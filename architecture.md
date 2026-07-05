@@ -122,3 +122,12 @@ Handled in `main.py`, using `RetrievalService` and `llm.answer_question()`:
 | SEC EDGAR (`data.sec.gov`, `www.sec.gov`) | Filing discovery + HTML download | `User-Agent` header (`EDGAR_USER_AGENT`) |
 | OpenAI | Embeddings (`text-embedding-3-small`) | `OPENAI_API_KEY` |
 | Anthropic | Answer generation (Claude) | `ANTHROPIC_API_KEY` |
+
+
+## Evaluation
+
+Retrieval quality is measured by an evaluation harness against a hand-curated test set of 25 questions across 5 categories (numeric-table, numeric-prose, narrative-single-section, narrative-cross-section, temporal-comparison). For each question, 1-3 gold chunk IDs identify the chunks that should be retrieved. 
+Metrics: recall@5, recall@10, 
+MRR — reported per category and in aggregate. 
+Baseline (v1, vector-only retrieval): [fill in once you run it].
+The harness is the gate for accepting Phase 2 changes: a change must improve metrics in at least one category without significant regression in others.

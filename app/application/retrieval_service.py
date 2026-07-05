@@ -39,13 +39,20 @@ class RetrievalService:
         # Embed the question (single call, batch of 1)
         vectors = await self.embedder.embed_many([question])
         query_vector = vectors[0]
+        return await self.retrieve_by_embedding(query_vector, k, filters)
 
+
+    async def retrieve_by_embedding(
+        self,
+        query_embedding: list[float],
+        k: int = 8,
+        filters: ChunkSearchFilters | None = None,
+    ) -> list[RetrievedChunk]:
         results = await self.chunk_repo.search_by_embedding(
-            query_embedding=query_vector,
+            query_embedding=query_embedding,
             k=k,
             filters=filters,
         )
-
         if results:
             top = results[0]
             logger.info(

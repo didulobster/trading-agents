@@ -9,3 +9,6 @@ __pycache__/
 
 # local synced data
 /data
+/eval/results*
+/eval/*cache.json
+/eval/test_set.yaml

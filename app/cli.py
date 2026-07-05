@@ -1,8 +1,10 @@
 
 import asyncio
+from dataclasses import asdict
+import json
 import logging
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import typer
@@ -13,11 +15,15 @@ from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.chunking.section_chunker import chunk_filing
 from app.infrastructure.parsing.filing_parser import parse_filing
 from app.infrastructure.queries.models import FilingDetail, FilingIssue
+from app.infrastructure.repositories.db import close_pool, init_pool
+from eval.runner import serialize_result
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = typer.Typer()
+
+# ----------------------- app command  -----------------------
 
 @app.callback()
 def main():
@@ -87,8 +93,38 @@ def inspect_chunks(
         if len(c.content) > preview_chars:
             preview += "…"
         typer.echo(preview)
-        
 
+@app.command(name="smoke-persist")
+def smoke_persist(ticker: str = "AAPL"):
+    """Smoke test the vertical slice: Insert one ListedSecurity + Filing to verify the repository layer."""
+    import asyncio
+    asyncio.run(_smoke_persist(ticker))
+
+@app.command(name="ingest")
+def ingest_cmd(
+    ticker: str,
+    form_type: str = typer.Option("10-K", "--type"),
+    limit: int = typer.Option(4, "--limit"),
+    since_year: int | None = typer.Option(None, "--since"),
+):
+    """Run the full ingestion pipeline for one ticker."""
+    asyncio.run(_ingest(ticker, form_type, limit, since_year))
+
+@app.command(name="corpus-status")
+def corpus_status_cmd(
+    ticker: str | None = typer.Option(None, "--ticker", "-t"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Print a summary of what's actually in the corpus."""
+    asyncio.run(_corpus_status(ticker, verbose))
+
+@app.command(name="eval")
+def eval_cmd(test_set: Path = Path("eval/test_set.yaml")):
+    """Run the evaluation harness against the current retrieval pipeline."""
+    asyncio.run(_run_eval(test_set))
+
+
+# ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
     user_agent = os.environ["EDGAR_USER_AGENT"]  # "Wilson Ting wilson@example.com"
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -112,13 +148,26 @@ async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None
             path = await client.download_filing(cik, f)
             typer.echo(f"  cached at {path}  ({path.stat().st_size:,} bytes)")
 
+async def _run_eval(test_set_path: Path) -> None:
+    from eval.runner import run_eval
+    from eval.report import report
 
-@app.command(name="smoke-persist")
-def smoke_persist(ticker: str = "AAPL"):
-    """Smoke test the vertical slice: Insert one ListedSecurity + Filing to verify the repository layer."""
-    import asyncio
-    asyncio.run(_smoke_persist(ticker))
-    
+    await init_pool()
+    try:
+        results = await run_eval(test_set_path)
+        print(report(results))
+
+        # Save raw results for diffing across runs
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        results_path = Path(f"eval/results-{timestamp}.json")
+        results_path.write_text(json.dumps(
+            [serialize_result(r) for r in results], indent=2
+        ))
+        print(f"\nRaw results saved to {results_path}")
+    finally:
+        await close_pool()
+
+
 async def _smoke_persist(ticker: str) -> None:
     from datetime import date
     from app.domain.listed_security import ListedSecurity
@@ -159,24 +208,6 @@ async def _smoke_persist(ticker: str) -> None:
         typer.echo(f"Roundtrip: {roundtrip}")
     finally:
         await close_pool()
-
-@app.command(name="ingest")
-def ingest_cmd(
-    ticker: str,
-    form_type: str = typer.Option("10-K", "--type"),
-    limit: int = typer.Option(4, "--limit"),
-    since_year: int | None = typer.Option(None, "--since"),
-):
-    """Run the full ingestion pipeline for one ticker."""
-    asyncio.run(_ingest(ticker, form_type, limit, since_year))
-
-@app.command(name="corpus-status")
-def corpus_status_cmd(
-    ticker: str | None = typer.Option(None, "--ticker", "-t"),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
-):
-    """Print a summary of what's actually in the corpus."""
-    asyncio.run(_corpus_status(ticker, verbose))
 
 async def _corpus_status(ticker: str | None, verbose: bool) -> None:
     from app.infrastructure.repositories.db import init_pool, close_pool
