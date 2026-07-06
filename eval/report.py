@@ -59,4 +59,16 @@ def report(results: list[QuestionResult]) -> str:
             lines.append(f"  {r.question_id} [{r.category}]: {r.question}")
             lines.append(f"    got:  {r.retrieved_chunks[:5]}...")
 
-    return "\n".join(lines)
+    lines.append("")
+    lines.append("=== Decomposition Trace ===")
+    for r in results:
+        if r.was_decomposed:
+            lines.append(f"  {r.question_id}: {r.question}")
+            for i, sq in enumerate(r.sub_queries, 1):
+                lines.append(f"    sub-query {i}: {sq}")
+            lines.append(f"    coverage@5: {r.coverage_at_5:.3f}")
+            lines.append("")
+
+    if not any(r.was_decomposed for r in results):
+        lines.append("  (no queries were decomposed)")
+        return "\n".join(lines)

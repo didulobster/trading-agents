@@ -1,9 +1,11 @@
 # eval/runner.py
 import json
+from re import sub
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.application.embedding_service import EmbeddingService
 from app.infrastructure.repositories.chunk_repo import ChunkRepository
@@ -32,6 +34,8 @@ class QuestionResult:
     reciprocal_rank: float        # 1/rank of first gold chunk, or 0
     success_at_5: float
     success_at_10: float
+    was_decomposed: bool
+    sub_queries: list[str]
 
 def _parse_components(q: dict) -> list[GoldComponent]:
     """Parse and validate the components block for one question."""
@@ -102,7 +106,10 @@ async def get_or_embed(embedder, question: str) -> list[float]:
     CACHE_PATH.write_text(json.dumps(cache))
     return vec
 
-async def run_eval(test_set_path: Path, k: int = 10) -> list[QuestionResult]:
+async def run_eval(
+    test_set_path: Path, 
+    k: int = 10, 
+    use_decomposition = False) -> list[QuestionResult]:
     test_set = yaml.safe_load(test_set_path.read_text())
     if not test_set or "questions" not in test_set:
         raise ValueError(f"{test_set_path} must have a top-level 'questions' key")
@@ -111,7 +118,8 @@ async def run_eval(test_set_path: Path, k: int = 10) -> list[QuestionResult]:
         raise ValueError(f"{test_set_path} has no questions")
     
     embedder = EmbeddingService()
-    retrieval = RetrievalService(embedder, ChunkRepository())
+    decomposer = QueryDecomposer() if use_decomposition else None
+    retrieval = RetrievalService(embedder, ChunkRepository(), decomposer)
     cache = QuestionEmbeddingCache(CACHE_PATH)
 
     results: list[QuestionResult] = []
@@ -119,9 +127,19 @@ async def run_eval(test_set_path: Path, k: int = 10) -> list[QuestionResult]:
         for q in questions:
             components = _parse_components(q)
 
-            question_vec = await cache.get_or_embed(embedder, q["question"])
-            retrieved = await retrieval.retrieve_by_embedding(question_vec, k=k)
-            retrieved_ids = [c.chunk.id for c in retrieved]
+            if use_decomposition:
+                retrieved, decomposition = await retrieval.retrieve_with_decomposition(
+                    q["question"], k=k
+                )
+                retrieved_ids = [c.chunk.id for c in retrieved]
+                was_decomposed = decomposition.was_decomposed
+                sub_queries = decomposition.sub_queries
+            else:
+                question_vec = await cache.get_or_embed(embedder, q["question"])
+                retrieved = await retrieval.retrieve_by_embedding(question_vec, k=k)
+                retrieved_ids = [c.chunk.id for c in retrieved]
+                was_decomposed = False
+                sub_queries = [q["question"]]
 
             metrics = _compute_metrics(components, retrieved_ids)
 
@@ -131,7 +149,9 @@ async def run_eval(test_set_path: Path, k: int = 10) -> list[QuestionResult]:
                 question=q["question"],
                 components=components,
                 retrieved_chunks=retrieved_ids,
-                **metrics
+                **metrics,
+                was_decomposed=was_decomposed,
+                sub_queries=sub_queries
             ))
     finally:
         cache.flush()
@@ -155,4 +175,6 @@ def serialize_result(r: QuestionResult) -> dict:
         "success_at_10": r.success_at_10,
         "coverage_at_5": r.coverage_at_5,
         "coverage_at_10": r.coverage_at_10,
+        "was_decomposed": r.was_decomposed,
+        "sub_queries": r.sub_queries
     }

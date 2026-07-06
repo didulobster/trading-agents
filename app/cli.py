@@ -119,10 +119,12 @@ def corpus_status_cmd(
     asyncio.run(_corpus_status(ticker, verbose))
 
 @app.command(name="eval")
-def eval_cmd(test_set: Path = Path("eval/test_set.yaml")):
+def eval_cmd(
+    test_set: Path = Path("eval/test_set.yaml"),
+    decompose: bool = typer.Option(False,"--decompose")
+    ):
     """Run the evaluation harness against the current retrieval pipeline."""
-    asyncio.run(_run_eval(test_set))
-
+    asyncio.run(_run_eval(test_set, 10, decompose))
 
 # ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
@@ -148,13 +150,13 @@ async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None
             path = await client.download_filing(cik, f)
             typer.echo(f"  cached at {path}  ({path.stat().st_size:,} bytes)")
 
-async def _run_eval(test_set_path: Path) -> None:
+async def _run_eval(test_set_path: Path, k, use_decomposition: bool) -> None:
     from eval.runner import run_eval
     from eval.report import report
 
     await init_pool()
     try:
-        results = await run_eval(test_set_path)
+        results = await run_eval(test_set_path, k, use_decomposition)
         print(report(results))
 
         # Save raw results for diffing across runs
