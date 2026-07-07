@@ -6,11 +6,11 @@ from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
-# Keyword signals that a query likely needs multiple distinct facts.
-# Deliberately conservative — false negatives (missed decomposition)
-# are preferable to false positives (unnecessary LLM calls on simple queries).
-_MULTI_FACT_SIGNALS = re.compile(
+# Stage 1: keyword signals that a query needs LLM rewriting.
+# Two categories now: multi-fact signals AND vocabulary-mismatch signals.
+_NEEDS_REWRITE_SIGNALS = re.compile(
     r"""
+    # Multi-fact / synthesis signals (existing)
     \b(vs\.?|versus|relative\s+to|compared\s+(to|with)|
     as\s+a?\s*%\s*of|as\s+percentage\s+of|
     faster\s+than|slower\s+than|
@@ -23,26 +23,44 @@ _MULTI_FACT_SIGNALS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-DECOMPOSITION_PROMPT = """You are a financial research query decomposer. Given a complex investment research question that requires multiple distinct facts to answer, break it into independent sub-queries that can each be answered by searching a corpus of SEC 10-K filings.
+# Vocabulary-mismatch signals: analyst jargon that filers phrase differently.
+# These are terms your eval has confirmed don't appear verbatim in filings.
+_VOCABULARY_MISMATCH_TERMS = re.compile(
+    r"""
+    \b(supply\s+chain|
+    contingent\s+liabilit|
+    capital\s+intensity|
+    buyback|
+    EBITDA|
+    customer\s+concentration|
+    moat|
+    switching\s+cost|
+    pricing\s+power)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+REWRITE_PROMPT = """You are a financial research query rewriter. Your job is to take an investment research question and produce 2-4 alternative phrasings that are more likely to match the language used in SEC 10-K filings.
+
+SEC filings use formal accounting and legal terminology, not analyst jargon. Common translations:
+- "supply chain risks" → "third-party vendor dependencies", "outsourcing partners", "manufacturing concentration"
+- "contingent liabilities" → "commitments and contingencies", "legal proceedings", "loss contingencies"
+- "buybacks" → "share repurchase program", "repurchases of common stock"
+- "capital intensity" → "capital expenditures as percentage of revenue", "property plant and equipment additions"
+- "customer concentration" → "significant customers", "concentration of credit risk"
+- "EBITDA" → "operating profit", "operating income", "profit before taxes"
 
 Rules:
-- Each sub-query should target ONE specific fact or data point
-- Use the vocabulary that SEC filings actually use (e.g., "net income" not "earnings", "share repurchase" not "buyback", "operating profit" not "operational improvement")
-- Include the company name in each sub-query
-- Include temporal scope if the original question implies it
-- Return 2-4 sub-queries, no more
-- Return ONLY the sub-queries, one per line, no numbering, no explanation
+- Each variant should use vocabulary that actually appears in SEC filings
+- Keep the company name and temporal scope from the original query
+- Each variant should approach the concept from a DIFFERENT angle, not just swap one synonym
+- If the query asks about multiple distinct facts, split into independent sub-queries (one fact each)
+- Return ONLY the rewritten queries, one per line, no numbering, no explanation
+- Include the original query as the FIRST line (it may still match some filings)
 
-Example:
-Question: "How much of Apple's earnings growth comes from buybacks vs actual operational improvement?"
-Sub-queries:
-Apple diluted earnings per share fiscal 2024 and 2023
-Apple net income fiscal 2024 and 2023
-Apple share repurchase program amounts fiscal 2024 and 2023
-Apple weighted-average diluted shares outstanding fiscal 2024 and 2023
-
-Question: "{question}"
-Sub-queries:"""
+Original query: "{question}"
+Rewritten queries:"""
 
 @dataclass(frozen=True)
 class DecompositionResult:
@@ -53,59 +71,68 @@ class DecompositionResult:
 
 class QueryDecomposer:
     """
-    Two-stage query decomposition:
-    1. Cheap keyword detection — does the query look like it needs multiple facts?
-    2. LLM decomposition — split into independent sub-queries using filer vocabulary.
+    Two-stage query rewriting:
+    1. Cheap regex detection — does the query contain multi-fact signals
+       OR vocabulary-mismatch terms?
+    2. LLM rewriting — decompose into sub-queries OR expand into
+       filer-vocabulary variants.
 
-    Simple factual queries bypass both stages entirely.
+    The LLM decides whether to split or expand based on the query structure.
+    Simple factual queries using standard filing terminology bypass both stages.
     """
 
     def __init__(self, model: str | None = None):
         self._client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self._model = model or os.getenv("LLM_CLAUDE_MODEL")
 
-    def needs_decomposition(self, query: str) -> bool:
-        """Stage 1: cheap keyword check."""
-        return bool(_MULTI_FACT_SIGNALS.search(query))
+    def needs_rewrite(self, query: str) -> bool:
+        """Stage 1: cheap detection."""
+        if _NEEDS_REWRITE_SIGNALS.search(query):
+            return True
+        if _VOCABULARY_MISMATCH_TERMS.search(query):
+            return True
+        return False
 
     async def decompose(self, query: str) -> DecompositionResult:
         """
-        Full pipeline: detect, then decompose if needed.
-        Returns the original query wrapped in a DecompositionResult
-        if no decomposition is needed.
+        Full pipeline: detect, then rewrite if needed.
+        Returns the original query unchanged if no rewrite is needed.
         """
-        if not self.needs_decomposition(query):
-            logger.debug("Query does not need decomposition: %s", query[:80])
+        if not self.needs_rewrite(query):
+            logger.debug("Query does not need rewriting: %s", query[:80])
             return DecompositionResult(
                 original_query=query,
                 was_decomposed=False,
                 sub_queries=[query],
             )
-        logger.info("Decomposing query: %s", query[:80])
+
+        logger.info("Rewriting query: %s", query[:80])
         resp = await self._client.messages.create(
             model=self._model,
             max_tokens=512,
             messages=[{
                 "role": "user",
-                "content": DECOMPOSITION_PROMPT.format(question=query),
+                "content": REWRITE_PROMPT.format(question=query),
             }],
         )
         raw = resp.content[0].text.strip()
         sub_queries = [
             line.strip()
             for line in raw.splitlines()
-            if line.strip() and not line.strip().startswith("Sub-queries")
+            if line.strip()
+            and not line.strip().lower().startswith("rewritten")
+            and not line.strip().lower().startswith("original")
         ]
 
         if not sub_queries:
-            logger.warning("Decomposition returned no sub-queries; falling back to original")
+            logger.warning("Rewriting returned no variants; falling back to original")
             return DecompositionResult(
                 original_query=query,
                 was_decomposed=False,
                 sub_queries=[query],
             )
 
-        logger.info("Decomposed into %d sub-queries: %s", len(sub_queries), sub_queries)
+        logger.info("Rewrote into %d sub-queries: %s", len(sub_queries), sub_queries)
         return DecompositionResult(
             original_query=query,
             was_decomposed=True,

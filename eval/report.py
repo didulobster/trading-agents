@@ -71,4 +71,5 @@ def report(results: list[QuestionResult]) -> str:
 
     if not any(r.was_decomposed for r in results):
         lines.append("  (no queries were decomposed)")
-        return "\n".join(lines)
+
+    return "\n".join(lines)

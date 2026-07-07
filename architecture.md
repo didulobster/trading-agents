@@ -131,3 +131,8 @@ Metrics: recall@5, recall@10,
 MRR — reported per category and in aggregate. 
 Baseline (v1, vector-only retrieval): [fill in once you run it].
 The harness is the gate for accepting Phase 2 changes: a change must improve metrics in at least one category without significant regression in others.
+
+## Retrieval/ Query Pipelien
+1. **Problem, with evidence** Based on what eval harness showed: multi-component synthesis question (q005, q009) returned coverage@5 of 0.25 and 0.0 respectively under single-query retrieval. A single query embedding dominated by the most important phrase (buybacks) never explore the semantic neighbourhood of the other required components ("net income", "share count"). Reference the eval results file (results-20260706-215451.json)
+2. **Solution, with design decisions** 2-stage detection: keyword regex for compound-query signals ("vs", "relative to", "as % of", "Trajectory"), then LLM decomposition into 2-4 sub-queries using filer vocabulary. The rationale of 2 stage: simple queries bypass the LLM call entirely (zero regression risk, and zero added cost). Filer vocabulary in the prompt, because same eval showed "operating income" return zero rows for CAT while "operating profit" return dozens. - The decomposer must translate analyst vocabulary to filer vocabulary.
+3. **Results, with limitation** q005 coverage@5: 0.25 → 0.75. q009 coverage@5: 0.0 → 1.0. No regression on q001/q002/q003/q006. State explicitly what this doesn't fix: single-concept vocabulary-mismatch questions (q004, q008) where decomposition isn't triggered because the query isn't compound. Those remain at S@5 = 0.0 and are the next retrieval improvement target.
