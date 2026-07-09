@@ -40,6 +40,26 @@ _VOCABULARY_MISMATCH_TERMS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+DECOMPOSITION_PROMPT = """You are a financial research query decomposer. Given a complex investment research question that requires multiple distinct facts to answer, break it into independent sub-queries that can each be answered by searching a corpus of SEC 10-K filings.
+
+Rules:
+- Each sub-query should target ONE specific fact or data point
+- Use the vocabulary that SEC filings actually use (e.g., "net income" not "earnings", "share repurchase" not "buyback", "operating profit" not "operational improvement")
+- Include the company name in each sub-query
+- Include temporal scope if the original question implies it
+- Return 2-4 sub-queries, no more
+- Return ONLY the sub-queries, one per line, no numbering, no explanation
+
+Example:
+Question: "How much of Apple's earnings growth comes from buybacks vs actual operational improvement?"
+Sub-queries:
+Apple diluted earnings per share fiscal 2024 and 2023
+Apple net income fiscal 2024 and 2023
+Apple share repurchase program amounts fiscal 2024 and 2023
+Apple weighted-average diluted shares outstanding fiscal 2024 and 2023
+
+Question: "{question}"
+Sub-queries:"""
 
 REWRITE_PROMPT = """You are a financial research query rewriter. Your job is to take an investment research question and produce 2-4 alternative phrasings that are more likely to match the language used in SEC 10-K filings.
 
@@ -85,20 +105,23 @@ class QueryDecomposer:
         self._client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self._model = model or os.getenv("LLM_CLAUDE_MODEL")
 
-    def needs_rewrite(self, query: str) -> bool:
-        """Stage 1: cheap detection."""
+    def needs_rewrite(self, query: str) -> str | None:
+        """Stage 1: cheap detection.
+            Returns 'decompose', 'expand', or None.
+        """
         if _NEEDS_REWRITE_SIGNALS.search(query):
-            return True
+            return "decompose"
         if _VOCABULARY_MISMATCH_TERMS.search(query):
-            return True
-        return False
+            return "expand"
+        return None
 
     async def decompose(self, query: str) -> DecompositionResult:
         """
         Full pipeline: detect, then rewrite if needed.
         Returns the original query unchanged if no rewrite is needed.
         """
-        if not self.needs_rewrite(query):
+        rewrite_type = self.needs_rewrite(query);
+        if rewrite_type is None:
             logger.debug("Query does not need rewriting: %s", query[:80])
             return DecompositionResult(
                 original_query=query,
@@ -106,13 +129,20 @@ class QueryDecomposer:
                 sub_queries=[query],
             )
 
-        logger.info("Rewriting query: %s", query[:80])
-        resp = await self._client.messages.create(
+        if rewrite_type == "decompose":
+            logger.info("Rewriting decompose query: %s", query[:80])
+            prompt = DECOMPOSITION_PROMPT.format(question=query)
+        else:
+            logger.info("Rewriting expansion query: %s", query[:80])
+            prompt = REWRITE_PROMPT.format(question=query)
+
+        resp = await self._client.messages.create( 
             model=self._model,
             max_tokens=512,
+            temperature=0,
             messages=[{
                 "role": "user",
-                "content": REWRITE_PROMPT.format(question=query),
+                "content": prompt,
             }],
         )
         raw = resp.content[0].text.strip()
@@ -137,4 +167,4 @@ class QueryDecomposer:
             original_query=query,
             was_decomposed=True,
             sub_queries=sub_queries,
-        )
+        ) 

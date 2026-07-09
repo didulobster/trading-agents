@@ -168,3 +168,63 @@ class ChunkRepository:
             chunk = Chunk.model_validate(row)
             results.append(RetrievedChunk(chunk=chunk, similarity=similarity))
         return results
+
+    async def search_by_text(
+        self,
+        query: str,
+        k: int = 20,
+        filters: ChunkSearchFilters | None = None,
+    ) -> list[RetrievedChunk]:
+        """
+        BM25-style full-text search using Postgres tsvector.
+        Returns chunks ranked by ts_rank, with score as similarity.
+        """
+        filters = filters or ChunkSearchFilters()
+    
+        where_clauses: list[str] = [
+            "content_tsv @@ plainto_tsquery('english', %s)"
+        ]
+        params: list = [query]
+    
+        if filters.tickers:
+            where_clauses.append("ticker = ANY(%s)")
+            params.append([t.upper() for t in filters.tickers])
+        if filters.filing_types:
+            where_clauses.append("filing_type = ANY(%s)")
+            params.append(filters.filing_types)
+        if filters.filed_after:
+            where_clauses.append("filed_date >= %s")
+            params.append(filters.filed_after)
+        if filters.filed_before:
+            where_clauses.append("filed_date <= %s")
+            params.append(filters.filed_before)
+        if filters.section_path_contains:
+            where_clauses.append("section_path && %s")
+            params.append(filters.section_path_contains)
+    
+        where_sql = " AND ".join(where_clauses)
+        params.append(query)  # for ts_rank's tsquery
+        params.append(k)
+    
+        sql = f"""
+            SELECT
+                id, section_id, content, chunk_index, token_count, embedding,
+                ticker, filed_date, filing_type, section_path, created_at,
+                ts_rank(content_tsv, plainto_tsquery('english', %s)) AS similarity
+            FROM chunks
+            WHERE {where_sql}
+            ORDER BY similarity DESC
+            LIMIT %s
+        """
+    
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, params)
+                rows = await cur.fetchall()
+    
+        results: list[RetrievedChunk] = []
+        for row in rows:
+            similarity = row.pop("similarity")
+            chunk = Chunk.model_validate(row)
+            results.append(RetrievedChunk(chunk=chunk, similarity=float(similarity)))
+        return results

@@ -109,7 +109,9 @@ async def get_or_embed(embedder, question: str) -> list[float]:
 async def run_eval(
     test_set_path: Path, 
     k: int = 10, 
-    use_decomposition = False) -> list[QuestionResult]:
+    use_decomposition = False,
+    use_hybrid: bool = False
+    ) -> list[QuestionResult]:
     test_set = yaml.safe_load(test_set_path.read_text())
     if not test_set or "questions" not in test_set:
         raise ValueError(f"{test_set_path} must have a top-level 'questions' key")
@@ -119,7 +121,11 @@ async def run_eval(
     
     embedder = EmbeddingService()
     decomposer = QueryDecomposer() if use_decomposition else None
-    retrieval = RetrievalService(embedder, ChunkRepository(), decomposer)
+    retrieval = RetrievalService(
+        embedder, ChunkRepository(),
+        decomposer=decomposer,
+        use_hybrid=use_hybrid
+    )
     cache = QuestionEmbeddingCache(CACHE_PATH)
 
     results: list[QuestionResult] = []
@@ -127,20 +133,23 @@ async def run_eval(
         for q in questions:
             components = _parse_components(q)
 
-            if use_decomposition:
+            if use_hybrid:
+                retrieved = await retrieval.retrieve_hybrid(q["question"], k=k)
+                was_decomposed = False
+                sub_queries = [q["question"]]
+            elif use_decomposition:
                 retrieved, decomposition = await retrieval.retrieve_with_decomposition(
                     q["question"], k=k
                 )
-                retrieved_ids = [c.chunk.id for c in retrieved]
                 was_decomposed = decomposition.was_decomposed
                 sub_queries = decomposition.sub_queries
             else:
                 question_vec = await cache.get_or_embed(embedder, q["question"])
                 retrieved = await retrieval.retrieve_by_embedding(question_vec, k=k)
-                retrieved_ids = [c.chunk.id for c in retrieved]
                 was_decomposed = False
                 sub_queries = [q["question"]]
 
+            retrieved_ids = [c.chunk.id for c in retrieved]
             metrics = _compute_metrics(components, retrieved_ids)
 
             results.append(QuestionResult(

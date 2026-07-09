@@ -39,15 +39,16 @@ The codebase follows a clean architecture / DDD-style layering:
 
 ## Limitations
 
-- **Citation precision not verified.** The LLM produces citations alongside its answer, but the system does not check whether each cited chunk literally contains the claimed text or numbers. Dogfooding surfaced a case where a confident answer cited a specific dollar figure to a chunk that did not contain that figure — the numbers were present in the corpus but in different chunks not selected by top-k retrieval. For an investment research tool, this is a critical failure mode: a plausible-looking citation may be unverifiable. Phase 2 will add a citation verification module that parses (claim, citation) pairs and confirms the cited chunk contains the claim's key terms before returning the answer.
-
-- **Parser assumes explicit "Item N." section headings.** Discovered during dogfooding that some large-cap filers (confirmed: McDonald's) instead use business-friendly headings ("Business Summary", "Management's View of the Business") and rely solely on the SEC table of contents and anchor links to cross-reference Items. The current parser silently produces near-empty section maps on these filings. Phase 2 will rebuild parsing around TOC-anchor following, which handles both conventions uniformly.
+- **Parser assumes explicit "Item N." section headings.** Discovered during dogfooding that some large-cap filers (confirmed: McDonald's) instead use business-friendly headings ("Business Summary", "Management's View of the Business") and rely solely on the SEC table of contents and anchor links to cross-reference Items. The current parser silently produces near-empty section maps on these filings. A future improvement would rebuild parsing around TOC-anchor following, which handles both conventions uniformly.
 
 - **Embedding-only retrieval is literal at a semantic level.** Vector search surfaces chunks lexically near the query, but does not synthesize across passages that discuss the same business concept under different vocabulary. Example: a query about "supply chain risks" on a filer who discusses the topic as "vendor dependencies" or "pharmaceutical procurement" may underperform. Phase 2 will evaluate hybrid search (BM25 + vector) and query expansion against an evaluation harness to measure whether either materially improves recall.
 
-- **Numeric retrieval is unreliable on table-heavy filings.** Vector embedding quality is weak for chunks dominated by financial tables (numbers with minimal surrounding prose), and queries about specific financial metrics may miss the chunks containing the numbers. Confirmed during dogfooding with UnitedHealth's Optum Rx revenue: the relevant chunks (containing the $49,775M figure) were not retrieved in top-8 for the natural-language query, while similar queries on Apple (where the services revenue chunk has more surrounding prose context) surfaced the right chunk reliably. Phase 2 will evaluate chunking strategy changes (richer context around tables), hybrid search (BM25 + vector), and structured XBRL fact extraction against an evaluation harness.
+- **Total vocabulary gap between analyst and filer terminology is not bridgeable by current retrieval.** Hybrid search (BM25 + vector) fixes partial-overlap cases (q008 "contingent liabilities" → filer's "commitments and contingencies": S@5 0.0→1.0). But when analyst and filer vocabulary share zero lexical stems (q004 "supply chain risks" → filer's "third-party vendor dependencies"), neither BM25 nor vector search surfaces the relevant chunks. Addressing this would require a curated domain-specific synonym mapping or knowledge graph.
 
-- **Citation reliability degrades when retrieval misses the target chunk.** The LLM does not yet verify that cited chunks literally contain the claimed facts; when retrieval fails to surface the right chunk for a numeric question, the LLM may still confidently produce a plausible-looking citation. Three out of four tested cases showed citations were accurate when retrieval succeeded, so the immediate Phase 2 priority is fixing retrieval; citation verification is a secondary safety net.
+- **Numeric retrieval is unreliable on table-heavy filings.** Early eval results suggested table-heavy chunks were unretrievable; this was traced to incorrect gold-set curation rather than a retrieval deficiency. The failure mode is not confirmed.
+
+- **Citation verification is not implemented.** The system does not programmatically check whether each cited chunk literally contains the claimed text or numbers. Dogfooding investigated a suspected citation-precision failure (UNH Optum Rx revenue); the failure was traced to truncated preview display rather than actual misattribution. The risk remains theoretically present and a verification module would add a safety net, but no confirmed failure case currently motivates urgent implementation.
+
 
 ## Domain Model
 
@@ -125,14 +126,54 @@ Handled in `main.py`, using `RetrievalService` and `llm.answer_question()`:
 
 
 ## Evaluation
+Retrieval quality is measured by an evaluation harness (`eval/`) against a hand-curated test set of 8 questions across 5 categories:
+- `numeric_table` (1 question)
+- `numeric_prose` (2 questions)
+- `narrative_single_section` (1 question)
+- `narrative_conceptual_vocabulary` (2 questions)
+- `synthesis_multi_component` (2 questions)
 
-Retrieval quality is measured by an evaluation harness against a hand-curated test set of 25 questions across 5 categories (numeric-table, numeric-prose, narrative-single-section, narrative-cross-section, temporal-comparison). For each question, 1-3 gold chunk IDs identify the chunks that should be retrieved. 
-Metrics: recall@5, recall@10, 
-MRR — reported per category and in aggregate. 
-Baseline (v1, vector-only retrieval): [fill in once you run it].
-The harness is the gate for accepting Phase 2 changes: a change must improve metrics in at least one category without significant regression in others.
+For each question, gold chunks are organized by component — single-component for factual questions, multi-component for synthesis questions requiring multiple distinct facts. Metrics per category: success@k (did any gold chunk appear in top-k), coverage@k (fraction of components with ≥1 gold chunk in top-k), recall@k, and MRR.
 
-## Retrieval/ Query Pipelien
-1. **Problem, with evidence** Based on what eval harness showed: multi-component synthesis question (q005, q009) returned coverage@5 of 0.25 and 0.0 respectively under single-query retrieval. A single query embedding dominated by the most important phrase (buybacks) never explore the semantic neighbourhood of the other required components ("net income", "share count"). Reference the eval results file (results-20260706-215451.json)
-2. **Solution, with design decisions** 2-stage detection: keyword regex for compound-query signals ("vs", "relative to", "as % of", "Trajectory"), then LLM decomposition into 2-4 sub-queries using filer vocabulary. The rationale of 2 stage: simple queries bypass the LLM call entirely (zero regression risk, and zero added cost). Filer vocabulary in the prompt, because same eval showed "operating income" return zero rows for CAT while "operating profit" return dozens. - The decomposer must translate analyst vocabulary to filer vocabulary.
-3. **Results, with limitation** q005 coverage@5: 0.25 → 0.75. q009 coverage@5: 0.0 → 1.0. No regression on q001/q002/q003/q006. State explicitly what this doesn't fix: single-concept vocabulary-mismatch questions (q004, q008) where decomposition isn't triggered because the query isn't compound. Those remain at S@5 = 0.0 and are the next retrieval improvement target.
+Baseline (vector-only): overall S@5 = 0.625, with failures concentrated in vocabulary-mismatch (q004, q008) and synthesis (q005, q009) categories.
+
+## Phase 2: Retrieval Improvements
+Two retrieval improvements were built and measured against the eval harness, each targeting a distinct failure mode.
+
+### Query Decomposition
+
+**Problem:** Multi-component synthesis questions (q005: "buybacks vs
+operational improvement", q009: "debt trajectory relative to operating
+profit") returned coverage@5 of 0.25 and 0.0. A single query embedding
+dominated by the most salient phrase never explores the semantic
+neighborhood of other required components.
+
+**Solution:** Two-stage detection — keyword regex for compound-query signals
+("vs", "relative to", "trajectory"), then LLM decomposition into 2-4
+sub-queries using filer vocabulary. Simple queries bypass the LLM call
+entirely (zero regression risk, zero added cost). The decomposition prompt
+instructs the LLM to translate analyst vocabulary to filer terminology —
+necessary because the same eval showed "operating income" returns zero rows
+for CAT while "operating profit" returns dozens.
+
+**Results:** q005 coverage@5: 0.25 → 0.75. q009 coverage@5: 0.0 → 1.0. No
+regression on q001/q002/q003/q006. Does not address single-concept
+vocabulary-mismatch questions (q004, q008).
+
+### Hybrid Search (BM25 + Vector)
+
+**Problem:** Single-concept vocabulary-mismatch questions (q008: "contingent
+liabilities") failed at S@5 = 0.0 under vector-only retrieval. The filer
+uses "commitments and contingencies" — partial lexical overlap that
+embeddings miss but keyword matching catches.
+
+**Solution:** Added a `tsvector` column (GENERATED ALWAYS AS stored) to
+chunks with a GIN index. BM25 retrieval via `ts_rank` runs in parallel with
+vector search. Results merged via reciprocal rank fusion (RRF, k=60).
+Deterministic — identical results across runs, unlike LLM-based query
+rewriting.
+
+**Results:** q008 S@5: 0.0 → 1.0. No regression on any working question.
+q004 remains at 0.0 — total vocabulary gap ("supply chain" shares zero
+stems with "third-party vendor"), which neither BM25 nor vector search can
+bridge.

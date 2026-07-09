@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.application.embedding_service import EmbeddingService
+from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.infrastructure.repositories.db import init_pool, close_pool
 from app.infrastructure.repositories.chunk_repo import (
@@ -13,6 +15,13 @@ from app.llm import answer_question
 
 
 app = FastAPI(title="RAG Skeleton")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # tighten to your actual origin once you know it
+    allow_methods=["POST"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 def startup():
@@ -59,7 +68,12 @@ async def ask(req: AskRequest) -> AskResponse:
 
     embedder = EmbeddingService()
     chunk_repo = ChunkRepository()
-    retrieval = RetrievalService(embedder, chunk_repo)
+    decomposer = QueryDecomposer()
+    retrieval = RetrievalService(
+        embedding_service=embedder, 
+        chunk_repo=chunk_repo,
+        decomposer=decomposer,
+        use_hybrid=True)
 
     filters = ChunkSearchFilters(
         tickers=req.tickers,

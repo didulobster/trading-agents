@@ -24,11 +24,13 @@ class RetrievalService:
         self,
         embedding_service: EmbeddingService,
         chunk_repo: ChunkRepository,
-        decomposer: QueryDecomposer | None = None
+        decomposer: QueryDecomposer | None = None,
+        use_hybrid: bool = False,
     ):
         self.embedder = embedding_service
         self.chunk_repo = chunk_repo
         self.decomposer = decomposer
+        self.use_hybrid = use_hybrid
 
     async def retrieve(
         self,
@@ -114,3 +116,85 @@ class RetrievalService:
         )
 
         return merged, decomposition
+
+    async def retrieve_hybrid(
+        self,
+        question: str,
+        k: int = 8,
+        filters: ChunkSearchFilters | None = None,
+        rrf_k: int = 60,
+    ) -> list[RetrievedChunk]:
+        """
+        Hybrid retrieval: vector search + BM25, merged via
+        reciprocal rank fusion.
+
+        RRF score = 1/(rrf_k + rank_vector) + 1/(rrf_k + rank_bm25)
+
+        rrf_k=60 is the standard constant from the original RRF paper
+        (Cormack et al. 2009). Higher values dampen rank differences;
+        lower values amplify them. 60 works well empirically for
+        combining two diverse rankers.
+        """
+        # Retrieve more candidates from each path than we need,
+        # so fusion has enough to work with
+        candidate_k = k * 3
+
+        # Vector path
+        vectors = await self.embedder.embed_many([question])
+        vector_results = await self.chunk_repo.search_by_embedding(
+            query_embedding=vectors[0], k=candidate_k, filters=filters,
+        )
+
+        # BM25 path
+        bm25_results = await self.chunk_repo.search_by_text(
+            query=question, k=candidate_k, filters=filters,
+        )
+
+        # Reciprocal rank fusion
+        merged = self._reciprocal_rank_fusion(
+            vector_results, bm25_results, rrf_k=rrf_k, k=k,
+        )
+
+        logger.info(
+            "Hybrid retrieval: %d vector + %d bm25 -> %d merged (top %d)",
+            len(vector_results), len(bm25_results), len(merged), k,
+        )
+
+        return merged
+
+    @staticmethod
+    def _reciprocal_rank_fusion(
+        vector_results: list[RetrievedChunk],
+        bm25_results: list[RetrievedChunk],
+        rrf_k: int = 60,
+        k: int = 10,
+    ) -> list[RetrievedChunk]:
+        """
+        Merge two ranked lists using reciprocal rank fusion.
+        Chunks appearing in both lists get a combined score.
+        Chunks appearing in only one list still participate.
+        """
+        scores: dict[int, float] = {}
+        chunk_map: dict[int, RetrievedChunk] = {}
+
+        for rank, chunk in enumerate(vector_results, start=1):
+            cid = chunk.chunk.id
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+            chunk_map[cid] = chunk
+
+        for rank, chunk in enumerate(bm25_results, start=1):
+            cid = chunk.chunk.id
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+            if cid not in chunk_map:
+                chunk_map[cid] = chunk
+
+        # Sort by fused score descending, take top-k
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:k]
+
+        return [
+            RetrievedChunk(
+                chunk=chunk_map[cid].chunk,
+                similarity=score,  # RRF score, not cosine similarity
+            )
+            for cid, score in ranked
+        ]
