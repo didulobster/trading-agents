@@ -1,3 +1,4 @@
+from datetime import date
 import logging
 
 from app.application.query_decomposer import DecompositionResult, QueryDecomposer
@@ -19,7 +20,13 @@ class RetrievalService:
     services. Doesn't know about the LLM or how chunks become answers — that's
     the next layer up.
     """
-
+    METRIC_QUERIES = {
+        "income_statement": "revenue gross profit cost of revenue gross margin net income loss",
+        "cash_flow": "free cash flow operating cash flow capital expenditures",
+        "sbc": "stock-based compensation expense percentage of revenue",
+        "retention": "net dollar retention rate customer retention",
+    }
+    
     def __init__(
         self,
         embedding_service: EmbeddingService,
@@ -198,3 +205,34 @@ class RetrievalService:
             )
             for cid, score in ranked
         ]
+    
+    async def retrieve_for_extraction(
+        self,
+        ticker: str,
+        filed_date: date,
+        k: int = 5,
+    ) -> list[RetrievedChunk]:
+        """
+        Fixed-query retrieval for metric extraction.
+        Scoped to a single filing via filed_date to prevent period bleeding.
+        """
+        filters = ChunkSearchFilters(
+            tickers=[ticker],
+            filing_types=None,
+            filed_after=filed_date,
+            filed_before=filed_date,
+            section_path_contains=None,
+        )
+        collected: list[RetrievedChunk] = []
+        for query in self.METRIC_QUERIES.values():
+            collected += await self.retrieve(query, k=k, filters=filters)
+        return self._dedupe_by_chunk_id(collected)
+
+    @staticmethod
+    def _dedupe_by_chunk_id(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+        best: dict[int, RetrievedChunk] = {}
+        for c in chunks:
+            key = c.chunk.id
+            if key not in best or c.similarity > best[key].similarity:
+                best[key] = c
+        return list(best.values())

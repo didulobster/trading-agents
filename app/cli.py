@@ -10,12 +10,24 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
+from app.application.embedding_service import EmbeddingService
+from app.application.extraction_service import MetricsExtractor
+from app.application.ingestion_service import IngestionService
+from app.application.query_decomposer import QueryDecomposer
+from app.application.retrieval_service import RetrievalService
+from app.domain.values import FilingStatus
 from app.infrastructure.edgar.client import EdgarClient
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.chunking.section_chunker import chunk_filing
 from app.infrastructure.parsing.filing_parser import parse_filing
 from app.infrastructure.queries.models import FilingDetail, FilingIssue
+from app.infrastructure.repositories.chunk_repo import ChunkRepository
 from app.infrastructure.repositories.db import close_pool, init_pool
+from app.infrastructure.repositories.document_repo import DocumentRepository
+from app.infrastructure.repositories.filing_repo import FilingRepository
+from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
+from app.infrastructure.repositories.metrics_repo import MetricsRepository
+from app.infrastructure.repositories.section_repo import SectionRepository
 from eval.runner import serialize_result
 
 load_dotenv()
@@ -126,6 +138,16 @@ def eval_cmd(
     ):
     """Run the evaluation harness against the current retrieval pipeline."""
     asyncio.run(_run_eval(test_set, 10, decompose, hybrid))
+
+
+@app.command(name="extract-metrics")
+def extract_metrics_cmd(
+    ticker: str = typer.Argument(..., help="Ticker to extract metrics for e.g. FIG"),
+    k: int = typer.Option(5, "--k", help="Chunks per metric query"),
+):
+    """Extract and store financial metrics for all ingested filings of a ticker."""
+    asyncio.run(_run_extract_metrics(ticker, k))
+
 
 # ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
@@ -313,21 +335,6 @@ def _print_per_filing(rows: list[FilingDetail]) -> None:
 async def _ingest(
     ticker: str, form_type: str, limit: int, since_year: int | None
 ) -> None:
-    import os
-    from datetime import date
-    from app.infrastructure.edgar.client import EdgarClient
-    from app.infrastructure.edgar.ticker_resolver import TickerResolver
-    from app.infrastructure.repositories.db import init_pool, close_pool
-    from app.infrastructure.repositories.listed_security_repo import (
-        ListedSecurityRepository,
-    )
-    from app.infrastructure.repositories.filing_repo import FilingRepository
-    from app.infrastructure.repositories.document_repo import DocumentRepository
-    from app.infrastructure.repositories.section_repo import SectionRepository
-    from app.infrastructure.repositories.chunk_repo import ChunkRepository
-    from app.application.embedding_service import EmbeddingService
-    from app.application.ingestion_service import IngestionService
-
     user_agent = os.environ["EDGAR_USER_AGENT"]
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
@@ -359,6 +366,47 @@ async def _ingest(
             )
     finally:
         await close_pool()
+
+async def _run_extract_metrics(ticker: str, k: int) -> None:
+    embedder = EmbeddingService()
+    chunk_repo = ChunkRepository()
+    decomposer = QueryDecomposer()
+    retrieval = RetrievalService(
+        embedding_service=embedder,
+        chunk_repo=chunk_repo,
+        decomposer=decomposer,
+        use_hybrid=True,
+    )
+    extractor = MetricsExtractor()
+    metrics_repo = MetricsRepository()
+    filing_repo = FilingRepository()
+
+    filings = await filing_repo.list_by_state(ticker, FilingStatus.INGESTED)
+    if not filings:
+        typer.echo(f"No ingested filings found for {ticker.upper()}")
+        raise typer.Exit(1)
+
+    for f in filings:
+        typer.echo(f"Extracting {f.fiscal_period} ({f.filing_type}, {f.filed_date})...")
+
+        chunks = await retrieval.retrieve_for_extraction(ticker, f.filed_date, k=k)
+        if not chunks:
+            typer.echo(f"  WARNING: no chunks retrieved — skipping")
+            continue
+
+        metrics = await extractor.extract(chunks, ticker, f.fiscal_period, f.filing_type, f.filed_date)
+        await metrics_repo.upsert(metrics)
+        await filing_repo.set_state(f.id, FilingStatus.METRICS_EXTRACTED)
+
+        typer.echo(
+            f"  revenue={metrics.revenue}M  "
+            f"gross_margin={metrics.gross_margin_pct}%  "
+            f"fcf={metrics.free_cash_flow}M  "
+            f"ndr={metrics.net_dollar_retention}  "
+            f"conf={metrics.extraction_confidence}"
+        )
+
+    typer.echo(f"\nDone. {len(filings)} filing(s) processed for {ticker.upper()}.")
 
 if __name__ == "__main__":
     app()

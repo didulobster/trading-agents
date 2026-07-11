@@ -1,9 +1,11 @@
+from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.application.embedding_service import EmbeddingService
+from app.application.extraction_service import FinancialMetrics
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.infrastructure.repositories.db import init_pool, close_pool
@@ -60,6 +62,20 @@ class AskResponse(BaseModel):
     citations: list[str]
     chunks: list[RetrievedChunkResponse]
 
+class ExtractRequest(BaseModel):
+    ticker: str
+    fiscal_period: str          # "Q1 2026" — you supply this, it's not extracted
+    filing_type: str            # "10-Q"
+    filed_date: date
+    filed_after: date | None = None
+    filed_before: date | None = None
+
+class FinancialMetricsResponse(BaseModel):
+    ticker: str
+    fiscal_period: str
+    metrics: FinancialMetrics   # the Pydantic model from point 2
+    citations: list[str]
+
 # ---- Endpoint ----
 @app.post("/ask",  response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
@@ -103,3 +119,20 @@ async def ask(req: AskRequest) -> AskResponse:
             for c in chunks
         ],
     )
+
+
+@app.post("/extract", response_model=FinancialMetrics)
+async def extract(req: ExtractRequest) -> FinancialMetrics:
+    chunks = await gather_extraction_chunks(retrieval, req.ticker, req.filed_after, req.filed_before)
+    metrics = await extractor.extract(chunks, req.ticker, req.fiscal_period)
+    await metrics_repo.upsert(ticker=req.ticker, period=req.fiscal_period, filing_type=req.filing_type,
+                                filed_date=req.filed_date, metrics=metrics,
+                                citations=[format_citation_tag(c) for c in chunks])
+    return metrics
+
+    async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):
+        filters = ChunkSearchFilters(tickers=[ticker], filed_after=filed_after, filed_before=filed_before)
+        chunks = []
+        for query in METRIC_QUERIES.values():
+            chunks += await retrieval.retrieve(query, k=5, filters=filters)
+        return dedupe_by_chunk_id(chunks)
