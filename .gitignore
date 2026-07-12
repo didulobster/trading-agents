@@ -12,3 +12,5 @@ __pycache__/
 /eval/results*
 /eval/*cache.json
 /eval/test_set.yaml
+/eval/extraction-results*
+extraction_truth.yaml

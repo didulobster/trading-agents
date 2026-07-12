@@ -28,6 +28,7 @@ from app.infrastructure.repositories.filing_repo import FilingRepository
 from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.infrastructure.repositories.metrics_repo import MetricsRepository
 from app.infrastructure.repositories.section_repo import SectionRepository
+from eval.extraction_report import serialize_extraction_result
 from eval.runner import serialize_result
 
 load_dotenv()
@@ -139,6 +140,13 @@ def eval_cmd(
     """Run the evaluation harness against the current retrieval pipeline."""
     asyncio.run(_run_eval(test_set, 10, decompose, hybrid))
 
+@app.command(name="eval-extraction")
+def eval_extraction_cmd(
+    test_set: Path = Path("eval/extraction_truth.yaml"),
+    k: int = typer.Option(5, "--k"),
+):
+    """Validate extraction output against hand-verified filing numbers."""
+    asyncio.run(_run_extraction_eval(test_set, k))
 
 @app.command(name="extract-metrics")
 def extract_metrics_cmd(
@@ -173,6 +181,12 @@ async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None
             path = await client.download_filing(cik, f)
             typer.echo(f"  cached at {path}  ({path.stat().st_size:,} bytes)")
 
+def _prune_old_results(prefix: str, keep: int = 10) -> None:
+    files = sorted(Path("eval").glob(f"{prefix}-*.json"), key=lambda p: p.name)
+    for stale in files[:-keep]:
+        stale.unlink()
+
+
 async def _run_eval(test_set_path: Path, k, use_decomposition: bool, use_hybrid: bool = False) -> None:
     from eval.runner import run_eval
     from eval.report import report
@@ -189,6 +203,7 @@ async def _run_eval(test_set_path: Path, k, use_decomposition: bool, use_hybrid:
             [serialize_result(r) for r in results], indent=2
         ))
         print(f"\nRaw results saved to {results_path}")
+        _prune_old_results("results")
     finally:
         await close_pool()
 
@@ -407,6 +422,27 @@ async def _run_extract_metrics(ticker: str, k: int) -> None:
         )
 
     typer.echo(f"\nDone. {len(filings)} filing(s) processed for {ticker.upper()}.")
+
+
+# async wrapper — matches _run_eval structure
+async def _run_extraction_eval(test_set_path: Path, k: int) -> None:
+    from eval.extract_runner import run_extraction_eval
+    from eval.extraction_report import extraction_report
+
+    await init_pool()
+    try:
+        results = await run_extraction_eval(test_set_path, k)
+        print(extraction_report(results))
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        results_path = Path(f"eval/extraction-results-{timestamp}.json")
+        results_path.write_text(json.dumps(
+            [serialize_extraction_result(r) for r in results], indent=2
+        ))
+        print(f"\nRaw results saved to {results_path}")
+        _prune_old_results("extraction-results")
+    finally:
+        await close_pool()
 
 if __name__ == "__main__":
     app()

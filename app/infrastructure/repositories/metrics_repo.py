@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
-import datetime
+from datetime import date, datetime
 import json
 from typing import Literal
 from app.application.extraction_service import FinancialMetrics

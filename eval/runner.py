@@ -1,10 +1,12 @@
 # eval/runner.py
+from datetime import date
 import json
 from re import sub
 import yaml
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.application.extraction_service import MetricsExtractor
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.application.embedding_service import EmbeddingService
@@ -36,6 +38,7 @@ class QuestionResult:
     success_at_10: float
     was_decomposed: bool
     sub_queries: list[str]
+
 
 def _parse_components(q: dict) -> list[GoldComponent]:
     """Parse and validate the components block for one question."""
