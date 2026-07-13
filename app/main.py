@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ from app.infrastructure.repositories.chunk_repo import (
 )
 from app.llm import answer_question
 
-
+logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="RAG Skeleton")
 
 app.add_middleware(
@@ -99,7 +100,7 @@ async def ask(req: AskRequest) -> AskResponse:
         section_path_contains=req.section_path_contains,
     )
 
-    chunks = await retrieval.retrieve(req.question, k=req.k, filters=filters)
+    chunks, _decomposition = await retrieval.retrieve_full(req.question, k=req.k, filters=filters)
     result = await answer_question(req.question, chunks)
 
     from app.application.citations import format_citation_tag
@@ -123,6 +124,14 @@ async def ask(req: AskRequest) -> AskResponse:
 
 @app.post("/extract", response_model=FinancialMetrics)
 async def extract(req: ExtractRequest) -> FinancialMetrics:
+    embedder = EmbeddingService()
+    chunk_repo = ChunkRepository()
+    decomposer = QueryDecomposer()
+    retrieval = RetrievalService(
+        embedding_service=embedder, 
+        chunk_repo=chunk_repo,
+        decomposer=decomposer,
+        use_hybrid=True)
     chunks = await gather_extraction_chunks(retrieval, req.ticker, req.filed_after, req.filed_before)
     metrics = await extractor.extract(chunks, req.ticker, req.fiscal_period)
     await metrics_repo.upsert(ticker=req.ticker, period=req.fiscal_period, filing_type=req.filing_type,
@@ -130,9 +139,9 @@ async def extract(req: ExtractRequest) -> FinancialMetrics:
                                 citations=[format_citation_tag(c) for c in chunks])
     return metrics
 
-    async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):
-        filters = ChunkSearchFilters(tickers=[ticker], filed_after=filed_after, filed_before=filed_before)
-        chunks = []
-        for query in METRIC_QUERIES.values():
-            chunks += await retrieval.retrieve(query, k=5, filters=filters)
-        return dedupe_by_chunk_id(chunks)
+async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):
+    filters = ChunkSearchFilters(tickers=[ticker], filed_after=filed_after, filed_before=filed_before)
+    chunks = []
+    for query in METRIC_QUERIES.values():
+        chunks = await retrieval.retrieve_hybrid(req.question, k=req.k, filters=filters)
+    return dedupe_by_chunk_id(chunks)

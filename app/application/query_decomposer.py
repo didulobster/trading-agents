@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _NEEDS_REWRITE_SIGNALS = re.compile(
     r"""
     # Multi-fact / synthesis signals (existing)
-    \b(vs\.?|versus|relative\s+to|compared\s+(to|with)|
+    \b(vs\.?|versus|relative\s+to|compar(e|ed|ing)\b|
     as\s+a?\s*%\s*of|as\s+percentage\s+of|
     faster\s+than|slower\s+than|
     comes?\s+from.*\bvs\b|

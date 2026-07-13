@@ -236,3 +236,38 @@ class RetrievalService:
             if key not in best or c.similarity > best[key].similarity:
                 best[key] = c
         return list(best.values())
+
+    async def retrieve_full(
+        self,
+        question: str,
+        k: int = 8,
+        filters: ChunkSearchFilters | None = None,
+    ) -> tuple[list[RetrievedChunk], DecompositionResult]:
+        """
+        Full retrieval pipeline: decompose if needed, then hybrid-retrieve
+        each sub-query, merge all results.
+        """
+        if self.decomposer is None:
+            chunks = await self.retrieve_hybrid(question, k=k, filters=filters)
+            result = DecompositionResult(
+                original_query=question, was_decomposed=False, sub_queries=[question]
+            )
+            return chunks, result
+    
+        decomposition = await self.decomposer.decompose(question)
+    
+        if not decomposition.was_decomposed:
+            chunks = await self.retrieve_hybrid(question, k=k, filters=filters)
+            return chunks, decomposition
+    
+        # Hybrid-retrieve per sub-query, merge
+        all_chunks: dict[int, RetrievedChunk] = {}
+        for sub_q in decomposition.sub_queries:
+            sub_results = await self.retrieve_hybrid(sub_q, k=k, filters=filters)
+            for chunk in sub_results:
+                existing = all_chunks.get(chunk.chunk.id)
+                if existing is None or chunk.similarity > existing.similarity:
+                    all_chunks[chunk.chunk.id] = chunk
+    
+        merged = sorted(all_chunks.values(), key=lambda c: c.similarity, reverse=True)[:k]
+        return merged, decomposition

@@ -88,3 +88,294 @@ Note: The filing does not use the word "moat" or explicitly rank these as durabl
 
 
 **Tag:** Useful
+
+
+## [2026-07-12] — ACN — Total revenue (sanity check)
+
+**Question asked:** What was Accenture's total revenue for the most recent fiscal year?
+**Filters used:** ACN 
+**Answer:**
+Accenture's total revenue for fiscal 2025 (most recent fiscal year, ended August 31, 2025) was $69,672,977 thousand [ACN 10-K 2025 §Item 16].
+
+Citations checked? Y/N — Yes, exist in Part II > Item 6 > [Reserved]
+
+Did this change my thinking?
+Would I have found this faster by reading the 10-K myself? Yes
+Question I wanted to ask but didn't:
+
+Tag: useful 
+
+
+[2026-07-12] — ACN — Financial Services segment revenue
+
+Question asked: What was Accenture's revenue from the Financial Services industry group?
+Filters used: ACN
+Answer:
+- Fiscal 2025: $12,773,856 thousand [ACN 10-K 2025 §Item 16]
+- Fiscal 2024: $11,610,225 thousand [ACN 10-K 2024 §Item 16]
+- Fiscal 2023: $12,131,531 thousand [ACN 10-K 2023 §Item 16]
+- Fiscal 2022: $11,810,582 thousand [ACN 10-K 2023 §Item 16]
+- Fiscal 2021: $9,932,523 thousand [ACN 10-K 2023 §Item 16]
+
+Citations checked? Y/N — yes, exist in  Part IV > Item 16 > Form 10-K Summary
+
+Did this change my thinking?
+Would I have found this faster by reading the 10-K myself? yes
+Question I wanted to ask but didn't:
+
+Tag: useful 
+
+
+## [2026-07-12] — ACN — AI risk factor tone vs MD&A framing
+
+**Question asked:** Does the tone of Accenture's AI-disruption risk factor 
+(Item 1A) match how GenAI is framed in the bookings/strategy narrative (MD&A)?
+
+**Filters used:** ACN
+
+**Answer:** [summary — structured comparison, found tone mismatch, 
+cited both sections accurately]
+
+**Citations checked?** Y — quotes traced to correct sections
+
+**Did this change my thinking?** No — the mismatch it found (defensive 
+in 1A, optimistic in MD&A) is structural to how 10-Ks are written, 
+not diagnostic of ACN specifically.
+
+**Would I have found this faster by reading the 10-K myself?** N/A — 
+the question itself wasn't the right question to ask. The system 
+answered it correctly; the problem was upstream in my question design.
+
+**Question I wanted to ask but didn't:** 
+- Compare AI risk factor language FY2025 vs FY2024 — what changed?
+- Does MD&A acknowledge utilization/margin pressure from AI automation?
+
+**Tag:** system worked, question wasn't diagnostic
+
+## [2026-07-12] — ACN — MD&A vs 1A on AI utilization pressure
+
+**Question asked:** Does MD&A acknowledge utilization/margin 
+pressure from AI automation?
+
+**Answer:** No — MD&A attributes margin compression to payroll 
+costs, never mentions AI automation as a factor. Item 1A explicitly 
+states AI will "adversely affect the utilization rate of our 
+professionals." Management compartmentalizes the risk.
+
+**Citations checked?** Y — margin discussion in Item 6/7, 
+utilization language in Item 1/1A, both verified.
+
+**Did this change my thinking?** Yes — the gap between what legal 
+discloses and what management discusses in MD&A is wider than 
+expected. Worth monitoring whether FY2026 MD&A starts acknowledging 
+what 1A has said for two years.
+
+**Would I have found this faster by reading the 10-K myself?** No. 
+Cross-referencing margin drivers in MD&A against specific risk 
+language in 1A would take 15-20 minutes of careful reading.
+
+**Tag:** useful — first question where the tool surfaced a 
+cross-section finding faster than manual reading
+
+
+## [2026-07-12] — ACN — AI risk factor YoY comparison
+
+**Question asked:** Compare AI-related risk factors FY2025 vs 
+FY2024 Item 1A — what changed?
+
+**Answer:** Three concrete additions in FY2025: (1) "ecosystem 
+partners" and "AI-native companies" as new competitive threats, 
+(2) explicit pricing/commercial model risk for AI solutions, 
+(3) "pace and level of spending" qualifier on demand replacement.
+
+**Citations checked?** Y — FY2025 and FY2024 Item 1 chunks both 
+cited, language differences verifiable.
+
+**Did this change my thinking?** Yes — the pricing-model risk 
+language is new and specific. ACN is signaling that AI may 
+compress per-unit pricing even if volume grows. Worth checking 
+whether revenue-per-FTE or pricing metrics appear in the 
+earnings call.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No. Side-by-side comparison of two 10-K risk sections is exactly 
+the kind of tedious cross-document work this tool should 
+accelerate.
+
+**Tag:** useful — cross-filing comparison, genuine time savings
+
+
+## [2026-07-12] — ACN — Peer operating margin comparison
+
+**Question asked:** How does Accenture's operating margin trend 
+compare to a peer IT-services company's over the same period?
+
+**Answer:** Provided ACN margins (FY2022-2025, both GAAP and 
+adjusted), correctly declined to compare because no peer filings 
+are in the corpus.
+
+**Citations checked?** Y — margin figures from Item 6 across 
+three filings.
+
+**Did this change my thinking?** No — but the ACN-only trend 
+(GAAP declining from 15.2% to 14.7% while adjusted holds at 
+15.4-15.6%) is itself notable. The growing gap between GAAP 
+and adjusted margins is driven by rising "business optimization 
+costs" — worth investigating whether those are recurring.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — pulling 4 years of margins from 3 separate filings manually 
+would take 10+ minutes.
+
+**Question I wanted to ask but didn't:** N/A — next step is 
+ingest a peer (CTSH) and re-ask.
+
+**Tag:** partial — correct on ACN, limited by corpus scope
+
+
+## [2026-07-12] — ACN vs CTSH — Operating margin comparison
+
+**Question asked:** Compare Accenture's and Cognizant's operating 
+margins for fiscal years 2023 through 2025, side by side.
+
+**Answer:** Side-by-side table showing ACN GAAP/adjusted and CTSH 
+GAAP/adjusted margins. Key finding: CTSH GAAP margin (16.1%) 
+overtook ACN (14.7%) in FY2025 — a reversal. System flagged 
+fiscal-year-end mismatch (Sept vs Jan) unprompted.
+
+**Citations checked?** Verified CTSH 16.1% figure in citations.
+
+**Did this change my thinking?** Yes — CTSH margin improvement 
+relative to ACN is worth investigating. Is it sustainable or 
+driven by one-time items?
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — opening two companies' 10-Ks, finding the margin 
+discussion in each, normalizing GAAP vs adjusted, and noting 
+the fiscal-year mismatch would take 20+ minutes.
+
+**Tag:** useful — cross-company comparison, genuine time savings, 
+first question requiring named-entity decomposition to work
+
+## [2026-07-13] — ACN — Revenue vs bookings growth divergence
+
+**Question asked:** How has local-currency revenue growth trended 
+over the last three fiscal years, and does that trend diverge from 
+bookings growth over the same window?
+
+**Answer:** Revenue growth: 8% → 2% → 7%. Bookings growth: 
+5% → 14% → -1%. Opposite trajectories. System identified the 
+structural explanation: Managed Services bookings (+24% in FY2024) 
+convert to revenue over multiple years, explaining the lag.
+
+**Citations checked?** Y — all figures from Item 6 across three 
+filings.
+
+**Did this change my thinking?** Yes — the bookings/revenue 
+divergence and the Managed Services conversion lag are not obvious 
+from reading any single filing. The system connected data points 
+across three years and provided the structural explanation.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — pulling local-currency growth and bookings figures from 
+three separate 10-Ks, then identifying the Managed Services 
+conversion lag as the explanatory factor, would take 30+ minutes.
+
+**Tag:** useful — cross-filing trend analysis with structural 
+explanation, strongest output so far
+
+
+## [2026-07-13] — AVGO — R&D/integration cost vs revenue growth
+
+**Question asked:** Does R&D and integration-cost growth track 
+segment revenue growth, or is growth being bought with 
+disproportionate opex ramp post-VMware?
+
+**Answer:** Growth is NOT being bought with opex ramp. Key findings:
+- Infra Software R&D decreased despite 26% revenue growth 
+  (VMware integration leverage)
+- Integration/restructuring costs down 61%
+- SG&A down 15% from headcount reductions
+- Operating income +89% on +24% revenue (massive margin expansion)
+- Caveat: SBC +33% (faster than revenue) — system flagged but 
+  excluded from conclusion
+
+**Citations checked?** verified SBC $7,568M figure
+
+**Did this change my thinking?** Yes — the segment-level R&D 
+breakdown (Semiconductor R&D +8% vs Software R&D -6%) shows 
+VMware integration is producing real operating leverage, not 
+just revenue stacking. More bullish signal than headline numbers 
+suggest.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — this required pulling segment-level R&D from Item 8, 
+integration costs from Item 7, SBC from the compensation note, 
+and operating income by segment, then cross-referencing all 
+against segment revenue growth. 45+ minutes of manual work.
+
+**Question I wanted to ask but didn't:** How does AVGO's 
+SBC-to-revenue ratio compare to peers (CTSH, ACN, IBM)?
+
+**Tag:** useful — multi-section synthesis, segment-level 
+granularity, strongest analytical output so far
+
+
+## [2026-07-13] — AVGO — AI narrative vs reported numbers
+
+**Question asked:** Did last year's MD&A AI-demand commentary 
+show up in this year's reported segment revenue?
+
+**Answer:** Semiconductor segment grew 22% revenue / 27% 
+operating income, consistent with AI narrative. But: (1) no 
+AI-specific revenue breakout exists — can't verify how much 
+of the $6.8B increase is AI vs other lines, (2) system only 
+retrieved FY2025 MD&A, not FY2024's forward-looking commentary.
+
+**Citations checked?** Y — segment figures from Item 7/8 verified.
+
+**Did this change my thinking?** Partially — the disclosure gap 
+(AI asserted but unquantified) is itself a finding. The missing 
+FY2024 comparison limits the answer's usefulness.
+
+**Would I have found this faster by reading the 10-K myself?** 
+Tie — the disclosure-gap observation is useful, but I'd still 
+need to open the FY2024 10-K manually to do the actual comparison.
+
+**Question I wanted to ask but didn't:** Rephrased version with 
+explicit FY2024 vs FY2025 anchoring — about to try.
+
+**Tag:** partial — correct on what's available, limited by 
+single-filing retrieval on a cross-year question
+
+
+
+## [2026-07-13] — AVGO — Export control risk factor YoY changes
+
+**Question asked:** Has export-control/China risk-factor language 
+changed materially year over year?
+
+**Answer:** Yes, material escalation across three years:
+- FY2023→FY2024: Huawei named disclosure dropped, "possible 
+  decoupling" upgraded to "the decoupling"
+- FY2024→FY2025: supply chain risk added (previously only 
+  customer-side), restricted entity list language expanded to 
+  include manufacturing impact, regulatory scrutiny broadened 
+  from Korea-only to Korea/Japan/EU
+
+**Citations checked?** Y — Huawei appears only in chunk 5171 (FY2023 filing, 2023-12-14), absent from all FY2024 and FY2025 chunks. Confirmed.
+
+**Did this change my thinking?** Yes — the progressive escalation 
+pattern (hypothetical → declarative → supply-chain-wide) suggests 
+management's internal risk assessment is materially worsening 
+each year, even as MD&A frames AI demand as a tailwind. Same 
+1A-vs-MD&A tension pattern as ACN, but with concrete textual 
+evidence of escalation.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — comparing risk-factor language across three separate 10-Ks 
+is exactly the kind of tedious cross-document work that takes 
+30-45 minutes manually. This is the tool's strongest use case.
+
+**Tag:** useful — cross-filing textual diff, strongest analytical 
+output, portfolio-quality example

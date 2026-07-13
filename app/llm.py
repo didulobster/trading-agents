@@ -20,7 +20,7 @@ Rules:
 - Every factual claim must cite the source excerpt(s) using the tags in the context, like [AAPL 10-K 2025 §Item 1A]. Multiple sources: [AAPL 10-K 2025 §Item 1A, MSFT 10-K 2024 §Item 7].
 - If the context does not contain the enough information, say so explicitly. 
   Do not speculate or fall back on generate knowledge.
-- Do not compute or estimate financial figures. Quote numbers exactly as they appear, with the citation
+- Quote numbers exactly as they appear, with the citation. You may compute simple ratios, margins, percentages, and growth rates from figures explicitly stated in the excerpts (e.g., operating margin from operating income ÷ revenue), but never estimate or fabricate figures not present in the context.
 - Be concise, No premable. no "Based on the provided context,
 - If multiple companies are involved, organize the answer by company
 """
