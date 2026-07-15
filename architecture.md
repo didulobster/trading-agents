@@ -49,6 +49,25 @@ The codebase follows a clean architecture / DDD-style layering:
 
 - **Citation verification is not implemented.** The system does not programmatically check whether each cited chunk literally contains the claimed text or numbers. Dogfooding investigated a suspected citation-precision failure (UNH Optum Rx revenue); the failure was traced to truncated preview display rather than actual misattribution. The risk remains theoretically present and a verification module would add a safety net, but no confirmed failure case currently motivates urgent implementation.
 
+- **Known: Incorporation-by-reference filers**
+IBM files a shell 10-K where Item 7 (MD&A), Item 7A, and Item 8 
+(Financial Statements) each contain only a page-number reference 
+to a separate Annual Report to Stockholders exhibit. The current 
+pipeline only processes the primary filing document and does not 
+follow exhibit references. Financial analysis questions on IBM 
+will fail. Other filers using this pattern (common among legacy 
+large-caps) will have the same issue.
+
+- **Known: Prolific-filer pagination gap**
+
+SEC's submissions endpoint returns ~40 recent filings in the 
+primary response. JPM files ~2,000 forms/month, so only the 
+most recent 10-K appears. Older 10-Ks require following 
+pagination links to secondary submission files. The current 
+EdgarClient.list_filings() does not follow pagination. This 
+affects prolific filers (large banks, conglomerates) but not 
+typical operating companies. JPM is limited to 1 filing until 
+pagination is implemented.
 
 ## Domain Model
 
