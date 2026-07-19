@@ -16,7 +16,7 @@ class FinancialMetrics(BaseModel):
     sbc_pct_of_revenue: float | None
     net_dollar_retention: float | None
     extraction_confidence: Literal["stated", "computed", "not_disclosed"]
-    reasoning: str  # forces the model to show its work — cheap sanity check
+    reasoning: str = ""  # forces the model to show its work — cheap sanity check
 
 class MetricsExtractor:
     def __init__(self):

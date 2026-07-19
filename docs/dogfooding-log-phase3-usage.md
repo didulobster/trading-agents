@@ -379,3 +379,36 @@ is exactly the kind of tedious cross-document work that takes
 
 **Tag:** useful — cross-filing textual diff, strongest analytical 
 output, portfolio-quality example
+
+
+## [2026-07-16] — NFLX — Content cash spend vs amortization gap
+
+**Question asked:** What's the gap between cash spent on content 
+and content amortization? Which way does it run, is it narrowing?
+
+**Answer:** Four-year table showing cash spend exceeds amortization 
+in every year except 2023. Gap narrowing: $2.8B (2022) → $0.67B 
+(2025). Amortization growing faster than additions (7.3% vs 5.4%).
+
+**Citations checked?** Y — arithmetic verified, all figures from 
+Item 16 across two filings.
+
+**Follow-up:** Asked whether FY2023 MD&A discusses Hollywood 
+strikes' impact on the $4.3B spending drop. System correctly 
+said no context available. SQL verification confirmed: "strike" 
+and "labor dispute" appear only in Item 1A risk factors (generic, 
+forward-looking), zero mentions in Item 7 MD&A. Netflix attributed 
+the spending anomaly to nothing in MD&A — same compartmentalization 
+pattern as ACN's AI/utilization disclosure gap.
+
+**Did this change my thinking?** Yes — the 2023 anomaly is clearly 
+strike-related but undisclosed as such in MD&A. The narrowing gap 
+trend (amortization catching up to cash spend) is a positive free 
+cash flow signal worth monitoring.
+
+**Would I have found this faster by reading the 10-K myself?** 
+No — four-year trend from two filings plus the cross-section 
+verification (1A vs MD&A) would take 30+ minutes manually.
+
+**Tag:** useful — quantitative trend analysis plus disclosure-gap 
+finding from follow-up investigation

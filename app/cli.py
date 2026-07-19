@@ -393,7 +393,7 @@ async def _run_extract_metrics(ticker: str, k: int) -> None:
         use_hybrid=True,
     )
     extractor = MetricsExtractor()
-    metrics_repo = MetricsRepository()
+    metrics_repo = MetricsRepository(session_factory=None)
     filing_repo = FilingRepository()
 
     filings = await filing_repo.list_by_state(ticker, FilingStatus.INGESTED)

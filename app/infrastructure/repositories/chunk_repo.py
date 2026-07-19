@@ -185,7 +185,8 @@ class ChunkRepository:
             "content_tsv @@ plainto_tsquery('english', %s)"
         ]
         params: list = [query]
-    
+        params.append(query)    # for tsquery in WHERE   
+
         if filters.tickers:
             where_clauses.append("ticker = ANY(%s)")
             params.append([t.upper() for t in filters.tickers])
@@ -203,7 +204,6 @@ class ChunkRepository:
             params.append(filters.section_path_contains)
     
         where_sql = " AND ".join(where_clauses)
-        params.append(query)  # for ts_rank's tsquery
         params.append(k)
     
         sql = f"""

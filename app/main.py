@@ -1,19 +1,34 @@
+from dataclasses import asdict
 import logging
+import os
+from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from datetime import date
+from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.application.citations import format_citation_tag
 from app.application.embedding_service import EmbeddingService
-from app.application.extraction_service import FinancialMetrics
+from app.application.extraction_service import FinancialMetrics, MetricsExtractor
+from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
+from app.infrastructure.edgar.client import EdgarClient
+from app.infrastructure.edgar.ticker_resolver import TickerResolver
+from app.infrastructure.queries.corpus_status import CorpusStatusQuery
+from app.infrastructure.repositories import metrics_repo
 from app.infrastructure.repositories.db import init_pool, close_pool
 from app.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
     ChunkSearchFilters,
+    RetrievedChunk,
 )
+from app.infrastructure.repositories.document_repo import DocumentRepository
+from app.infrastructure.repositories.filing_repo import FilingRepository
+from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
+from app.infrastructure.repositories.section_repo import SectionRepository
+from app.infrastructure.repositories.metrics_repo import MetricsRepository
 from app.llm import answer_question
 
 logging.basicConfig(level=logging.INFO)
@@ -77,6 +92,12 @@ class FinancialMetricsResponse(BaseModel):
     metrics: FinancialMetrics   # the Pydantic model from point 2
     citations: list[str]
 
+class IngestRequest(BaseModel):
+    ticker: str
+    form_type: str = "10-K"
+    limit: int = 3
+    since_year: int | None = None
+
 # ---- Endpoint ----
 @app.post("/ask",  response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
@@ -132,16 +153,84 @@ async def extract(req: ExtractRequest) -> FinancialMetrics:
         chunk_repo=chunk_repo,
         decomposer=decomposer,
         use_hybrid=True)
-    chunks = await gather_extraction_chunks(retrieval, req.ticker, req.filed_after, req.filed_before)
-    metrics = await extractor.extract(chunks, req.ticker, req.fiscal_period)
-    await metrics_repo.upsert(ticker=req.ticker, period=req.fiscal_period, filing_type=req.filing_type,
-                                filed_date=req.filed_date, metrics=metrics,
-                                citations=[format_citation_tag(c) for c in chunks])
-    return metrics
+    extractor = MetricsExtractor()
+    metrics_repo = MetricsRepository(session_factory=None)
+
+    # In extract() endpoint, before gather_extraction_chunks:
+    window_start = req.filed_date - timedelta(days=30)
+    window_end = req.filed_date + timedelta(days=30)
+    chunks = await gather_extraction_chunks(retrieval, req.ticker, window_start, window_end)
+    extracted = await extractor.extract(chunks, req.ticker, req.fiscal_period, req.filing_type, req.filed_date)
+    from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
+    row = MetricsRow(
+        ticker=req.ticker,
+        fiscal_period=req.fiscal_period,
+        filing_type=req.filing_type,
+        filed_date=req.filed_date,
+        revenue=extracted.revenue,
+        gross_margin_pct=extracted.gross_margin_pct,
+        gaap_net_income=extracted.gaap_net_income,
+        free_cash_flow=extracted.free_cash_flow,
+        sbc_pct_of_revenue=extracted.sbc_pct_of_revenue,
+        net_dollar_retention=extracted.net_dollar_retention,
+        extraction_confidence=extracted.extraction_confidence,
+        reasoning=extracted.reasoning,
+        source_citations=[format_citation_tag(c) for c in chunks],
+    )
+    await metrics_repo.upsert(row)
+    return extracted
 
 async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):
     filters = ChunkSearchFilters(tickers=[ticker], filed_after=filed_after, filed_before=filed_before)
-    chunks = []
-    for query in METRIC_QUERIES.values():
-        chunks = await retrieval.retrieve_hybrid(req.question, k=req.k, filters=filters)
-    return dedupe_by_chunk_id(chunks)
+    seen: dict[int, RetrievedChunk] = {}
+    for query in RetrievalService.METRIC_QUERIES.values():
+        results = await retrieval.retrieve_hybrid(query, k=5, filters=filters)
+        for chunk in results:
+            cid = chunk.chunk.id
+            if cid not in seen or chunk.similarity > seen[cid].similarity:
+                seen[cid] = chunk
+    return list(seen.values())
+
+@app.get("/corpus-status")
+async def corpus_status_endpoint(ticker: str | None = None):
+    query = CorpusStatusQuery()
+    summary = await query.summary(ticker)
+    if not summary:
+        return {"summary": [], "issues": [], "per_filing": []}
+
+    issues = await query.issues(ticker)
+    per_filing = await query.per_filing(ticker)
+    
+    return {
+        "summary": [asdict(row) for row in summary],
+        "issues": [asdict(i) for i in issues],
+        "per_filing": [asdict(d) for d in per_filing],
+    }
+
+@app.post("/ingest")
+async def ingest_endpoint(req: IngestRequest):
+    user_agent = os.environ["EDGAR_USER_AGENT"]
+    cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
+
+    async with EdgarClient(user_agent, cache_root / "filings") as edgar:
+        resolver = TickerResolver(user_agent, cache_root / "company_tickers.json")
+        embedder = EmbeddingService()
+        service = IngestionService(
+            edgar_client=edgar,
+            ticker_resolver=resolver,
+            embedding_service=embedder,
+            security_repo=ListedSecurityRepository(),
+            filing_repo=FilingRepository(),
+            document_repo=DocumentRepository(),
+            section_repo=SectionRepository(),
+            chunk_repo=ChunkRepository(),
+        )
+        since = date(req.since_year, 1, 1) if req.since_year else None
+        await service.ingest_security(
+            ticker=req.ticker,
+            form_types=[req.form_type],
+            limit=req.limit,
+            since=since,
+        )
+
+    return {"status": "ok", "ticker": req.ticker, "limit": req.limit}

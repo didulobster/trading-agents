@@ -43,13 +43,13 @@ class MetricsRepository:
                         ticker, fiscal_period, filing_type, filed_date,
                         revenue, gross_margin_pct, gaap_net_income,
                         free_cash_flow, sbc_pct_of_revenue, net_dollar_retention,
-                        extraction_confidence, reasoning, source_citations
+                        extraction_confidence, source_citations
                     )
                     VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s,
                         %s, %s, %s,
-                        %s, %s, %s
+                        %s, %s
                     )
                     ON CONFLICT ON CONSTRAINT uq_metric_period DO UPDATE SET
                         revenue                = EXCLUDED.revenue,
@@ -59,7 +59,6 @@ class MetricsRepository:
                         sbc_pct_of_revenue     = EXCLUDED.sbc_pct_of_revenue,
                         net_dollar_retention   = EXCLUDED.net_dollar_retention,
                         extraction_confidence  = EXCLUDED.extraction_confidence,
-                        reasoning              = EXCLUDED.reasoning,
                         source_citations       = EXCLUDED.source_citations,
                         extracted_at           = now()
                     """,
@@ -75,7 +74,6 @@ class MetricsRepository:
                         metrics.sbc_pct_of_revenue,
                         metrics.net_dollar_retention,
                         metrics.extraction_confidence,
-                        metrics.reasoning,
                         json.dumps(metrics.source_citations),
                     ),
                 )
