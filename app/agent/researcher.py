@@ -108,6 +108,7 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="EDGAR research agent")
     parser.add_argument(
         "ticker", nargs="?", help="Ticker to research (omit with --test)"

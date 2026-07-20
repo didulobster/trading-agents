@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Literal
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date, timedelta
@@ -31,7 +32,11 @@ from app.infrastructure.repositories.section_repo import SectionRepository
 from app.infrastructure.repositories.metrics_repo import MetricsRepository
 from app.llm import answer_question
 
+
+load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
+claude_model = os.getenv("LLM_CLAUDE_MODEL")
+
 app = FastAPI(title="RAG Skeleton")
 
 app.add_middleware(
@@ -122,7 +127,10 @@ async def ask(req: AskRequest) -> AskResponse:
     )
 
     chunks, _decomposition = await retrieval.retrieve_full(req.question, k=req.k, filters=filters)
-    result = await answer_question(req.question, chunks)
+    result = await answer_question(
+        question=req.question, 
+        chunks=chunks,
+        model=claude_model)
 
     from app.application.citations import format_citation_tag
     return AskResponse(

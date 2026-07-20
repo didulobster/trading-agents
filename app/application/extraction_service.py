@@ -3,7 +3,7 @@ from datetime import date
 from typing import Literal
 
 from anthropic import AsyncAnthropic
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 
@@ -18,9 +18,25 @@ class FinancialMetrics(BaseModel):
     extraction_confidence: Literal["stated", "computed", "not_disclosed"]
     reasoning: str = ""  # forces the model to show its work — cheap sanity check
 
+    @field_validator(
+        "revenue", "gross_margin_pct", "gaap_net_income",
+        "free_cash_flow", "sbc_pct_of_revenue", "net_dollar_retention",
+        mode="before",
+    )
+    
+    @classmethod
+    def coerce_non_numeric_to_none(cls, v):
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return None
+        return v
+
 class MetricsExtractor:
     def __init__(self):
         self.client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.llm_model = os.getenv("LLM_CLAUDE_MODEL")
 
     async def extract(
         self,
@@ -31,7 +47,7 @@ class MetricsExtractor:
         filed_date: date) -> FinancialMetrics:
         context = "\n\n".join(f"[{c.chunk.section_path}]\n{c.chunk.content}" for c in chunks)
         response = await self.client.messages.create(
-            model="claude-sonnet-4-6",
+            model=self.llm_model,
             max_tokens=1024,
             tools=[{
                 "name": "record_metrics",

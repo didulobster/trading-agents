@@ -34,7 +34,7 @@ class AnswerWithCitations:
 async def answer_question(
     question: str,
     chunks: list[RetrievedChunk],
-    model: str = "claude-opus-4-7",
+    model: str = "claude-haiku-4-5-20251001",
     max_tokens: int = 1024,
 ) -> AnswerWithCitations:
     if not chunks:
