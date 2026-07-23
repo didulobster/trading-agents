@@ -1,0 +1,94 @@
+# watchlist.yaml — final version (6 tickers)
+
+- ticker: AVGO
+  thesis: >
+    AI infrastructure + VMware integration leverage play.
+    Semiconductor demand driven by custom AI accelerators;
+    infrastructure software margins expanding rapidly post-acquisition.
+  key_metrics:
+    - "SBC as % of revenue (FY2025: 11.8%, was 6.1% in FY2023)"
+    - "Debt/operating profit ratio (FY2025: 2.5x, down from 5.0x peak)"
+    - "Infrastructure Software segment margin (FY2025: 76.8%)"
+    - "Semiconductor Solutions segment margin (FY2025: 57.6%)"
+  risks_watching:
+    - "Export controls and China-Taiwan geopolitical risk"
+    - "AI customer concentration and payment/credit risk (new in FY2025)"
+    - "SBC dilution offsetting buyback programs"
+
+- ticker: ACN
+  thesis: >
+    IT services bellwether. Managed services bookings conversion lag
+    creates revenue visibility — FY2024 bookings surge (+24% managed
+    services) should flow into FY2025-2026 revenue.
+  key_metrics:
+    - "Local-currency revenue growth vs bookings growth divergence"
+    - "Managed services bookings mix and conversion timing"
+    - "Operating margin (FY2025 GAAP: 14.7%, adjusted: 15.6%)"
+  risks_watching:
+    - "AI cannibalization of consulting (1A risk, absent from MD&A)"
+    - "Pricing model pressure from AI-enabled solutions"
+    - "Utilization rate impact from AI automation"
+
+- ticker: NFLX
+  thesis: >
+    Content spend discipline improving. Cash-to-amortization gap
+    narrowing ($2.8B in 2022 to $0.67B in 2025), signaling FCF
+    conversion strengthening as content library matures.
+  key_metrics:
+    - "Content cash spend vs amortization gap (narrowing trend)"
+    - "FCF/net income ratio (128% FY2023, normalizing)"
+    - "Operating cash flow growth vs revenue growth"
+  risks_watching:
+    - "Content cost re-inflation post-strike"
+    - "Strike impact acknowledged in 1A but absent from MD&A"
+    - "Subscriber growth deceleration"
+
+- ticker: FIG
+  thesis: >
+    Hypergrowth mispriced — 46% revenue growth, 136% net dollar
+    retention, 75% of enterprise paying for AI credits. AI is
+    monetization tailwind, not threat. Stock ~80% below highs.
+  key_metrics:
+    - "Net dollar retention rate (latest: 139%)"
+    - "Revenue growth rate QoQ (watching for deceleration)"
+    - "Path to GAAP profitability (projected 2026)"
+    - "SBC as % of revenue (latest: 50.7%)"
+  risks_watching:
+    - "Seat or logo loss to Claude Design or Adobe"
+    - "NDR plateau or decline"
+    - "Revenue growth deceleration quarter-over-quarter"
+    - "Pricing model transition risk (March 2025 changes)"
+
+- ticker: ASML
+  thesis: >
+    Monopoly chokepoint — sole EUV supplier with backlog into
+    2027-2028. AI capex converts directly into tool orders with
+    no substitute. Margin expanding despite fewer unit shipments
+    (327 vs 418) via product mix shift to EXE/NXE.
+  key_metrics:
+    - "Order backlog size and conversion timeline"
+    - "Gross margin (FY2025: 52.8%, expanding)"
+    - "EXE+NXE share of system sales (FY2025: 49.1%, up from 39.4%)"
+    - "Service revenue growth (FY2025: +26.2%, now 25.1% of sales)"
+  risks_watching:
+    - "China export-control expansion (Netherlands, EU, US Affiliates Rule)"
+    - "China revenue concentration (29.1% in FY2025)"
+    - "High-NA ramp costs pressuring gross margin"
+    - "TSMC/Samsung/Intel capex signals as leading indicator"
+
+- ticker: MSFT
+  thesis: >
+    Valuation reset trade — stock down ~20% YTD, trading cheap
+    relative to history. Selloff reflects capex-fatigue sentiment,
+    not deteriorating Azure/Copilot fundamentals. Clean beat plus
+    disciplined FY2027 capex guidance is re-rating catalyst.
+  key_metrics:
+    - "Azure revenue growth rate"
+    - "FY2027 capex guidance (single biggest swing factor)"
+    - "Intelligent Cloud segment margin"
+    - "Copilot monetization progress"
+  risks_watching:
+    - "Capex growth outpacing revenue growth"
+    - "OpenAI stake accounting treatment and consolidation risk"
+    - "Copilot adoption slower than guidance"
+    - "Antitrust/regulatory risk (EU, US)"

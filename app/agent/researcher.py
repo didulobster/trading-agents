@@ -1,26 +1,33 @@
+
 """
 Research agent — orchestration loop.
-
+ 
 Runs a tool-use conversation: the model plans, calls tools, reads results,
 and continues until it produces a final answer or hits the turn limit.
-
+ 
 Usage:
     # Step-1 loop verification (stubbed tools, test prompt):
     uv run python -m app.agent.researcher --test
-
-    # Full research run (needs USE_STUBS=False in tools.py + server running):
+ 
+    # Full research run:
     uv run python -m app.agent.researcher AVGO
+ 
+    # News assessment against watchlist thesis:
+    uv run python -m app.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
 """
 
 import argparse
 import asyncio
 import logging
 import os
+from pathlib import Path
+import sys
+import yaml
 
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
-
-from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT
+from datetime import datetime
+from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool
 
 load_dotenv()
@@ -28,6 +35,69 @@ logger = logging.getLogger(__name__)
 
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
+WATCHLIST_PATH = Path("watchlist.yaml")
+
+def _trace(msg: str) -> None:
+    """Print to stderr so tool traces don't pollute the memo output."""
+    print(msg, file=sys.stderr) 
+
+def _load_watchlist() -> list[dict]:
+    """Load the watchlist YAML. Returns empty list if missing."""
+    if not WATCHLIST_PATH.exists():
+        _trace(f"Warning: {WATCHLIST_PATH} not found")
+        return []
+    return yaml.safe_load(WATCHLIST_PATH.read_text()) or []
+
+def _get_watchlist_entry(ticker: str) -> dict | None:
+    """Find the watchlist entry for a ticker. Case-insensitive."""
+    watchlist = _load_watchlist()
+    ticker_upper = ticker.upper()
+    for entry in watchlist:
+        if entry.get("ticker", "").upper() == ticker_upper:
+            return entry
+    return None
+
+def _build_news_prompt(ticker: str, news_text: str) -> str:
+    """
+    Build the news assessment prompt with the watchlist context filled in.
+    If the ticker isn't in the watchlist, uses a generic framing.
+    """
+    entry = _get_watchlist_entry(ticker)
+ 
+    if entry:
+        thesis = entry.get("thesis", "No thesis specified.")
+        key_metrics = "\n".join(
+            f"- {m}" for m in entry.get("key_metrics", [])
+        ) or "- None specified"
+        risks_watching = "\n".join(
+            f"- {r}" for r in entry.get("risks_watching", [])
+        ) or "- None specified"
+    else:
+        _trace(f"Warning: {ticker} not in watchlist — using generic framing")
+        thesis = "No thesis on file. Assess the news on its own merits."
+        key_metrics = "- None specified (ticker not in watchlist)"
+        risks_watching = "- None specified (ticker not in watchlist)"
+ 
+    prompt = NEWS_ASSESSMENT_PROMPT.format(
+        ticker=ticker.upper(),
+        thesis=thesis,
+        key_metrics=key_metrics,
+        risks_watching=risks_watching,
+    )
+ 
+    return prompt
+
+def _save_output(content: str, ticker: str, mode: str) -> Path:
+    """Save output to docs/memos/ with timestamp. Returns the path."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if mode == "news":
+        filename = f"{ticker}-news-{timestamp}.md"
+    else:
+        filename = f"{ticker}-{timestamp}.md"
+    out_path = Path(f"docs/memos/{filename}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(content)
+    return out_path
 
 def _roll_cache_breakpoint(messages: list) -> None:
     """Place a single cache_control breakpoint on the last block of the last
@@ -50,12 +120,17 @@ def _roll_cache_breakpoint(messages: list) -> None:
         last[-1]["cache_control"] = {"type": "ephemeral"}
 
 
+
 async def run_agent(user_task: str, system_prompt: str) -> str:
+    """
+    Run the agent loop: send task, process tool calls, return final text.
+    Tool traces go to stderr; only the final output goes to stdout.
+    """
     client = AsyncAnthropic()
     messages = [{"role": "user", "content": user_task}]
 
     for turn in range(MAX_TURNS):
-        logger.info(f"\n--- turn {turn + 1} ---")
+        _trace(f"\n--- turn {turn + 1} ---")
         _roll_cache_breakpoint(messages)
         response = await client.messages.create(
             model=AGENT_MODEL,
@@ -71,7 +146,7 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
             messages=messages,
         )
         u = response.usage
-        logger.info(
+        _trace(
             f"  [tokens] in={u.input_tokens} "
             f"cache_write={u.cache_creation_input_tokens} "
             f"cache_read={u.cache_read_input_tokens} out={u.output_tokens}"
@@ -80,13 +155,13 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
         # Print any thinking-out-loud text the model emits alongside tool calls
         for block in response.content:
             if block.type == "text" and block.text.strip():
-                logger.info(f"  [agent] {block.text.strip()}")
+                _trace(f"  [agent] {block.text.strip()}")
 
         if response.stop_reason != "tool_use":
             final = "".join(
                 b.text for b in response.content if b.type == "text"
             )
-            logger.info(f"\n[agent finished after {turn + 1} turns]")
+            _trace(f"\n[agent finished after {turn + 1} turns]")
             return final
 
         tool_results = []
@@ -108,7 +183,6 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description="EDGAR research agent")
     parser.add_argument(
         "ticker", nargs="?", help="Ticker to research (omit with --test)"
@@ -118,20 +192,36 @@ def main() -> None:
         action="store_true",
         help="Run the step-1 loop verification against stubbed tools",
     )
+    parser.add_argument(
+        "--news",
+        type=str,
+        metavar="HEADLINE",
+        help='News headline or announcement to assess, e.g. --news "AVGO announces 10B buyback"',
+    )
     args = parser.parse_args()
 
     if args.test:
         task = "Run the test task described in your instructions."
         prompt = STEP1_TEST_PROMPT
+    elif args.ticker and args.news:
+        ticker = args.ticker.upper()
+        prompt = _build_news_prompt(ticker, args.news)
+        task = f"Assess this news for {ticker}:\n\n{args.news}"
+        mode = "news"
     elif args.ticker:
         task = f"Run the full research checklist for {args.ticker}."
         prompt = ANALYST_SYSTEM_PROMPT
+        mode = "research"
     else:
         parser.error("provide a ticker, or use --test")
 
     result = asyncio.run(run_agent(task, prompt))
-    logger.info("\n=== RESEARCH MEMO ===\n")
-    logger.info(result)
+    print(result)
+
+    # Save to file (skip for test mode)
+    if mode != "test" and args.ticker:
+        path = _save_output(result, args.ticker.upper(), mode)
+        _trace(f"\nSaved to {path}")
 
 
 if __name__ == "__main__":
