@@ -42,7 +42,7 @@ app = FastAPI(title="RAG Skeleton")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten to your actual origin once you know it
-    allow_methods=["POST"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -96,6 +96,15 @@ class FinancialMetricsResponse(BaseModel):
     fiscal_period: str
     metrics: FinancialMetrics   # the Pydantic model from point 2
     citations: list[str]
+
+class NewsAssessRequest(BaseModel):
+    ticker: str
+    headline: str
+
+class NewsAssessResponse(BaseModel):
+    ticker: str
+    headline: str
+    assessment: str
 
 class IngestRequest(BaseModel):
     ticker: str
@@ -242,3 +251,24 @@ async def ingest_endpoint(req: IngestRequest):
         )
 
     return {"status": "ok", "ticker": req.ticker, "limit": req.limit}
+
+
+@app.post("/news-assess", response_model=NewsAssessResponse)
+async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
+    if not req.headline.strip():
+        raise HTTPException(400, "headline must not be empty")
+    if not req.ticker.strip():
+        raise HTTPException(400, "ticker must not be empty")
+
+    from app.agent.researcher import run_agent, _build_news_prompt
+
+    ticker = req.ticker.strip().upper()
+    prompt = _build_news_prompt(ticker, req.headline)
+    task = f"Assess this news for {ticker}:\n\n{req.headline}"
+    result = await run_agent(task, prompt)
+
+    return NewsAssessResponse(
+        ticker=ticker,
+        headline=req.headline,
+        assessment=result,
+    )

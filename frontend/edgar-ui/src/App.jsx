@@ -1,11 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Send, ChevronDown, Loader2, AlertCircle, Settings2, X, FileStack } from "lucide-react";
+import { Send, ChevronDown, Loader2, AlertCircle, Settings2, X, FileStack, Newspaper, BookOpen } from "lucide-react";
 
 
 const EXAMPLE_QUESTIONS = [
   "What does UnitedHealth describe as risk factors tied to its regulatory environment?",
   "What is Apple's stated services revenue for fiscal 2024?",
   "How does Caterpillar's debt trajectory compare to its operating profit?",
+];
+
+const EXAMPLE_NEWS = [
+  { ticker: "AVGO", headline: "Broadcom announces $10B share repurchase program" },
+  { ticker: "MSFT", headline: "Microsoft Azure revenue grows 35% in Q2, beating estimates" },
+  { ticker: "ASML", headline: "Netherlands expands export controls on advanced chip equipment to China" },
 ];
 
 function useAutoResize(ref, value) {
@@ -81,6 +87,20 @@ function AssistantMessage({ msg }) {
   );
 }
 
+function NewsAssessmentMessage({ msg }) {
+  return (
+    <div className="edrd-row edrd-row-assistant">
+      <div className="edrd-card edrd-card-news">
+        <div className="edrd-news-header">
+          <Newspaper size={14} strokeWidth={2} />
+          <span className="edrd-news-ticker">{msg.ticker}</span>
+        </div>
+        <pre className="edrd-assessment">{msg.assessment}</pre>
+      </div>
+    </div>
+  );
+}
+
 function ErrorMessage({ text, onRetry }) {
   return (
     <div className="edrd-row edrd-row-assistant">
@@ -109,10 +129,13 @@ export default function EdgarResearchDesk() {
   const [tickerFilter, setTickerFilter] = useState("");
   const [filingType, setFilingType] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [mode, setMode] = useState("qa");
+  const [newsTicker, setNewsTicker] = useState("");
 
   const textareaRef = useRef(null);
   const scrollRef = useRef(null);
   const lastQuestionRef = useRef("");
+  const lastNewsRef = useRef({ ticker: "", headline: "" });
 
   useAutoResize(textareaRef, input);
 
@@ -166,16 +189,60 @@ export default function EdgarResearchDesk() {
     [apiBase, loading, tickerFilter, filingType]
   );
 
+  const assessNews = useCallback(
+    async (ticker, headline) => {
+      if (!ticker.trim() || !headline.trim() || loading) return;
+      lastNewsRef.current = { ticker, headline };
+      setMessages((m) => [...m, { role: "user", text: `[${ticker.toUpperCase()}] ${headline}` }]);
+      setInput("");
+      setLoading(true);
+
+      try {
+        const res = await fetch(`${apiBase}/news-assess`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: ticker.trim().toUpperCase(), headline: headline.trim() }),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          throw new Error(`${res.status} ${res.statusText}${detail ? " — " + detail.slice(0, 200) : ""}`);
+        }
+        const data = await res.json();
+        setMessages((m) => [
+          ...m,
+          { role: "news-assessment", ticker: data.ticker, assessment: data.assessment },
+        ]);
+      } catch (err) {
+        const msg =
+          err.message?.includes("Failed to fetch") || err.name === "TypeError"
+            ? `No response from ${apiBase}. Confirm the API is running and CORS is enabled for this origin.`
+            : err.message;
+        setMessages((m) => [...m, { role: "error", text: msg }]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [apiBase, loading]
+  );
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      ask(input);
+      if (mode === "qa") {
+        ask(input);
+      } else {
+        assessNews(newsTicker, input);
+      }
     }
   };
 
   const retry = () => {
     setMessages((m) => m.slice(0, -1));
-    ask(lastQuestionRef.current);
+    if (mode === "qa") {
+      ask(lastQuestionRef.current);
+    } else {
+      assessNews(lastNewsRef.current.ticker, lastNewsRef.current.headline);
+    }
   };
 
   return (
@@ -191,6 +258,8 @@ export default function EdgarResearchDesk() {
           --brass: #c9a227;
           --brass-dim: #8a7420;
           --brick: #a65a43;
+          --teal: #2a9d8f;
+          --teal-dim: #1e7268;
 
           min-height: 100vh;
           background: var(--bg);
@@ -244,6 +313,12 @@ export default function EdgarResearchDesk() {
           padding-left: 18px;
         }
 
+        .edrd-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
         .edrd-settings-btn {
           background: none;
           border: 1px solid var(--line);
@@ -270,6 +345,40 @@ export default function EdgarResearchDesk() {
           flex-wrap: wrap;
           align-items: center;
           font-size: 12.5px;
+        }
+
+        .edrd-mode-bar {
+          border-bottom: 1px solid var(--line);
+          background: var(--surface);
+          padding: 0 24px;
+          display: flex;
+          gap: 0;
+        }
+
+        .edrd-mode-tab {
+          background: none;
+          border: none;
+          border-bottom: 2px solid transparent;
+          color: var(--ink-dim);
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 11.5px;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          padding: 11px 16px 9px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: color 0.15s, border-color 0.15s;
+        }
+        .edrd-mode-tab:hover { color: var(--ink); }
+        .edrd-mode-tab.is-active {
+          color: var(--brass);
+          border-bottom-color: var(--brass);
+        }
+        .edrd-mode-tab.is-active-news {
+          color: var(--teal);
+          border-bottom-color: var(--teal);
         }
 
         .edrd-field {
@@ -356,6 +465,29 @@ export default function EdgarResearchDesk() {
         .edrd-example-btn:hover { border-color: var(--brass-dim); background: var(--surface-raised); }
         .edrd-example-btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 
+        .edrd-example-btn-news {
+          text-align: left;
+          background: var(--surface);
+          border: 1px solid var(--line);
+          color: var(--ink);
+          border-radius: 8px;
+          padding: 11px 14px;
+          font-size: 13px;
+          font-family: inherit;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
+          line-height: 1.45;
+        }
+        .edrd-example-btn-news:hover { border-color: var(--teal-dim); background: var(--surface-raised); }
+        .edrd-example-btn-news:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+        .edrd-example-btn-news .edrd-example-ticker {
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 10.5px;
+          color: var(--teal);
+          letter-spacing: 0.04em;
+          margin-bottom: 2px;
+        }
+
         .edrd-row { display: flex; width: 100%; }
         .edrd-row-user { justify-content: flex-end; }
         .edrd-row-assistant { justify-content: flex-start; }
@@ -379,7 +511,38 @@ export default function EdgarResearchDesk() {
           padding: 16px 18px;
         }
 
+        .edrd-card-news {
+          border-left-color: var(--teal);
+          max-width: 85%;
+        }
+
         .edrd-card-error { border-left-color: var(--brick); max-width: 78%; }
+
+        .edrd-news-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--teal);
+          font-size: 12px;
+          font-weight: 600;
+          margin-bottom: 10px;
+        }
+
+        .edrd-news-ticker {
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 11.5px;
+          letter-spacing: 0.06em;
+        }
+
+        .edrd-assessment {
+          font-size: 13.5px;
+          line-height: 1.7;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          margin: 0;
+          font-family: inherit;
+          color: var(--ink);
+        }
 
         .edrd-answer {
           font-size: 14.5px;
@@ -536,6 +699,22 @@ export default function EdgarResearchDesk() {
           flex-wrap: wrap;
         }
 
+        .edrd-news-inputs {
+          display: flex;
+          gap: 10px;
+          margin-bottom: 10px;
+          align-items: flex-end;
+        }
+
+        .edrd-news-ticker-field input {
+          min-width: 90px;
+          max-width: 100px;
+          text-transform: uppercase;
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 13px;
+          letter-spacing: 0.04em;
+        }
+
         .edrd-input-bar {
           display: flex;
           align-items: flex-end;
@@ -546,6 +725,7 @@ export default function EdgarResearchDesk() {
           padding: 8px 8px 8px 14px;
         }
         .edrd-input-bar:focus-within { border-color: var(--brass-dim); }
+        .edrd-input-bar.is-news:focus-within { border-color: var(--teal-dim); }
 
         .edrd-prompt-glyph {
           color: var(--brass);
@@ -554,6 +734,7 @@ export default function EdgarResearchDesk() {
           padding-bottom: 9px;
           flex-shrink: 0;
         }
+        .edrd-prompt-glyph.is-news { color: var(--teal); }
 
         .edrd-textarea {
           flex: 1;
@@ -584,6 +765,7 @@ export default function EdgarResearchDesk() {
           cursor: pointer;
           transition: opacity 0.15s, transform 0.1s;
         }
+        .edrd-send.is-news { background: var(--teal); }
         .edrd-send:hover:not(:disabled) { opacity: 0.88; }
         .edrd-send:active:not(:disabled) { transform: scale(0.94); }
         .edrd-send:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -601,6 +783,9 @@ export default function EdgarResearchDesk() {
           .edrd-thread { padding: 20px 14px 8px; }
           .edrd-composer { padding: 12px 14px 14px; }
           .edrd-card, .edrd-user-bubble { max-width: 92%; }
+          .edrd-card-news { max-width: 96%; }
+          .edrd-news-inputs { flex-direction: column; gap: 8px; }
+          .edrd-news-ticker-field input { max-width: 100%; min-width: 100%; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -614,14 +799,16 @@ export default function EdgarResearchDesk() {
           <div className="edrd-brand-mark">Edgar Research Desk</div>
           <div className="edrd-brand-sub">grounded Q&amp;A over SEC filings — every claim cited</div>
         </div>
-        <button
-          className="edrd-settings-btn"
-          onClick={() => setShowSettings((s) => !s)}
-          aria-label="Settings"
-          aria-expanded={showSettings}
-        >
-          {showSettings ? <X size={15} /> : <Settings2 size={15} />}
-        </button>
+        <div className="edrd-header-actions">
+          <button
+            className="edrd-settings-btn"
+            onClick={() => setShowSettings((s) => !s)}
+            aria-label="Settings"
+            aria-expanded={showSettings}
+          >
+            {showSettings ? <X size={15} /> : <Settings2 size={15} />}
+          </button>
+        </div>
       </header>
 
       {showSettings && (
@@ -639,8 +826,25 @@ export default function EdgarResearchDesk() {
         </div>
       )}
 
+      <div className="edrd-mode-bar">
+        <button
+          className={"edrd-mode-tab" + (mode === "qa" ? " is-active" : "")}
+          onClick={() => setMode("qa")}
+        >
+          <BookOpen size={13} strokeWidth={2} />
+          Filing Q&A
+        </button>
+        <button
+          className={"edrd-mode-tab" + (mode === "news" ? " is-active-news" : "")}
+          onClick={() => setMode("news")}
+        >
+          <Newspaper size={13} strokeWidth={2} />
+          News Assessment
+        </button>
+      </div>
+
       <div className="edrd-thread" ref={scrollRef}>
-        {messages.length === 0 && (
+        {messages.length === 0 && mode === "qa" && (
           <div className="edrd-empty">
             <div className="edrd-empty-mark">Nothing on the desk yet</div>
             <p className="edrd-empty-sub">
@@ -657,6 +861,32 @@ export default function EdgarResearchDesk() {
           </div>
         )}
 
+        {messages.length === 0 && mode === "news" && (
+          <div className="edrd-empty">
+            <div className="edrd-empty-mark">News assessment desk</div>
+            <p className="edrd-empty-sub">
+              Enter a ticker and news headline to get an assessment grounded in SEC filings
+              and your watchlist thesis. The agent cross-references the news against filing
+              disclosures and returns a verdict.
+            </p>
+            <div className="edrd-examples">
+              {EXAMPLE_NEWS.map((ex) => (
+                <button
+                  key={ex.headline}
+                  className="edrd-example-btn-news"
+                  onClick={() => {
+                    setNewsTicker(ex.ticker);
+                    assessNews(ex.ticker, ex.headline);
+                  }}
+                >
+                  <div className="edrd-example-ticker">{ex.ticker}</div>
+                  {ex.headline}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {messages.map((msg, i) =>
           msg.role === "user" ? (
             <div className="edrd-row edrd-row-user" key={i}>
@@ -664,6 +894,8 @@ export default function EdgarResearchDesk() {
             </div>
           ) : msg.role === "error" ? (
             <ErrorMessage key={i} text={msg.text} onRetry={i === messages.length - 1 ? retry : undefined} />
+          ) : msg.role === "news-assessment" ? (
+            <NewsAssessmentMessage key={i} msg={msg} />
           ) : (
             <AssistantMessage key={i} msg={msg} />
           )
@@ -673,65 +905,88 @@ export default function EdgarResearchDesk() {
           <div className="edrd-row edrd-row-assistant">
             <div className="edrd-thinking">
               <Loader2 size={13} strokeWidth={2.5} />
-              retrieving filings…
+              {mode === "news" ? "assessing news against filings…" : "retrieving filings…"}
             </div>
           </div>
         )}
       </div>
 
       <div className="edrd-composer">
-        <button
-          className={"edrd-filters-toggle" + (showFilters ? " is-open" : "")}
-          onClick={() => setShowFilters((s) => !s)}
-        >
-          <ChevronDown size={11} strokeWidth={2.5} />
-          filters {tickerFilter || filingType ? "· active" : ""}
-        </button>
+        {mode === "qa" && (
+          <>
+            <button
+              className={"edrd-filters-toggle" + (showFilters ? " is-open" : "")}
+              onClick={() => setShowFilters((s) => !s)}
+            >
+              <ChevronDown size={11} strokeWidth={2.5} />
+              filters {tickerFilter || filingType ? "· active" : ""}
+            </button>
 
-        {showFilters && (
-          <div className="edrd-filters-row">
-            <div className="edrd-field">
-              <label htmlFor="edrd-tickers">Tickers</label>
+            {showFilters && (
+              <div className="edrd-filters-row">
+                <div className="edrd-field">
+                  <label htmlFor="edrd-tickers">Tickers</label>
+                  <input
+                    id="edrd-tickers"
+                    type="text"
+                    value={tickerFilter}
+                    onChange={(e) => setTickerFilter(e.target.value)}
+                    placeholder="AAPL, UNH, CAT"
+                  />
+                </div>
+                <div className="edrd-field">
+                  <label htmlFor="edrd-form">Form type</label>
+                  <select id="edrd-form" value={filingType} onChange={(e) => setFilingType(e.target.value)}>
+                    <option value="">Any</option>
+                    <option value="10-K">10-K</option>
+                    <option value="10-Q">10-Q</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {mode === "news" && (
+          <div className="edrd-news-inputs">
+            <div className="edrd-field edrd-news-ticker-field">
+              <label htmlFor="edrd-news-ticker">Ticker</label>
               <input
-                id="edrd-tickers"
+                id="edrd-news-ticker"
                 type="text"
-                value={tickerFilter}
-                onChange={(e) => setTickerFilter(e.target.value)}
-                placeholder="AAPL, UNH, CAT"
+                value={newsTicker}
+                onChange={(e) => setNewsTicker(e.target.value.toUpperCase())}
+                placeholder="AVGO"
               />
-            </div>
-            <div className="edrd-field">
-              <label htmlFor="edrd-form">Form type</label>
-              <select id="edrd-form" value={filingType} onChange={(e) => setFilingType(e.target.value)}>
-                <option value="">Any</option>
-                <option value="10-K">10-K</option>
-                <option value="10-Q">10-Q</option>
-              </select>
             </div>
           </div>
         )}
 
-        <div className="edrd-input-bar">
-          <span className="edrd-prompt-glyph">›</span>
+        <div className={"edrd-input-bar" + (mode === "news" ? " is-news" : "")}>
+          <span className={"edrd-prompt-glyph" + (mode === "news" ? " is-news" : "")}>›</span>
           <textarea
             ref={textareaRef}
             className="edrd-textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about a filing…"
+            placeholder={mode === "news" ? "Enter a news headline…" : "Ask about a filing…"}
             rows={1}
           />
           <button
-            className="edrd-send"
-            onClick={() => ask(input)}
-            disabled={!input.trim() || loading}
-            aria-label="Send question"
+            className={"edrd-send" + (mode === "news" ? " is-news" : "")}
+            onClick={() => mode === "qa" ? ask(input) : assessNews(newsTicker, input)}
+            disabled={mode === "qa" ? !input.trim() || loading : !input.trim() || !newsTicker.trim() || loading}
+            aria-label={mode === "news" ? "Assess news" : "Send question"}
           >
             <Send size={15} strokeWidth={2.25} />
           </button>
         </div>
-        <div className="edrd-hint">Enter to send · Shift+Enter for a new line</div>
+        <div className="edrd-hint">
+          {mode === "news"
+            ? "Enter ticker above, headline below · Enter to assess"
+            : "Enter to send · Shift+Enter for a new line"}
+        </div>
       </div>
     </div>
   );
