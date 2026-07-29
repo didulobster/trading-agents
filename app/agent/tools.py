@@ -41,13 +41,18 @@ TOOLS = [
         "name": "ingest_ticker",
         "description": (
             "Ingest SEC filings for a ticker not in the corpus or lacking "
-            "history. Slow: 30-60s per filing. Call once with limit=3."
+            "history. Slow: 30-60s per filing. Call once with limit=3. "
+            "Defaults to 10-K; set form_type to '10-Q' or '8-K' for others."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "ticker": {"type": "string"},
                 "limit": {"type": "integer"},
+                "form_type": {
+                    "type": "string",
+                    "description": "Filing type to ingest: '10-K', '10-Q', or '8-K'. Default: '10-K'",
+                },
             },
             "required": ["ticker"],
         },
@@ -86,6 +91,20 @@ TOOLS = [
                 "filed_before": {"type": "string", "format": "date"},
             },
             "required": ["ticker", "fiscal_period", "filing_type", "filed_date"],
+        },
+    },
+    {
+        "name": "check_latest_filings",
+        "description": (
+            "Check SEC EDGAR for the latest filings (10-K, 10-Q, 8-K) for a "
+            "ticker and compare with what is already in the corpus. Returns "
+            "which filings are new and not yet ingested. Use this to ensure "
+            "the corpus has the most recent reports before running analysis."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
         },
     },
     {
@@ -180,11 +199,10 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return resp.text
 
         if name == "ingest_ticker":
-            # STEP 2: confirm this route exists, or add it to main.py
-            resp = await http.post(
-                f"{API_BASE}/ingest",
-                json={"ticker": inputs["ticker"], "limit": inputs.get("limit", 3)},
-            )
+            payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit", 3)}
+            if "form_type" in inputs:
+                payload["form_type"] = inputs["form_type"]
+            resp = await http.post(f"{API_BASE}/ingest", json=payload)
             if resp.status_code != 200:
                 return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
 
@@ -210,6 +228,15 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
         if name == "extract_metrics":
             resp = await http.post(f"{API_BASE}/extract", json=inputs)
+            return resp.text
+
+        if name == "check_latest_filings":
+            resp = await http.post(
+                f"{API_BASE}/latest-filings",
+                json={"ticker": inputs["ticker"]},
+            )
+            if resp.status_code != 200:
+                return f"Error from /latest-filings: {resp.status_code} — {resp.text[:500]}"
             return resp.text
 
     return f"Unknown tool: {name}"

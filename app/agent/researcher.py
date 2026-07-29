@@ -37,6 +37,16 @@ AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 WATCHLIST_PATH = Path("watchlist.yaml")
 
+# Pricing per million tokens — add new models as needed
+_MODEL_PRICING = {
+    "claude-haiku-4-5-20251001": {
+        "input": 1.00,
+        "output": 5.00,
+        "cache_write": 1.25,
+        "cache_read": 0.10,
+    },
+}
+
 def _trace(msg: str) -> None:
     """Print to stderr so tool traces don't pollute the memo output."""
     print(msg, file=sys.stderr) 
@@ -99,6 +109,41 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
     out_path.write_text(content)
     return out_path
 
+def _print_usage_summary(
+    total_input: int,
+    total_cache_write: int,
+    total_cache_read: int,
+    total_output: int,
+) -> None:
+    """Print token usage and estimated cost to stderr."""
+    pricing = _MODEL_PRICING.get(AGENT_MODEL)
+    _trace(f"\n{'='*55}")
+    _trace("[usage summary]")
+    _trace(f"  model: {AGENT_MODEL}")
+    if not pricing:
+        _trace(
+            f"  input={total_input:,}  cache_write={total_cache_write:,}  "
+            f"cache_read={total_cache_read:,}  output={total_output:,}"
+        )
+        _trace(f"  (pricing not configured for this model)")
+        _trace(f"{'='*55}")
+        return
+
+    cost_input = total_input * pricing["input"] / 1_000_000
+    cost_cache_write = total_cache_write * pricing["cache_write"] / 1_000_000
+    cost_cache_read = total_cache_read * pricing["cache_read"] / 1_000_000
+    cost_output = total_output * pricing["output"] / 1_000_000
+    total_cost = cost_input + cost_cache_write + cost_cache_read + cost_output
+
+    _trace(f"  input:       {total_input:>9,} tokens  ${cost_input:.4f}")
+    _trace(f"  cache_write: {total_cache_write:>9,} tokens  ${cost_cache_write:.4f}")
+    _trace(f"  cache_read:  {total_cache_read:>9,} tokens  ${cost_cache_read:.4f}")
+    _trace(f"  output:      {total_output:>9,} tokens  ${cost_output:.4f}")
+    _trace(f"  ─────────────────────────────────")
+    _trace(f"  TOTAL COST:  ${total_cost:.4f}")
+    _trace(f"{'='*55}")
+
+
 def _roll_cache_breakpoint(messages: list) -> None:
     """Place a single cache_control breakpoint on the last block of the last
     turn, and strip any stale ones. The cached prefix is tools + system + all
@@ -121,13 +166,25 @@ def _roll_cache_breakpoint(messages: list) -> None:
 
 
 
-async def run_agent(user_task: str, system_prompt: str) -> str:
+class UsageSummary:
+    __slots__ = ("input_tokens", "cache_write_tokens", "cache_read_tokens", "output_tokens")
+
+    def __init__(self) -> None:
+        self.input_tokens = 0
+        self.cache_write_tokens = 0
+        self.cache_read_tokens = 0
+        self.output_tokens = 0
+
+
+async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSummary]:
     """
-    Run the agent loop: send task, process tool calls, return final text.
+    Run the agent loop: send task, process tool calls, return final text
+    and accumulated token usage.
     Tool traces go to stderr; only the final output goes to stdout.
     """
     client = AsyncAnthropic()
     messages = [{"role": "user", "content": user_task}]
+    usage = UsageSummary()
 
     for turn in range(MAX_TURNS):
         _trace(f"\n--- turn {turn + 1} ---")
@@ -146,13 +203,16 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
             messages=messages,
         )
         u = response.usage
+        usage.input_tokens += u.input_tokens
+        usage.cache_write_tokens += u.cache_creation_input_tokens
+        usage.cache_read_tokens += u.cache_read_input_tokens
+        usage.output_tokens += u.output_tokens
         _trace(
             f"  [tokens] in={u.input_tokens} "
             f"cache_write={u.cache_creation_input_tokens} "
             f"cache_read={u.cache_read_input_tokens} out={u.output_tokens}"
         )
 
-        # Print any thinking-out-loud text the model emits alongside tool calls
         for block in response.content:
             if block.type == "text" and block.text.strip():
                 _trace(f"  [agent] {block.text.strip()}")
@@ -162,7 +222,7 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
                 b.text for b in response.content if b.type == "text"
             )
             _trace(f"\n[agent finished after {turn + 1} turns]")
-            return final
+            return final, usage
 
         tool_results = []
         for block in response.content:
@@ -179,7 +239,7 @@ async def run_agent(user_task: str, system_prompt: str) -> str:
         messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
 
-    return "ERROR: hit MAX_TURNS without finishing."
+    return "ERROR: hit MAX_TURNS without finishing.", usage
 
 
 def main() -> None:
@@ -215,13 +275,18 @@ def main() -> None:
     else:
         parser.error("provide a ticker, or use --test")
 
-    result = asyncio.run(run_agent(task, prompt))
+    result, usage = asyncio.run(run_agent(task, prompt))
     print(result)
 
     # Save to file (skip for test mode)
     if mode != "test" and args.ticker:
         path = _save_output(result, args.ticker.upper(), mode)
         _trace(f"\nSaved to {path}")
+
+    _print_usage_summary(
+        usage.input_tokens, usage.cache_write_tokens,
+        usage.cache_read_tokens, usage.output_tokens,
+    )
 
 
 if __name__ == "__main__":
