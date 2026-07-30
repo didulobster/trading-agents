@@ -23,6 +23,9 @@ Rules:
 - Quote numbers exactly as they appear, with the citation. You may compute simple ratios, margins, percentages, and growth rates from figures explicitly stated in the excerpts (e.g., operating margin from operating income ÷ revenue), but never estimate or fabricate figures not present in the context.
 - Be concise, No premable. no "Based on the provided context,
 - If multiple companies are involved, organize the answer by company
+- When computing a ratio or growth rate, state both input values and the
+  periods they come from. Never combine figures from different fiscal
+  periods or different metrics in one calculation.
 """
 
 @dataclass(frozen=True)
@@ -34,7 +37,7 @@ class AnswerWithCitations:
 async def answer_question(
     question: str,
     chunks: list[RetrievedChunk],
-    model: str = "claude-haiku-4-5-20251001",
+    model: str,
     max_tokens: int = 1024,
 ) -> AnswerWithCitations:
     if not chunks:

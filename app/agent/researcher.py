@@ -45,6 +45,12 @@ _MODEL_PRICING = {
         "cache_write": 1.25,
         "cache_read": 0.10,
     },
+    "claude-sonnet-4-5-20250929": {
+        "input": 3.00,
+        "output": 15.00,
+        "cache_write": 3.75,
+        "cache_read": 0.30,
+    },
 }
 
 def _trace(msg: str) -> None:
@@ -239,7 +245,24 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
 
-    return "ERROR: hit MAX_TURNS without finishing.", usage
+    # Budget exhausted — force a memo from whatever was gathered.
+    _trace("\n[MAX_TURNS reached — forcing memo from gathered data]")
+    messages.append({
+        "role": "user",
+        "content": (
+            "You have exhausted your tool-call budget. Write the memo now "
+            "using only data you have already retrieved. For any checklist "
+            "item you could not complete, list it under Data Gaps and note "
+            "that the tool budget was exhausted. Do not call any more tools."
+        ),
+    })
+    response = await client.messages.create(
+        model=AGENT_MODEL,
+        max_tokens=4096,
+        system=system_prompt,
+        messages=messages,
+    )
+    return "".join(b.text for b in response.content if b.type == "text")
 
 
 def main() -> None:
@@ -259,17 +282,18 @@ def main() -> None:
         help='News headline or announcement to assess, e.g. --news "AVGO announces 10B buyback"',
     )
     args = parser.parse_args()
-
+    today = datetime.today().isoformat()
+    task = f"Today's date is {today}. "
     if args.test:
-        task = "Run the test task described in your instructions."
+        task += "Run the test task described in your instructions."
         prompt = STEP1_TEST_PROMPT
     elif args.ticker and args.news:
         ticker = args.ticker.upper()
         prompt = _build_news_prompt(ticker, args.news)
-        task = f"Assess this news for {ticker}:\n\n{args.news}"
+        task += f"Assess this news for {ticker}:\n\n{args.news}"
         mode = "news"
     elif args.ticker:
-        task = f"Run the full research checklist for {args.ticker}."
+        task += f"Run the full research checklist for {args.ticker}."
         prompt = ANALYST_SYSTEM_PROMPT
         mode = "research"
     else:

@@ -1,16 +1,10 @@
 """
 Tool schemas and dispatch for the research agent.
-
-STEP 1 (current): check_corpus / ingest_ticker / ask_edgar / extract_metrics
-return stub data so the orchestration loop can be verified in isolation.
-calculate is fully real.
-
-STEP 2: replace the stub bodies marked `# STEP 2:` with httpx calls to your
-running FastAPI server. Nothing else in this file or researcher.py changes.
 """
 
 import ast
 import operator
+import re
 
 import httpx
 
@@ -180,6 +174,11 @@ async def execute_tool(name: str, inputs: dict) -> str:
 
 async def _dispatch(name: str, inputs: dict) -> str:
     if name == "calculate":
+        err = validate_calculate_inputs(
+            inputs["expression"], inputs.get("inputs", [])
+        )
+        if err:
+            return err
         return safe_calculate(inputs["expression"])
 
     if USE_STUBS:
@@ -194,7 +193,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 f"{API_BASE}/corpus-status", params={"ticker": inputs["ticker"]}
             )
             if resp.status_code != 200:
-                return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
+                return f"Error from /check_corpus: {resp.status_code} — {resp.text[:500]}"
 
             return resp.text
 
@@ -204,7 +203,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 payload["form_type"] = inputs["form_type"]
             resp = await http.post(f"{API_BASE}/ingest", json=payload)
             if resp.status_code != 200:
-                return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
+                return f"Error from /ingest_ticker: {resp.status_code} — {resp.text[:500]}"
 
             return resp.text
 
@@ -228,6 +227,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
         if name == "extract_metrics":
             resp = await http.post(f"{API_BASE}/extract", json=inputs)
+            if resp.status_code != 200:
+                return f"Error from /extract_metrics: {resp.status_code} — {resp.text[:500]}"
             return resp.text
 
         if name == "check_latest_filings":
@@ -258,3 +259,114 @@ def _stub(name: str, inputs: dict) -> str:
     if name == "extract_metrics":
         return "STUB: revenue=63887, gross_margin_pct=68.0, confidence=stated"
     return f"Unknown tool: {name}"
+
+
+# ---------------------------------------------------------------------------
+# 1. Schema — replaces the existing "calculate" entry in TOOLS
+# ---------------------------------------------------------------------------
+
+CALCULATE_TOOL = {
+    "name": "calculate",
+    "description": (
+        "Evaluate a mathematical expression. Use for EVERY ratio, growth "
+        "rate, margin and percentage — never compute one yourself. Each "
+        "numeric literal in the expression must be a figure you retrieved "
+        "verbatim from a filing in this session, and must be declared in "
+        "`inputs` with its fiscal period and source citation. Do not "
+        "reconstruct figures with arithmetic (no 27.6*1000): retrieve the "
+        "exact value instead."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": (
+                    "e.g. '(32667.3 - 28262.9) / 28262.9 * 100'. Every "
+                    "figure must appear exactly as the filing states it."
+                ),
+            },
+            "inputs": {
+                "type": "array",
+                "description": (
+                    "One entry per retrieved figure used in the expression. "
+                    "Scalars that are part of the operation itself (100 for "
+                    "percent, 2 for a square root) do not need declaring."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "number"},
+                        "label": {
+                            "type": "string",
+                            "description": "e.g. 'total net sales'",
+                        },
+                        "fiscal_period": {
+                            "type": "string",
+                            "description": "e.g. 'FY2024'",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "e.g. 'ASML 20-F 2026 §Item 6'",
+                        },
+                    },
+                    "required": ["value", "label", "fiscal_period", "source"],
+                },
+            },
+        },
+        "required": ["expression", "inputs"],
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# 2. Validator — rejects literals the model didn't account for
+# ---------------------------------------------------------------------------
+
+# Scalars that belong to the operation rather than to a filing.
+_OPERATION_SCALARS = {1.0, 2.0, 3.0, 4.0, 12.0, 100.0, 365.0}
+
+# Unit-conversion multipliers — the fingerprint of a remembered figure.
+_UNIT_MULTIPLIERS = {1000.0, 1000000.0, 1_000_000_000.0}
+
+
+def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None:
+    """Return an error message if the expression contains undeclared figures."""
+    literals = {float(m) for m in re.findall(r"\d+\.?\d*(?:[eE][+-]?\d+)?", expression)}
+    declared = {float(i.get("value")) for i in inputs if i.get("value") is not None}
+
+    # Unit multipliers are always a reconstruction signal, declared or not.
+    reconstructed = literals & _UNIT_MULTIPLIERS
+    if reconstructed:
+        return (
+            f"Rejected: expression contains unit-conversion multiplier(s) "
+            f"{sorted(reconstructed)}. A figure retrieved from a filing is a "
+            f"single literal in the filing's own units. Retrieve the exact "
+            f"value and call calculate again."
+        )
+
+    unaccounted = literals - declared - _OPERATION_SCALARS
+    if unaccounted:
+        return (
+            f"Rejected: these numbers appear in the expression but are not "
+            f"declared in `inputs`: {sorted(unaccounted)}. Every figure must "
+            f"be retrieved from a filing and declared with its fiscal period "
+            f"and source."
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 4. Dispatch branch — replaces the existing calculate branch in _dispatch()
+# ---------------------------------------------------------------------------
+#
+#     if name == "calculate":
+#         err = validate_calculate_inputs(
+#             inputs["expression"], inputs.get("inputs", [])
+#         )
+#         if err:
+#             return err          # returned to the model as the tool result
+#         return safe_calculate(inputs["expression"])
+#
+# The rejection message goes back as a normal tool result, so the agent reads
+# it and retries rather than crashing.

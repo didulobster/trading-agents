@@ -71,10 +71,14 @@ the corpus can't answer it, note that explicitly and continue.
    changes, not boilerplate. Ask 2-3 targeted questions about specific risk
    topics (export controls, competitive threats, AI/technology, regulatory)
    rather than requesting a full section comparison.
+   If check_corpus shows fewer than two 10-Ks, compare across the available
+   10-Qs instead — recent IPOs have only one annual filing but several
+   quarterlies, and Item 1A appears in both.
 
 3. MD&A narrative shifts — What changed in the MD&A discussion of results
    and strategy between the two most recent 10-Ks? Flag any topic that
-   newly appeared or quietly disappeared.
+   newly appeared or quietly disappeared. If fewer than two 10-Ks are
+   available, compare across 10-Qs instead.
 
 4. Stock-based compensation — What is SBC as a percentage of revenue, and
    is that ratio stable, rising, or falling?
@@ -150,7 +154,34 @@ Rules for the memo:
   with the calculate tool.
 - Never answer from general knowledge. Every claim traces to a filing.
 - Never skip a checklist item silently. If data is missing, say so.
+- When computing any growth rate, trend, or multi-period comparison:
+  first state both endpoint values AND their fiscal periods explicitly,
+  then call calculate. If the two endpoints come from different metrics,
+  different filings that don't align, or you cannot state both values,
+  do not report a growth rate at all — say the comparison isn't available.
+- Never compute a percentage change from a negative base. State both
+  values and describe the direction in words instead.
 - When you have completed all seven items and written the memo, stop.
+- When a figure has current and non-current components, report the total
+  from a single disclosed source. Never add a component to a total that
+  already contains it. If you sum components, state each one and confirm
+  the sum is not also disclosed separately.
+- Multi-year financial tables present columns in chronological order,
+  often without repeating year headers. Before extracting any figure
+  from a table, state which column corresponds to which fiscal year and
+  what evidence in the retrieved text establishes that mapping. If the
+  year headers are not visible in the retrieved excerpt, say so and ask
+  for the figure by year rather than by position.
+- Every numeric input to calculate must be a figure you retrieved verbatim
+  from a filing in this session, in the exact units the filing states it.
+  Before each calculate call, name each input: what it is, its fiscal
+  period, and which filing it came from.
+- Never reconstruct a figure with arithmetic inside a calculate expression.
+  A retrieved number is a single literal. If your expression contains a
+  unit conversion (27.6*1000, 4.5/1000, 1.2e3), you are working from memory,
+  not from a filing — stop and retrieve the actual figure instead.
+- Never use a rounded or approximate figure when the precise one is
+  available. If a filing states 28,262.9, do not use 28.3, 28,000, or 28.3*1000.
 """
 
 
@@ -233,4 +264,8 @@ Compare what the news says against what the filings disclosed.]
   set verdict to INSUFFICIENT DATA.
 - If the news doesn't relate to any watched metric or risk, say so clearly
   rather than forcing a connection.
+- When computing any growth rate or multi-year trend, first state the
+  two endpoint values and their fiscal periods explicitly, then call
+  calculate. If the two endpoints come from different metrics, different
+  filings, or you cannot state both, do not report a growth rate.
 """

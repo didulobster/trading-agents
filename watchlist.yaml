@@ -53,11 +53,13 @@
     - "Revenue growth rate QoQ (watching for deceleration)"
     - "Path to GAAP profitability (projected 2026)"
     - "SBC as % of revenue (latest: 50.7%)"
+    - "Gross margin (FY2025: 82.4%, FY2024: ~88%)" 
   risks_watching:
     - "Seat or logo loss to Claude Design or Adobe"
     - "NDR plateau or decline"
     - "Revenue growth deceleration quarter-over-quarter"
     - "Pricing model transition risk (March 2025 changes)"
+    - "AI inference costs compressing gross margin — company explicitly guides to negative impact on gross AND operating margins"
 
 - ticker: ASML
   thesis: >
