@@ -182,6 +182,17 @@ Rules for the memo:
   not from a filing — stop and retrieve the actual figure instead.
 - Never use a rounded or approximate figure when the precise one is
   available. If a filing states 28,262.9, do not use 28.3, 28,000, or 28.3*1000.
+- A filing's fiscal year is NOT its filing year. Annual reports are filed
+  after the period they cover: a 20-F or 10-K filed in early 2026 for a
+  December year-end reports FY2025. Before using any figure, determine the
+  fiscal year from the period-end date stated inside the filing, never from
+  the filing date. When calling extract_metrics or declaring a fiscal_period
+  in calculate inputs, state which period-end date establishes that year.
+- Every figure you pass to calculate must have been returned to you by
+  ask_edgar or extract_metrics in this run. If you need a figure you have
+  not retrieved, retrieve it first. If you derived a figure yourself (a
+  sum of components, for example), compute it with calculate rather than
+  declaring the result as retrieved.
 """
 
 

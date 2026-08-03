@@ -28,7 +28,7 @@ from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.agent.tools import TOOLS, execute_tool
+from app.agent.tools import TOOLS, execute_tool, reset_run_provenance
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -188,6 +188,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
     and accumulated token usage.
     Tool traces go to stderr; only the final output goes to stdout.
     """
+    reset_run_provenance()
     client = AsyncAnthropic()
     messages = [{"role": "user", "content": user_task}]
     usage = UsageSummary()

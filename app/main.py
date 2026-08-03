@@ -9,12 +9,15 @@ from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.application.citation_verifier import verify_and_log
 from app.application.citations import format_citation_tag
 from app.application.embedding_service import EmbeddingService
 from app.application.extraction_service import FinancialMetrics, MetricsExtractor
 from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
+from app.application.citations import format_citation_tag
+
 from app.infrastructure.edgar.client import EdgarClient
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.queries.corpus_status import CorpusStatusQuery
@@ -146,7 +149,9 @@ async def ask(req: AskRequest) -> AskResponse:
         chunks=chunks,
         model=claude_model)
 
-    from app.application.citations import format_citation_tag
+    verify_and_log(result.answer, 
+    {c.chunk.id: c.chunk.content for c in chunks})
+
     return AskResponse(
         answer=result.answer,
         citations=result.citations,

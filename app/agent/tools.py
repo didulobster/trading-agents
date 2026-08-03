@@ -104,15 +104,46 @@ TOOLS = [
     {
         "name": "calculate",
         "description": (
-            "Evaluate a mathematical expression. Use for every ratio, growth "
-            "rate, and percentage — never compute these yourself."
+            "Evaluate a mathematical expression. Use for EVERY ratio, growth "
+            "rate, margin and percentage — never compute one yourself. Each "
+            "numeric literal in the expression must be a figure you retrieved "
+            "verbatim from a filing in this session, and must be declared in "
+            "`inputs` with its fiscal period and source citation. Do not "
+            "reconstruct figures with arithmetic (no 27.6*1000): retrieve the "
+            "exact value instead."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {"expression": {"type": "string"}},
-            "required": ["expression"],
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": (
+                        "e.g. '(32667.3 - 28262.9) / 28262.9 * 100'. Every "
+                        "figure must appear exactly as the filing states it."
+                    ),
+                },
+                "inputs": {
+                    "type": "array",
+                    "description": (
+                        "One entry per retrieved figure used in the expression. "
+                        "Scalars that are part of the operation itself (100 for "
+                        "percent, 2 for a square root) do not need declaring."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "value": {"type": "number"},
+                            "label": {"type": "string", "description": "e.g. 'total net sales'"},
+                            "fiscal_period": {"type": "string", "description": "e.g. 'FY2024'"},
+                            "source": {"type": "string", "description": "e.g. 'ASML 20-F 2026 §Item 6'"},
+                        },
+                        "required": ["value", "label", "fiscal_period", "source"],
+                    },
+                },
+            },
+            "required": ["expression", "inputs"],
         },
-    },
+    }
 ]
 
 
@@ -260,65 +291,6 @@ def _stub(name: str, inputs: dict) -> str:
         return "STUB: revenue=63887, gross_margin_pct=68.0, confidence=stated"
     return f"Unknown tool: {name}"
 
-
-# ---------------------------------------------------------------------------
-# 1. Schema — replaces the existing "calculate" entry in TOOLS
-# ---------------------------------------------------------------------------
-
-CALCULATE_TOOL = {
-    "name": "calculate",
-    "description": (
-        "Evaluate a mathematical expression. Use for EVERY ratio, growth "
-        "rate, margin and percentage — never compute one yourself. Each "
-        "numeric literal in the expression must be a figure you retrieved "
-        "verbatim from a filing in this session, and must be declared in "
-        "`inputs` with its fiscal period and source citation. Do not "
-        "reconstruct figures with arithmetic (no 27.6*1000): retrieve the "
-        "exact value instead."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "expression": {
-                "type": "string",
-                "description": (
-                    "e.g. '(32667.3 - 28262.9) / 28262.9 * 100'. Every "
-                    "figure must appear exactly as the filing states it."
-                ),
-            },
-            "inputs": {
-                "type": "array",
-                "description": (
-                    "One entry per retrieved figure used in the expression. "
-                    "Scalars that are part of the operation itself (100 for "
-                    "percent, 2 for a square root) do not need declaring."
-                ),
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "value": {"type": "number"},
-                        "label": {
-                            "type": "string",
-                            "description": "e.g. 'total net sales'",
-                        },
-                        "fiscal_period": {
-                            "type": "string",
-                            "description": "e.g. 'FY2024'",
-                        },
-                        "source": {
-                            "type": "string",
-                            "description": "e.g. 'ASML 20-F 2026 §Item 6'",
-                        },
-                    },
-                    "required": ["value", "label", "fiscal_period", "source"],
-                },
-            },
-        },
-        "required": ["expression", "inputs"],
-    },
-}
-
-
 # ---------------------------------------------------------------------------
 # 2. Validator — rejects literals the model didn't account for
 # ---------------------------------------------------------------------------
@@ -331,11 +303,20 @@ _UNIT_MULTIPLIERS = {1000.0, 1000000.0, 1_000_000_000.0}
 
 
 def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None:
-    """Return an error message if the expression contains undeclared figures."""
-    literals = {float(m) for m in re.findall(r"\d+\.?\d*(?:[eE][+-]?\d+)?", expression)}
-    declared = {float(i.get("value")) for i in inputs if i.get("value") is not None}
-
-    # Unit multipliers are always a reconstruction signal, declared or not.
+    """
+    Three checks, in order of how cheaply they fail:
+      1. no unit-conversion multipliers (fingerprint of a remembered figure)
+      2. every literal in the expression is declared in `inputs`
+      3. every declared input actually appeared in some tool output this run
+    """
+    literals = {
+        float(m) for m in re.findall(r"\d+\.?\d*(?:[eE][+-]?\d+)?", expression)
+    }
+    declared = {
+        float(i["value"]) for i in inputs if i.get("value") is not None
+    }
+ 
+    # 1 — reconstruction fingerprint
     reconstructed = literals & _UNIT_MULTIPLIERS
     if reconstructed:
         return (
@@ -344,7 +325,8 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"single literal in the filing's own units. Retrieve the exact "
             f"value and call calculate again."
         )
-
+ 
+    # 2 — undeclared literals
     unaccounted = literals - declared - _OPERATION_SCALARS
     if unaccounted:
         return (
@@ -353,20 +335,78 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"be retrieved from a filing and declared with its fiscal period "
             f"and source."
         )
+ 
+    # 3 — declared but never returned by any tool
+    corpus = _provenance_corpus()
+    if corpus:
+        unsourced = [
+            i for i in inputs
+            if i.get("value") is not None
+            and float(i["value"]) not in _OPERATION_SCALARS
+            and not _appears_in_output(float(i["value"]), corpus)
+        ]
+        if unsourced:
+            detail = "; ".join(
+                f"{i['value']} ({i.get('label', 'unlabelled')})"
+                for i in unsourced
+            )
+            return (
+                f"Rejected: no tool returned these figures during this run: "
+                f"{detail}. You cited a source for them, but the value never "
+                f"appeared in any ask_edgar or extract_metrics result. Either "
+                f"retrieve the figure first, or — if you derived it yourself — "
+                f"show the derivation as a separate calculate call using only "
+                f"retrieved figures."
+            )
+ 
     return None
 
+# ---------------------------------------------------------------------------
+# Run-scoped store of everything the tools have returned.
+#
+# Module-level, which assumes one agent run per process — true for the CLI.
+# If you ever run concurrent agents in one process, make this a context
+# object passed through execute_tool instead.
+# ---------------------------------------------------------------------------
+ 
+_RETRIEVED_TEXT: list[str] = []
+ 
+ 
+def reset_run_provenance() -> None:
+    """Call once at the start of each agent run."""
+    _RETRIEVED_TEXT.clear()
+ 
+ 
+def record_tool_output(text: str) -> None:
+    """Record a tool result so its figures count as retrieved."""
+    if text:
+        _RETRIEVED_TEXT.append(text)
+ 
+ 
+def _provenance_corpus() -> str:
+    return "\n".join(_RETRIEVED_TEXT)
 
 # ---------------------------------------------------------------------------
-# 4. Dispatch branch — replaces the existing calculate branch in _dispatch()
+# Number matching — a tool returns "€11,384.0 million"; calculate gets 11384.0
 # ---------------------------------------------------------------------------
-#
-#     if name == "calculate":
-#         err = validate_calculate_inputs(
-#             inputs["expression"], inputs.get("inputs", [])
-#         )
-#         if err:
-#             return err          # returned to the model as the tool result
-#         return safe_calculate(inputs["expression"])
-#
-# The rejection message goes back as a normal tool result, so the agent reads
-# it and retries rather than crashing.
+ 
+def _variants(value: float) -> set[str]:
+    """String forms a tool output might use for this value."""
+    out: set[str] = set()
+    if value == int(value):
+        n = int(value)
+        out.update({str(n), f"{n:,}"})
+        # a tool may render a whole number with one decimal
+        out.update({f"{n}.0", f"{n:,}.0"})
+    else:
+        out.update({
+            f"{value}", f"{value:,}",
+            f"{value:.1f}", f"{value:,.1f}",
+            f"{value:.2f}", f"{value:,.2f}",
+        })
+    return out
+ 
+ 
+def _appears_in_output(value: float, corpus: str) -> bool:
+    return any(v in corpus for v in _variants(value))
+ 
