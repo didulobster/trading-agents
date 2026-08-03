@@ -5,6 +5,7 @@ Tool schemas and dispatch for the research agent.
 import ast
 import operator
 import re
+import sys
 
 import httpx
 
@@ -197,9 +198,21 @@ USE_STUBS = False
 async def execute_tool(name: str, inputs: dict) -> str:
     print(f"  [tool call] {name}({inputs})")
     result = await _dispatch(name, inputs)
+
+    # Feed tool output into the provenance corpus so calculate() can verify
+    # its inputs were actually retrieved. Exclusions:
+    #   - calculate itself: computed results must not count as retrieved,
+    #     or derived figures launder themselves one call at a time
+    #   - the verifier's warning block: a flagged figure appears inside the
+    #     answer text, and recording it would make the fabrication count
+    #     as "returned by a tool" for later calculate calls
+    if name != "calculate":
+        clean = result.split("WARNING — these figures")[0]
+        record_tool_output(clean)
+
     # Truncate noisy results in the console; the model still gets the full text
     preview = result if len(result) < 300 else result[:300] + " …"
-    print(f"  [tool result] {preview}")
+    print(f"  [tool result] {preview}", file=sys.stderr)
     return result
 
 
@@ -254,7 +267,15 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 f"  [{c['citation']}] sim={c['similarity']:.3f}"
                 for c in data.get("chunks", [])
             )
-            return f"{data['answer']}\n\nSources:\n{citations}"
+            out = f"{data['answer']}\n\nSources:\n{citations}"
+            if data.get("unverified"):
+                out += (
+                    f"\n\nWARNING — these figures in the above answer do not "
+                    f"appear in any retrieved filing chunk: "
+                    f"{data['unverified']}. Do not use them in the memo or in "
+                    f"calculate inputs without re-retrieving them first."
+                )
+            return out
 
         if name == "extract_metrics":
             resp = await http.post(f"{API_BASE}/extract", json=inputs)

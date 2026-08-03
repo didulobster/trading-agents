@@ -84,6 +84,7 @@ class RetrievedChunkResponse(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     citations: list[str]
+    unverified: list[str] = []
     chunks: list[RetrievedChunkResponse]
 
 class ExtractRequest(BaseModel):
@@ -149,12 +150,16 @@ async def ask(req: AskRequest) -> AskResponse:
         chunks=chunks,
         model=claude_model)
 
-    verify_and_log(result.answer, 
-    {c.chunk.id: c.chunk.content for c in chunks})
+    report =verify_and_log(
+        result.answer,
+        {c.chunk.id: c.chunk.content for c in chunks},
+        context_label=req.question[:60],
+    )
 
     return AskResponse(
         answer=result.answer,
         citations=result.citations,
+        unverified=[f.value for f in report.unverified], 
         chunks=[
             RetrievedChunkResponse(
                 citation=format_citation_tag(c),

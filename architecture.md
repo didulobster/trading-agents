@@ -53,11 +53,24 @@ The codebase follows a clean architecture / DDD-style layering:
   | FY2024 non-current debt €4,631.5M | €3,677.3M | read the 2023 column |
 Each was individually plausible and internally consistent. Detection required reconciling against the underlying chunk text by SQL. Partially mitigated by an agent prompt rule requiring the model to state which column maps to which fiscal year before extracting; the rule reduced but did not eliminate occurrences.
 
-- Citation verification is not implemented, and confirmed failures now exist. The system does not programmatically check whether a cited chunk literally contains the claimed text or figures. The originally suspected case (UNH Optum Rx revenue) was disproven — traced to truncated preview display. But Phase 4 agent dogfooding produced three confirmed fabrications that citation verification would have caught:
-Invented figure. An ASML memo reported SBC of €345.8M for one fiscal year, cited to extract_metrics, at 1.22% of revenue. The verified series is €134.8M / €172.6M / €202.3M. The figure appears in no chunk and reconciles to nothing; an entire "spike warrants monitoring" narrative was built on it.
-Invented textual difference. A memo claimed a contingency disclosure shifted from "reasonably probable" to "reasonably possible" across two filings and flagged it for follow-up. "Reasonably possible" is the standard accounting term; both filings use it.
-Invented causation. A memo attributed a debt increase to "new issuance of Eurobonds to fund capex." Debt had in fact declined, because a bond matured.
-This moves verification from theoretical safety net to the highest-value unbuilt component. A verifier need only assert that every numeric literal and quoted string in an answer appears in at least one retrieved chunk — cheap to implement, and it catches all three cases above.
+- **Citation verification is implemented** (`citation_verifier.py`), wired
+  into `/ask` and surfaced to the agent. Every numeric literal and quoted
+  string (≥4 words) in an answer is checked against the retrieved chunks;
+  figures produced by the `calculate` tool are exempted via the run's
+  calculate log rather than flagged as fabrications. Unverified findings
+  return in `AskResponse.unverified`, and the agent's `ask_edgar` tool
+  appends them as an explicit warning ("do not use them in the memo or in
+  calculate inputs without re-retrieving") so detection happens mid-run,
+  not in a log read afterwards.
+  Confirmed catches before implementation: an invented SBC figure
+  (€345.8M against a real series of €134.8/172.6/202.3M), an invented
+  quotation ("reasonably probable" where both filings say "reasonably
+  possible"), and — indirectly — the invented prose figures that recurred
+  after the calculate path was closed (€428M SBC, €27,600M revenue).
+  Named non-goals: the verifier answers "does this literal exist in the
+  source material," not "is this claim true." It cannot catch fabricated
+  causation (no literal to check) or a real figure attributed to the wrong
+  fiscal year (the number exists; the label is wrong).
 
 - **Known: Incorporation-by-reference filers**
 IBM files a shell 10-K where Item 7 (MD&A), Item 7A, and Item 8 
@@ -348,14 +361,18 @@ retries within the run.
   financing activity and cannot affect FCF) or "new Eurobond issuance"
   explaining a debt increase that did not occur. Fabricated causation is
   more persuasive than a bare wrong number because it explains itself.
-- **Retrieval is non-deterministic across runs.** Repeated runs against a
-  static corpus retrieve different subsets of the available facts. Observed:
-  a material OFAC enforcement disclosure present in run 1, absent in runs
-  2-3, present in run 4; FY2025 FCF retrieved in three runs and reported
-  "data unavailable" in a fourth; revolving-credit-facility terms present,
-  absent, then present again. Neither memo in a given pair is uniformly
-  better — they fail on different line items. **This, not model capability,
-  is currently the binding constraint on memo reliability.**
+- **Retrieval remains non-deterministic across runs.** — repeated runs against
+  a static corpus still retrieve different subsets of the available facts,
+  and some items (ASML backlog/bookings) sit outside the ingested 20-F
+  items entirely. But with the verification chain in place, a retrieval
+  miss now degrades to an honest data gap in the memo rather than an
+  invented figure filling the hole. The final validation run reported
+  unretrievable figures as "queries returned figures that could not be
+  verified against retrieved chunks" — the pipeline describing its own
+  limits accurately. Non-determinism is now a completeness cost, not a
+  correctness cost.
+
+
 ## Additional Limitations
  
 - **Parser changes do not retroactively fix ingested filings.** `_parse`
@@ -403,4 +420,100 @@ accumulating it in the same tracker. Embedding costs are not tracked at all.
 default), and metric extraction (`extraction_service`). These have
 disagreed in practice, which makes both cost attribution and quality
 attribution unreliable until they are set deliberately.
+
+
+---
+ 
+# PART 2 — NEW SECTION
+ 
+## The verification chain (replaces "The `calculate` guard")
+ 
+The agent's numeric reliability was reached through six iterations, each
+closing a channel and relocating the failure to a narrower one. The
+sequence matters more than the destination, so it is documented as an arc.
+ 
+### The arc
+ 
+| Iteration | Failure observed | Fix applied | Where the failure moved |
+|---|---|---|---|
+| 1 | Growth rates asserted from memory (18.4% YoY that matched no endpoints) | Prose rule: state both endpoints, then call calculate | Inputs to calculate |
+| 2 | `calculate("(32667.3 - 27.6*1000) / (27.6*1000) * 100")` — a rounded recollection, wrong year besides, laundered through the tool | Schema change: `calculate` requires an `inputs` array declaring each figure's value, label, fiscal period, and source; validator rejects undeclared literals and unit-conversion multipliers (`27.6*1000` is the syntactic fingerprint of a remembered figure — a retrieved value never needs multiplication to reach its own units) | The declarations themselves |
+| 3 | Fabricated inputs with plausible citations: `{"value": 7787.6, "source": "ASML 20-F 2026 Item 6"}` where the real figure is 8,193.0. Four segment-margin calls each paired a genuinely retrieved cost with an invented revenue | Run-scoped provenance: every non-calculate tool output is recorded; a third validator check rejects any declared input that no tool returned during the run | Prose |
+| 4 | Figures asserted in narrative, bypassing calculate entirely: "FY2024 SBC was €428M" two sentences from the correct €172.6M; the original €27,600M returned as prose | Citation verifier on `/ask` answers, findings surfaced to the agent as in-band warnings | (closed) |
+ 
+Interim states also produced: fiscal years labelled by filing year
+(a 20-F filed February 2026 labelled FY2026 when it reports FY2025),
+a component added to a total already containing it (€4,374.5M + €1,694.8M
+current portion = a reported €6,069.3M), and principal-vs-carrying
+confusion on the same debt figure. Each got a targeted prompt rule.
+ 
+### Validation
+ 
+The post-chain run (ASML, `docs/memos/ASML-20260802-*.md`) was audited
+figure-by-figure: **19 of 19 derived values exact, zero fabrications.**
+Every failure class from prior runs was individually resolved — correct
+FY2023 revenue (27,558.5, not 27,600), correct SBC series and the correct
+"modest rise" conclusion where a prior run reported a "material decline"
+from an invented base, an explicit refusal to produce segment margins for
+a single-segment filer where a prior run fabricated a four-cell table,
+debt built from carrying amount with the components named, and no invented
+causation anywhere. Unretrievable figures were reported as data gaps in
+the memo's own words: "queries returned figures that could not be
+verified against retrieved chunks."
+ 
+### Findings
+ 
+1. **Prose rules were followed procedurally and circumvented four
+   consecutive times.** The rule requiring both endpoints stated before
+   computing was satisfied in prose immediately above an expression using
+   neither endpoint. Instructions constrain the form of compliance, not
+   its substance.
+2. **A calculator launders invented inputs into tool-authorized outputs.**
+   The tool returns the correct answer to the wrong question, and the
+   result carries the apparent authority of a tool call — more persuasive
+   than a bare hallucinated figure, because it looks verified.
+3. **Declaration is not provenance.** Requiring a source citation per
+   input produced fabricated figures with plausible citations. The check
+   that held was mechanical: the value must have literally appeared in a
+   tool output this run.
+4. **Structural constraints held where instructions did not.** The two
+   fixes that stuck were a schema change (the model cannot omit the
+   `inputs` array) and a corpus check (the validator, not the model,
+   decides whether a figure was retrieved). Both are enforced outside the
+   model's discretion.
+5. **When the numeric substrate is fully constrained, confabulated
+   reasoning largely disappears with it.** Fabricated causation ("new
+   Eurobond issuance", "the IPO drove FCF") had accompanied fabricated
+   numbers; the clean run contained neither. The mechanism is plausible —
+   invented explanations existed to explain invented figures — but one
+   run is one run; treated as an observation, not a law.
+### Layers, as implemented
+ 
+```
+answer_question (llm.py)
+  └─ grounding prompt: cite everything, arithmetic on in-context figures only
+/ask (main.py)
+  └─ citation_verifier: literals + quotes vs retrieved chunks,
+     calculate results exempt; unverified → AskResponse.unverified
+agent tools (tools.py)
+  ├─ ask_edgar: appends in-band WARNING for unverified figures
+  ├─ record_tool_output: run-scoped provenance corpus
+  │    (calculate results and verifier warnings excluded — computed
+  │     figures must not count as retrieved, and flagged figures must
+  │     not re-enter through the corpus)
+  └─ calculate: schema-required inputs[] →
+       reject unit multipliers → reject undeclared literals →
+       reject inputs absent from provenance corpus
+agent loop (researcher.py)
+  └─ reset_run_provenance() per run; MAX_TURNS exhaustion forces a
+     memo from gathered data (final call issued without tools=)
+```
+ 
+### Residual limits, named
+ 
+- **Fabricated reasoning has no mechanical check.** A causal claim with no literal to verify passes every layer. Observed to co-occur with fabricated numbers and to disappear when they did, but not prevented.
+- **Wrong-period attribution of a real figure passes.** The verifier confirms existence, not labelling. Mitigated by prompt rules (period-end date establishes fiscal year), not enforced.
+- **The provenance corpus trusts tool outputs.** A figure that `answer_question` itself misstates enters the corpus as "retrieved." The chain verifies the agent against the tools, and the tools against the chunks, but the second link runs only where the citation verifier is wired — `/ask` — not `extract_metrics`.
+- **Operating envelope** stated for users of the output: retrieved and cited figures are reliable; computed figures are reliable when produced by calculate; period labels and causal explanations warrant a
+spot-check.
  
