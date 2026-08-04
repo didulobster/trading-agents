@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 WATCHLIST_PATH = Path("watchlist.yaml")
+MEMO_DIR = os.environ["MEMO_DIR"]
 
 # Pricing per million tokens — add new models as needed
 _MODEL_PRICING = {
@@ -104,13 +105,13 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
     return prompt
 
 def _save_output(content: str, ticker: str, mode: str) -> Path:
-    """Save output to docs/memos/ with timestamp. Returns the path."""
+    """Save output to Obsidian vault with timestamp. Returns the path."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if mode == "news":
         filename = f"{ticker}-news-{timestamp}.md"
     else:
         filename = f"{ticker}-{timestamp}.md"
-    out_path = Path(f"docs/memos/{filename}")
+    out_path = Path.home() / MEMO_DIR / ticker / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
     return out_path
