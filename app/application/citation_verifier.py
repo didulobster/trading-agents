@@ -18,11 +18,9 @@ mechanically decidable.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # What we pull out of an answer
@@ -117,11 +115,10 @@ def _should_skip_number(raw: str, context: str) -> bool:
     if _YEAR_RE.match(bare):
         return True
 
-    # Citation tags and section references: [ACN 10-K 2025 §Item 7], Item 1A
-    if re.search(r"§\s*Item|Item\s+\d|\bFY\d{4}|10-[KQ]|20-F", context):
-        # only skip if the number is part of that reference
-        if bare in re.sub(r"[^\d]", " ", context.split("§")[-1] if "§" in context else context):
-            return True
+    # Section references: "Item 1A", "Item 7". Only the section number
+    # itself is skipped — not every number that happens to sit near one.
+    if re.search(rf"Item\s+{re.escape(raw)}\b", context):
+        return True
 
     try:
         val = float(bare)
@@ -224,27 +221,4 @@ def verify_answer(
         f = Finding("quote", quoted[:70], context, hit)
         (report.verified if hit is not None else report.unverified).append(f)
 
-    return report
-
-def verify_and_log(
-    answer: str,
-    chunk_texts: dict[int, str],
-    computed_values: list[float] | None = None,
-    context_label: str = "",
-) -> VerificationReport:
-    """verify_answer() plus a log line when anything is unverified.
-
-    Logs at WARNING when unverified findings exist, DEBUG otherwise, so
-    a clean answer costs nothing at normal log levels.
-    """
-    report = verify_answer(answer, chunk_texts, computed_values)
-    prefix = f"[{context_label}] " if context_label else ""
-
-    if report.unverified:
-        logger.warning("%s%s", prefix, report.summary())
-    else:
-        logger.debug(
-            "%sCitation check clean: %d verified, %d skipped",
-            prefix, len(report.verified), len(report.skipped),
-        )
     return report

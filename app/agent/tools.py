@@ -9,6 +9,7 @@ import sys
 
 import httpx
 
+
 # Base URL of your running FastAPI server. Override when you wire step 2.
 API_BASE = "http://localhost:8000"
 HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
@@ -223,7 +224,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
         )
         if err:
             return err
-        return safe_calculate(inputs["expression"])
+        result = safe_calculate(inputs["expression"])
+        record_calc_result(result)
+        return result
 
     if USE_STUBS:
         return _stub(name, inputs)
@@ -391,13 +394,25 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
 # ---------------------------------------------------------------------------
  
 _RETRIEVED_TEXT: list[str] = []
- 
+_CALC_RESULTS: list[float] = []
  
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
     _RETRIEVED_TEXT.clear()
+    _CALC_RESULTS.clear()
  
- 
+def record_calc_result(value: str | float) -> None:
+    try:
+        _CALC_RESULTS.append(float(value))
+    except (TypeError, ValueError):
+        pass
+
+def get_calc_results() -> list[float]:
+    return list(_CALC_RESULTS)
+
+def get_provenance_corpus() -> str:
+    return "\n".join(_RETRIEVED_TEXT)
+
 def record_tool_output(text: str) -> None:
     """Record a tool result so its figures count as retrieved."""
     if text:
