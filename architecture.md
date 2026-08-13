@@ -19,7 +19,7 @@ The codebase follows a clean architecture / DDD-style layering:
 | LLM (answer generation) | Anthropic Claude | Strong grounded-reasoning behavior; isolated behind a service for swap-out |
 | Embeddings | OpenAI `text-embedding-3-small` | Best-in-class quality/cost; mixed providers were a deliberate choice over single-vendor lock-in |
 | Database + vector store | PostgreSQL + pgvector | Single store for relational + vector data — one backup story, one failure surface, joinable with structured metadata for pre-filtered retrieval. Revisit if recall at scale becomes a bottleneck |
-| ORM/driver | SQLAlchemy 2.0 + asyncpg / psycopg async pool | Async end-to-end matches the FastAPI runtime |
+| ORM/driver | psycopg 3 + psycopg_pool | Direct async SQL with no ORM layer — async end-to-end matches the FastAPI runtime |
 | Migrations | Alembic | Versioned, reversible migrations from day one — no "how is the schema reproducible?" question for the life of the project |
 | HTML parsing | BeautifulSoup4 + lxml (custom parser) | Initially used `edgartools` but encountered breaking API changes between versions and limited control over section boundaries; rebuilt as ~200 lines of focused parsing code with no external library risk |
 | Tokenization | tiktoken (cl100k_base) | Matches OpenAI embedding model tokenization for accurate chunk-size budgeting |
@@ -97,7 +97,7 @@ pagination is implemented.
 **Filing state machine** (`domain/values.py`, `domain/filing.py`):
 
 ```
-DISCOVERED -> DOWNLOADED -> PARSED -> CHUNKED -> EMBEDDED
+DISCOVERED -> DOWNLOADED -> PARSED -> CHUNKED -> EMBEDDED -> METRICS_EXTRACTED
                    \------------------------------> FAILED (resettable to DISCOVERED)
 ```
 
@@ -112,7 +112,7 @@ This makes ingestion resumable — each phase only processes filings sitting at 
 
 ## Database Schema
 
-PostgreSQL 16 + pgvector. Five tables mirror the domain entities 1:1, with `chunks` denormalizing parent metadata for retrieval performance:
+PostgreSQL 16 + pgvector. Five tables mirror the domain entities 1:1, with `chunks` denormalizing parent metadata for retrieval performance. A sixth table (`financial_metrics`) stores LLM-extracted figures per ticker/period for trend queries:
 
 ```
 listed_securities (cik UNIQUE, ticker UNIQUE, exchange, name)
@@ -125,6 +125,12 @@ sections (document_id FK, section_path TEXT[], order, content)
         │ 1:N
 chunks (section_id FK, content, chunk_index, token_count, embedding vector(1536),
         ticker, filed_date, filing_type, section_path TEXT[])  -- denormalized for pre-filtering
+
+financial_metrics (ticker, fiscal_period, filing_type, filed_date,
+                   revenue, gross_margin_pct, gaap_net_income, free_cash_flow,
+                   sbc_pct_of_revenue, net_dollar_retention, extraction_confidence,
+                   source_citations JSONB, extracted_at,
+                   UNIQUE(ticker, filing_type, fiscal_period))
 ```
 
 Indexes:
@@ -176,6 +182,20 @@ tests that exercise the same wrong path.
 | SEC EDGAR (`data.sec.gov`, `www.sec.gov`) | Filing discovery + HTML download | `User-Agent` header (`EDGAR_USER_AGENT`) |
 | OpenAI | Embeddings (`text-embedding-3-small`) | `OPENAI_API_KEY` |
 | Anthropic | Answer generation (Claude) | `ANTHROPIC_API_KEY` |
+
+
+## HTTP API
+
+FastAPI server (`main.py`). All endpoints are JSON; the agent's tool layer (`tools.py`) calls these over HTTP.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/ask` | POST | Grounded Q&A — decompose, hybrid-retrieve, answer with citations, verify. Detailed flow in [Query Pipeline](#query-pipeline-post-ask) |
+| `/extract` | POST | Extract structured financial metrics (revenue, gross margin, FCF, SBC%, NDR) for one ticker/period. Persists to `financial_metrics` table |
+| `/ingest` | POST | Run the full ingestion pipeline for one ticker (discover → download → parse → chunk → embed) |
+| `/latest-filings` | POST | Check SEC EDGAR for a ticker's recent filings and compare against what is already in the corpus |
+| `/corpus-status` | GET | Cross-check filing status against chunk/embedding counts. Same logic as the CLI command |
+| `/news-assess` | POST | Run the research agent in news-assessment mode — cross-reference a headline against the watchlist thesis and filing corpus, return a verdict |
 
 
 ## Evaluation
@@ -303,9 +323,15 @@ for cross-section questions, one comparison per question.
 `watchlist.yaml` (thesis, key metrics, watched risks per ticker) and the
 filing corpus, returning a verdict (CONFIRMS / CONTRADICTS / NEUTRAL /
 INSUFFICIENT DATA) plus a suggested action.
+
+**Watchlist** (`watchlist.yaml`). Per-ticker investment context used by
+the news-assessment mode. Each entry has `ticker`, `thesis` (free-text
+investment case), `key_metrics` (list of named metrics with recent
+values), and `risks_watching` (list of risk items to monitor). The agent
+builds the news-assessment prompt from the matching entry; tickers not in
+the watchlist get a generic framing.
  
-**Output separation.** Tool traces to stderr, memo to stdout, auto-saved to
-`docs/memos/{TICKER}-{timestamp}.md`. `2>/dev/null` yields a clean memo.
+**Output separation.** Tool traces to stderr, memo to stdout. `2>/dev/null` yields a clean memo.
  
 **Validated against manual dogfooding.** On AVGO the agent independently
 reproduced 7 of 10 manual findings and surfaced 2 the manual pass missed
@@ -505,8 +531,12 @@ agent tools (tools.py)
        reject unit multipliers → reject undeclared literals →
        reject inputs absent from provenance corpus
 agent loop (researcher.py)
-  └─ reset_run_provenance() per run; MAX_TURNS exhaustion forces a
-     memo from gathered data (final call issued without tools=)
+  ├─ reset_run_provenance() per run; MAX_TURNS exhaustion forces a
+  │    memo from gathered data (final call issued without tools=)
+  └─ memo_verifier: re-runs citation_verifier over the final memo text
+       against the full provenance corpus; appends an "Unverified Figures
+       and Quotations" section to the memo for any figure that no tool
+       returned during the run
 ```
  
 ### Residual limits, named

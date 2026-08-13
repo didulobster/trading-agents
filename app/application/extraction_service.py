@@ -51,7 +51,7 @@ class MetricsExtractor:
             max_tokens=1024,
             tools=[{
                 "name": "record_metrics",
-                "input_schema": FinancialMetrics.model_json_schema(),
+                "input_schema": ExtractedFigures.model_json_schema(),
             }],
             tool_choice={"type": "tool", "name": "record_metrics"},
             messages=[{
@@ -64,8 +64,52 @@ class MetricsExtractor:
                 - If not present in the excerpts, return null and confidence = "not_disclosed" — never estimate from general knowledge
                 - Never mix time periods when computing a metric
                 - Return all dollar amounts in millions (e.g., $333,439 thousand = 333.4 million)
+                - Never derive a figure from a rounded narrative amount. "$1.4 billion" in prose is not a usable input; use only the exact figures in the financial statements and notes.
+                - When a component breakout sums to a total, use that sum. Do not substitute a rounded figure from elsewhere in the filing.
+                - Show the exact values you divided in `reasoning`.
+                - Report gross profit and total stock-based compensation expense as dollar amounts in millions. Do not compute margins or percentages — those are calculated downstream.
                 Excerpts:
                 {context}"""
                             }])
         tool_call = next(b for b in response.content if b.type == "tool_use")
-        return FinancialMetrics.model_validate(tool_call.input)
+        figures = ExtractedFigures.model_validate(tool_call.input)
+
+        return FinancialMetrics(
+            revenue=figures.revenue,
+            gross_margin_pct=_ratio(figures.gross_profit, figures.revenue),
+            gaap_net_income=figures.gaap_net_income,
+            free_cash_flow=figures.free_cash_flow,
+            sbc_pct_of_revenue=_ratio(figures.sbc_expense, figures.revenue),
+            net_dollar_retention=figures.net_dollar_retention,
+            extraction_confidence=figures.extraction_confidence,
+            reasoning=figures.reasoning,
+        )
+
+class ExtractedFigures(BaseModel):
+    """What the LLM fills in. Figures only — no ratios."""
+    revenue: float | None
+    gross_profit: float | None
+    gaap_net_income: float | None
+    free_cash_flow: float | None
+    sbc_expense: float | None
+    net_dollar_retention: float | None
+    extraction_confidence: Literal["stated", "computed", "not_disclosed"]
+    reasoning: str = ""
+
+    @field_validator("revenue", "gross_profit", "gaap_net_income",
+                     "free_cash_flow", "sbc_expense", "net_dollar_retention",
+                     mode="before")
+    @classmethod
+    def coerce_non_numeric_to_none(cls, v):
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return None
+        return v
+
+
+def _ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or not denominator:
+        return None
+    return round(numerator / denominator * 100, 1)

@@ -90,15 +90,28 @@ the corpus can't answer it, note that explicitly and continue.
 6. Debt trajectory — What is total debt relative to operating profit, and
    is leverage rising or falling?
 
-7. Contingent liabilities — Are there material commitments, legal
-   proceedings, or loss contingencies, and did anything change from the
-   prior year?
+7. Contingent liabilities — Ask THREE separate questions, not one:
+   (a) Material commitments and loss contingencies from the Commitments
+       and Contingencies note.
+   (b) Legal proceedings from Item 3.
+   (c) Regulatory, sanctions, and enforcement matters — ask explicitly
+       about OFAC, export controls, economic sanctions, government
+       investigations, subpoenas, and voluntary self-disclosures. These
+       are frequently disclosed in Item 1A Risk Factors rather than in
+       Item 3 or the contingencies note, so ask for them by name.
+   A company can report "no material legal proceedings" while carrying an
+   unresolved enforcement matter. Report anything disclosed as pending,
+   under review, or unaccrued, and state how long it has been disclosed.
 
 ## Question-phrasing rules (critical — retrieval quality depends on these)
 - Name the company AND the specific fiscal years in EVERY question.
 - Use the filer's own vocabulary, not analyst jargon: "operating profit"
   or "operating income" as the filer uses it, "share repurchase" not
   "buyback", "commitments and contingencies" not "contingent liabilities".
+  Exception: when checklist item 7(c) directs you to name specific
+  regulatory terms (OFAC, sanctions, export controls, voluntary
+  self-disclosure), use those exact terms — they are the filer's
+  vocabulary in Item 1A even when the contingencies note doesn't use them.
 - For year-over-year questions, write "Compare X in FY2025 vs FY2024"
   explicitly. Never say "last year" or "this year" — those don't retrieve.
 - For cross-section questions, name both sections: "Compare the Item 1A
@@ -110,7 +123,7 @@ Produce a research memo in exactly this structure:
 
 # {TICKER} — Research Memo
 **Date:** {today's date}
-**Filings reviewed:** {list the specific 10-Ks used}
+**Filings reviewed:** {list every filing used — form type, filing date, and period-end date}
 
 ## Executive Summary
 3-5 bullet points: the most decision-relevant findings from this review.
@@ -182,6 +195,9 @@ Rules for the memo:
   not from a filing — stop and retrieve the actual figure instead.
 - Never use a rounded or approximate figure when the precise one is
   available. If a filing states 28,262.9, do not use 28.3, 28,000, or 28.3*1000.
+- The no-rounding rule applies to prose, not only to calculate. Never
+  subtract or compare using an approximation you wrote yourself ("~$1.0B
+  combined"). If 975.7 and 55.5 are the disclosed components, use 1031.2.
 - A filing's fiscal year is NOT its filing year. Annual reports are filed
   after the period they cover: a 20-F or 10-K filed in early 2026 for a
   December year-end reports FY2025. Before using any figure, determine the
@@ -193,6 +209,12 @@ Rules for the memo:
   not retrieved, retrieve it first. If you derived a figure yourself (a
   sum of components, for example), compute it with calculate rather than
   declaring the result as retrieved.
+- Segment operating income excludes unallocated corporate expenses
+  (amortization, restructuring, stock-based compensation). Never sum
+  reported segments to obtain consolidated operating income — retrieve
+  the consolidated figure directly. If the segment sum and the
+  consolidated figure differ, that difference is real and the
+  consolidated figure is the one to use for leverage and margin ratios.
 """
 
 

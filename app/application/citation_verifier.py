@@ -29,9 +29,24 @@ from dataclasses import dataclass, field
 # Numbers with optional thousands separators and decimals: 27,558.5  1364.1  118
 _NUMBER_RE = re.compile(r"\d[\d,]*\.?\d*")
 
-# Double-quoted spans of >= 4 words — the shape of a claimed filing quotation.
-# Shorter quoted fragments are usually terminology, not quotation.
-_QUOTE_RE = re.compile(r"[\"“]([^\"”]{15,}?)[\"”]")
+def _extract_quotes(text: str) -> list[tuple[str, int]]:
+    """
+    Pair quote characters sequentially (1st-2nd, 3rd-4th, ...) and return
+    spans of >= 4 words with their start offsets.
+
+    A regex like ["“]([^"”]{15,}?)["”] pairs the CLOSING quote of a short
+    quotation with the OPENING quote of the next one, capturing the prose
+    between them. Observed: 'measures being "put in place" (FY2025 10-K) to
+    being "completed"' yielded ' (FY2025 10-K) to being ' as a quotation.
+    """
+    positions = [m.start() for m in re.finditer(r"[\"\u201c\u201d]", text)]
+    out: list[tuple[str, int]] = []
+    for i in range(0, len(positions) - 1, 2):
+        start, end = positions[i], positions[i + 1]
+        span = text[start + 1 : end]
+        if len(span.split()) >= 4 and len(span) >= 15:
+            out.append((span, start))
+    return out
 
 # Figures that are almost always structural rather than sourced: years,
 # percentages of the model's own construction, list numbering, small counts.
@@ -149,6 +164,49 @@ def _computed_forms(values) -> set[str]:
     return out
 
 
+
+_CORPUS_NUM_RE = re.compile(r"-?\(?[\d,]+\.?\d*\)?")
+
+
+def _corpus_values(corpus: str) -> list[float]:
+    """Every number in the corpus, as floats. Parenthesised = negative."""
+    out: list[float] = []
+    for m in _CORPUS_NUM_RE.finditer(corpus):
+        s = m.group().strip()
+        neg = s.startswith("(") and s.endswith(")")
+        s = s.strip("()").replace(",", "")
+        if not s or s in {".", "-"}:
+            continue
+        try:
+            v = float(s)
+        except ValueError:
+            continue
+        out.append(-v if neg else v)
+    return out
+
+
+def _matches_with_scale(value: float, corpus_values: list[float]) -> bool:
+    """
+    True if `value` matches a corpus figure directly or after a unit change.
+
+    Filings that report in thousands are routinely restated in millions in a
+    memo: the corpus holds 877,433 and the memo says 877.4. Comparison is
+    numeric with a tolerance sized to the memo's precision, not string-based.
+    """
+    av = abs(value)
+    for c in corpus_values:
+        ac = abs(c)
+        if ac == av:
+            return True
+        # corpus in thousands, memo in millions (and the reverse)
+        for scale in (1000.0, 1_000_000.0):
+            if ac and abs(ac / scale - av) <= max(0.05, av * 0.0005):
+                return True
+            if av and abs(av / scale - ac) <= max(0.05, ac * 0.0005):
+                return True
+    return False
+
+
 def verify_answer(
     answer: str,
     chunk_texts: dict[int, str],
@@ -169,6 +227,7 @@ def verify_answer(
 
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
     raw_chunks = {cid: t for cid, t in chunk_texts.items()}
+    _corpus_nums = _corpus_values("\n".join(chunk_texts.values()))
 
     # --- numbers -----------------------------------------------------------
     seen_numbers: set[str] = set()
@@ -198,19 +257,22 @@ def verify_answer(
             if any(v in text for v in variants):
                 hit = cid
                 break
+        if hit is None:
+            # Fall back to scale-aware numeric comparison (thousands vs millions)
+            try:
+                if _matches_with_scale(float(bare), _corpus_nums):
+                    hit = -2
+            except ValueError:
+                pass
 
         f = Finding("number", raw, context, hit)
         (report.verified if hit is not None else report.unverified).append(f)
 
     # --- quotes ------------------------------------------------------------
-    for m in _QUOTE_RE.finditer(answer):
-        quoted = m.group(1)
-        if len(quoted.split()) < 4:
-            continue
-
+    for quoted, qstart in _extract_quotes(answer):
         needle = _normalize_text(quoted)
-        start = max(0, m.start() - 30)
-        context = answer[start : m.end() + 30].replace("\n", " ")
+        start = max(0, qstart - 30)
+        context = answer[start : qstart + len(quoted) + 32].replace("\n", " ")
 
         hit = None
         for cid, text in normalized_chunks.items():

@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 WATCHLIST_PATH = Path("watchlist.yaml")
-MEMO_DIR = os.environ["MEMO_DIR"]
+MEMO_DIR = Path("docs/memos")
 
 # Pricing per million tokens — add new models as needed
 _MODEL_PRICING = {
@@ -106,13 +107,13 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
     return prompt
 
 def _save_output(content: str, ticker: str, mode: str) -> Path:
-    """Save output to Obsidian vault with timestamp. Returns the path."""
+    """Save output with timestamp. Returns the path."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if mode == "news":
         filename = f"{ticker}-news-{timestamp}.md"
     else:
         filename = f"{ticker}-{timestamp}.md"
-    out_path = Path.home() / MEMO_DIR / ticker / filename
+    out_path = MEMO_DIR / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
     return out_path
@@ -150,6 +151,35 @@ def _print_usage_summary(
     _trace(f"  ─────────────────────────────────")
     _trace(f"  TOTAL COST:  ${total_cost:.4f}")
     _trace(f"{'='*55}")
+
+
+def _log_cost(ticker: str, mode: str, usage: UsageSummary) -> None:
+    """Append one JSON line to docs/cost-log.jsonl."""
+    pricing = _MODEL_PRICING.get(AGENT_MODEL)
+    cost = None
+    if pricing:
+        cost = round(
+            usage.input_tokens * pricing["input"] / 1_000_000
+            + usage.cache_write_tokens * pricing["cache_write"] / 1_000_000
+            + usage.cache_read_tokens * pricing["cache_read"] / 1_000_000
+            + usage.output_tokens * pricing["output"] / 1_000_000,
+            6,
+        )
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "ticker": ticker,
+        "mode": mode,
+        "model": AGENT_MODEL,
+        "input_tokens": usage.input_tokens,
+        "cache_write_tokens": usage.cache_write_tokens,
+        "cache_read_tokens": usage.cache_read_tokens,
+        "output_tokens": usage.output_tokens,
+        "estimated_cost_usd": cost,
+    }
+    log_path = Path("docs/cost-log.jsonl")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 def _roll_cache_breakpoint(messages: list) -> None:
@@ -317,6 +347,8 @@ def main() -> None:
         usage.input_tokens, usage.cache_write_tokens,
         usage.cache_read_tokens, usage.output_tokens,
     )
+    if args.ticker:
+        _log_cost(args.ticker.upper(), mode, usage)
 
 
 if __name__ == "__main__":
