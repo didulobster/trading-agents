@@ -16,6 +16,7 @@ Usage:
     uv run python -m app.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
 """
 
+from __future__ import annotations  
 import argparse
 import asyncio
 import json

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 import logging
 import os
@@ -9,6 +10,8 @@ from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.trading.infrastructure.checkpointer import build_checkpointer
+from app.agent.trading.infrastructure.graph import build_trading_graph
 from app.application.citations import format_citation_tag
 from app.application.citation_verifier import verify_answer
 from app.application.embedding_service import EmbeddingService
@@ -341,3 +344,11 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
         headline=req.headline,
         assessment=result,
     )
+
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with build_checkpointer() as checkpointer:
+        app.state.trading_graph = build_trading_graph(checkpointer)
+        yield
