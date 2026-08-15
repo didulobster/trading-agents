@@ -16,6 +16,7 @@ Usage:
     uv run python -m app.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
 """
 
+from __future__ import annotations  
 import argparse
 import asyncio
 import json
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 WATCHLIST_PATH = Path("watchlist.yaml")
-MEMO_DIR = Path("docs/memos")
+MEMO_DIR = Path.home() / "Library/Mobile Documents/iCloud~md~obsidian/Documents/EDGAR-MEMO/memos"
 
 # Pricing per million tokens — add new models as needed
 _MODEL_PRICING = {
@@ -153,7 +154,7 @@ def _print_usage_summary(
     _trace(f"{'='*55}")
 
 
-def _log_cost(ticker: str, mode: str, usage: UsageSummary) -> None:
+def log_cost(ticker: str, mode: str, usage: UsageSummary) -> None:
     """Append one JSON line to docs/cost-log.jsonl."""
     pricing = _MODEL_PRICING.get(AGENT_MODEL)
     cost = None
@@ -348,7 +349,7 @@ def main() -> None:
         usage.cache_read_tokens, usage.output_tokens,
     )
     if args.ticker:
-        _log_cost(args.ticker.upper(), mode, usage)
+        log_cost(args.ticker.upper(), mode, usage)
 
 
 if __name__ == "__main__":

@@ -15,3 +15,6 @@ __pycache__/
 /eval/extraction-results*
 extraction_truth.yaml
 /docs
+
+# dev cache for trading agent
+.fundamentals_cache/

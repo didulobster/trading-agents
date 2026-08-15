@@ -1,0 +1,46 @@
+import argparse
+import asyncio
+import json
+
+from app.agent.trading.infrastructure.checkpointer import build_checkpointer
+from app.agent.trading.infrastructure.graph import build_trading_graph
+
+
+async def run(ticker: str, thread_id: str | None) -> None:
+    thread_id = thread_id or f"trading-{ticker}"
+    async with build_checkpointer() as checkpointer:
+        graph = build_trading_graph(checkpointer)
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await graph.aget_state(config)
+
+        if state.values and not state.next:
+            print(f"Run already completed for {ticker} (thread {thread_id})")
+            result = state.values
+        elif state.next:
+            print(f"Resuming unfinished run for {ticker} at: {state.next}")
+            result = await graph.ainvoke(None, config=config)
+        else:
+            print(f"Starting new run for {ticker}")
+            result = await graph.ainvoke({"ticker": ticker}, config=config)
+
+    fundamentals = result.get("fundamentals_report")
+    if fundamentals is not None:
+        print("\n--- Fundamentals Report ---")
+        print(fundamentals.summary)
+        print(f"(tokens: in={fundamentals.input_tokens} out={fundamentals.output_tokens})")
+        print("--- end Fundamentals Report ---\n")
+
+    memo = result["decision_memo"]
+    print(json.dumps(memo.model_dump(mode="json"), indent=2))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the trading pipeline for a single ticker")
+    parser.add_argument("ticker")
+    parser.add_argument("--thread-id", default=None)
+    args = parser.parse_args()
+    asyncio.run(run(args.ticker, args.thread_id))
+
+
+if __name__ == "__main__":
+    main()
