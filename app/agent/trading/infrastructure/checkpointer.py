@@ -1,11 +1,13 @@
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+load_dotenv(override=True)
 
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 DB_URI = os.getenv("TRADING_CHECKPOINT_DB_URI")  
 
 connection_kwargs = {"autocommit": True, "prepare_threshold": 0}

@@ -23,8 +23,10 @@ async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
     cached = _cache_path(ticker)
 
     if _USE_MOCK and cached.exists():
-        print(f"[fundamentals] loading cached report for {ticker}")
-        return FundamentalsReport.model_validate_json(cached.read_text())
+        report = FundamentalsReport.model_validate_json(cached.read_text())
+        age_days = (date.today() - report.generated_at).days
+        print(f"[fundamentals] loading cached report for {ticker} ({age_days}d old)")
+        return report
 
     today = date.today()
     task = f"Today's date is {today.isoformat()}. Run the full research checklist for {ticker}."
