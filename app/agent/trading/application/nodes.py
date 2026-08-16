@@ -7,8 +7,12 @@ import asyncio
 from datetime import date
 
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.technical_report import TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
+from app.agent.trading.infrastructure.price_data_port import get_price_history
+from app.agent.trading.application.technical_indicators import compute_indicators
+from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators
 
 
 async def fundamentals_node(state: TradingState) -> dict:
@@ -18,8 +22,23 @@ async def fundamentals_node(state: TradingState) -> dict:
 
 
 async def technical_node(state: TradingState) -> dict:
-    print(f"[technical] STUB running for {state['ticker']}")
-    return {"technical_report": "STUB — Phase 3 wires this to pandas-ta-classic"}
+    ticker = state["ticker"]
+    print(f"[technical] running for {ticker}")
+
+    df, source = await get_price_history(ticker)
+    indicators = compute_indicators(df)
+    interpretation, flagged = await interpret_indicators(ticker, indicators)
+
+    report = TechnicalReport(
+        ticker=ticker,
+        as_of_date=df.index[-1].date(),
+        data_source=source,
+        bars_used=len(df),
+        indicators=indicators,
+        interpretation=interpretation,
+        interpretation_flagged_numbers=flagged,
+    )
+    return {"technical_report": report}
 
 
 async def news_node(state: TradingState) -> dict:
@@ -49,7 +68,7 @@ async def synthesizer_node(state: TradingState) -> dict:
         bull_case="STUB",
         bear_case="STUB",
         risk_debate_summary=state["risk_summary"],
-        technical_signal=state["technical_report"],
+        technical_signal=state["technical_report"].interpretation,
         reasoning="STUB — synthesis logic not yet implemented. fundamentals_report is real (Phase 2); technical/news/sentiment/debate/risk are still stubs.",
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,

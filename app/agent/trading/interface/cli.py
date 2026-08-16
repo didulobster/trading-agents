@@ -30,6 +30,16 @@ async def run(ticker: str, thread_id: str | None) -> None:
         print(f"(tokens: in={fundamentals.input_tokens} out={fundamentals.output_tokens})")
         print("--- end Fundamentals Report ---\n")
 
+    technical = result.get("technical_report")
+    if technical is not None:
+        print("\n--- Technical Report ---")
+        print(f"source={technical.data_source} bars={technical.bars_used} as_of={technical.as_of_date}")
+        print(technical.indicators.model_dump_json(indent=2))
+        print(f"\n{technical.interpretation}")
+        if technical.interpretation_flagged_numbers:
+            print(f"[flagged numbers] {technical.interpretation_flagged_numbers}")
+        print("--- end Technical Report ---\n")
+
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
 
