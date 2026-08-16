@@ -215,6 +215,16 @@ class UsageSummary:
         self.output_tokens = 0
 
 
+def _strip_preamble(text: str) -> str:
+    """Drop any scratch/transition text the model wrote before the output's
+    top-level heading (e.g. "Let me compile the research memo.")."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            return "\n".join(lines[i:])
+    return text
+
+
 async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSummary]:
     """
     Run the agent loop: send task, process tool calls, return final text
@@ -261,6 +271,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
             final = "".join(
                 b.text for b in response.content if b.type == "text"
             )
+            final = _strip_preamble(final)
             final = verify_memo(final, get_provenance_corpus(), get_calc_results())
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
@@ -304,6 +315,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
     usage.output_tokens += u.output_tokens
 
     final = "".join(b.text for b in response.content if b.type == "text")
+    final = _strip_preamble(final)
     final = verify_memo(final, get_provenance_corpus(), get_calc_results())
     return final, usage
 
