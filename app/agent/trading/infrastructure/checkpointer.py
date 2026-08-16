@@ -2,6 +2,7 @@ import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
+from dotenv import load_dotenv
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
