@@ -194,6 +194,14 @@ Rules for the memo:
   from a single disclosed source. Never add a component to a total that
   already contains it. If you sum components, state each one and confirm
   the sum is not also disclosed separately.
+- Before writing any breakdown of the form "$X (A + B)", run A + B through
+  the calculate tool and confirm the result equals X. If it doesn't, do not
+  present the breakdown as if it reconciles — state the discrepancy
+  explicitly (e.g. "components as retrieved do not sum to the disclosed
+  total; re-verify") rather than printing mismatched numbers side by side.
+  A total and its components are individually real, retrieved figures, but
+  nothing else checks that they're internally consistent with each other —
+  that check is on you.
 - Multi-year financial tables present columns in chronological order,
   often without repeating year headers. Before extracting any figure
   from a table, state which column corresponds to which fiscal year and

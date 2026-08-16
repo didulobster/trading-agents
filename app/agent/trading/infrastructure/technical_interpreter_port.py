@@ -19,6 +19,12 @@ you, used exactly as given (you may round for readability, e.g. 62.37 -> "around
 If you are not given a value (None), do not guess or fabricate one — say the signal
 is unavailable.
 
+MACD PRECISION: `macd`, `macd_signal`, and `macd_histogram` are three distinct values —
+never refer to any of them as just "the MACD". A negative `macd_histogram` means the
+MACD line is below its signal line (a bearish crossover), NOT that the MACD line
+itself is below zero — those are different conditions and must not be conflated. Name
+the specific line you mean: "the MACD line", "the signal line", or "the histogram".
+
 Respond in 3-5 sentences of plain-language interpretation. No preamble, no headers.
 """
 
@@ -60,9 +66,9 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     than indicator values themselves (e.g. "RSI above 70") — treat this as a review
     signal, not an auto-reject.
 
-    Two known transformations are normalized before flagging, each patched from a real
-    false positive rather than designed upfront — coverage is only as good as the
-    phrasing actually tested, not something derivable from first principles:
+    Three known transformations are normalized before flagging, each patched from a
+    real false positive rather than designed upfront — coverage is only as good as
+    the phrasing actually tested, not something derivable from first principles:
 
     1. Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
        since those are label numbers (the SMA/RSI window length), not data values. This
@@ -74,18 +80,30 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     2. "N%" mentions are checked against known_values/100 as well as known_values
        directly — confirmed necessary when volume_vs_20d_avg=0.529 was faithfully
        reported as "53%" and would otherwise have been flagged as fabricated.
+    3. "N% above/below" mentions are checked against (known_value - 1) * 100 —
+       a distinct transform from #2: "22% above the 20-day average" describes a
+       *delta* from a ratio-type value (volume_vs_20d_avg=1.2153 -> (1.2153-1)*100
+       = 21.5% =~ "around 22"), not the raw ratio-as-percentage. Matched (and
+       consumed) before the general percent pattern so the two don't collide.
     """
     known_values = [v for v in indicators.model_dump().values() if isinstance(v, (int, float))]
     text_no_periods = re.sub(r"\b\d+-day\b", "", text)
 
     flagged: list[str] = []
 
+    above_below_pattern = re.compile(r"(-?\d+\.?\d*)%\s*(?:above|below)")
+    for m in above_below_pattern.findall(text_no_periods):
+        delta_pct = float(m)
+        if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
+            flagged.append(f"{m}% above/below")
+    text_no_above_below = above_below_pattern.sub("", text_no_periods)
+
     percent_pattern = re.compile(r"(-?\d+\.?\d*)%")
-    for m in percent_pattern.findall(text_no_periods):
+    for m in percent_pattern.findall(text_no_above_below):
         ratio = float(m) / 100
         if not any(abs(ratio - kv) <= max(0.01, abs(kv) * 0.02) for kv in known_values):
             flagged.append(f"{m}%")
-    text_no_percents = percent_pattern.sub("", text_no_periods)
+    text_no_percents = percent_pattern.sub("", text_no_above_below)
 
     for m in re.findall(r"-?\d+\.?\d*", text_no_percents):
         val = float(m)

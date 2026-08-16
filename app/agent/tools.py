@@ -328,10 +328,18 @@ _UNIT_MULTIPLIERS = {1000.0, 1000000.0, 1_000_000_000.0}
 
 def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None:
     """
-    Three checks, in order of how cheaply they fail:
+    Four checks, in order of how cheaply they fail:
       1. no unit-conversion multipliers (fingerprint of a remembered figure)
       2. every literal in the expression is declared in `inputs`
       3. every declared input actually appeared in some tool output this run
+      4. every declared input's fiscal_period year actually appears near
+         where that value was retrieved — catches a real value paired with
+         the wrong period's label (e.g. FY2025's debt figure declared as
+         FY2023's), which check 3 alone can't see: it only confirms the
+         number exists somewhere in this run's retrieved text, not that it
+         was retrieved *for the period being claimed*. This is the exact
+         gap citation_verifier.py's docstring names as out of its scope:
+         "wrong fiscal-year attribution of a real figure."
     """
     literals = {
         float(m) for m in re.findall(r"\d+\.?\d*(?:[eE][+-]?\d+)?", expression)
@@ -382,7 +390,38 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
                 f"show the derivation as a separate calculate call using only "
                 f"retrieved figures."
             )
- 
+
+        # 4 — real value, wrong period label
+        outputs = _RETRIEVED_TEXT
+        mismatched = []
+        for i in inputs:
+            if i.get("value") is None:
+                continue
+            value = float(i["value"])
+            if value in _OPERATION_SCALARS:
+                continue
+            year = _fiscal_year(i.get("fiscal_period", ""))
+            if year is None:
+                continue  # can't check a period we can't parse a year from
+            if not _year_near_any_occurrence(value, year, outputs):
+                mismatched.append((i, year))
+
+        if mismatched:
+            detail = "; ".join(
+                f"{i['value']} ({i.get('label', 'unlabelled')}) declared as "
+                f"{i.get('fiscal_period')}, but '{year}' never appears near "
+                f"any occurrence of {i['value']} in retrieved text"
+                for i, year in mismatched
+            )
+            return (
+                f"Rejected: fiscal-period mismatch — {detail}. This value "
+                f"was retrieved, but not in a context mentioning the period "
+                f"you're claiming it for — check whether you've paired a "
+                f"figure from the wrong fiscal year (e.g. a later year's "
+                f"balance used for an earlier year's ratio). Re-retrieve "
+                f"the correct period's value before calling calculate again."
+            )
+
     return None
 
 # ---------------------------------------------------------------------------
@@ -445,4 +484,58 @@ def _variants(value: float) -> set[str]:
  
 def _appears_in_output(value: float, corpus: str) -> bool:
     return any(v in corpus for v in _variants(value))
- 
+
+
+# ---------------------------------------------------------------------------
+# Fiscal-period proximity — a real value can still be paired with the wrong
+# period's label. Check 4 in validate_calculate_inputs uses these.
+# ---------------------------------------------------------------------------
+
+_YEAR_IN_PERIOD_RE = re.compile(r"(19|20)\d{2}")
+_PROXIMITY_WINDOW = 400  # chars either side of a value occurrence
+
+
+def _fiscal_year(fiscal_period: str) -> str | None:
+    """Pull the 4-digit year out of a fiscal_period label like 'FY2023',
+    'Q1 2026', or 'fiscal year 2024'. None if no year is parseable —
+    the caller skips the check rather than guess."""
+    m = _YEAR_IN_PERIOD_RE.search(fiscal_period or "")
+    return m.group() if m else None
+
+
+def _occurrence_spans(value: float, text: str) -> list[tuple[int, int]]:
+    """Every (start, end) span where some string form of `value` occurs."""
+    spans: list[tuple[int, int]] = []
+    for v in _variants(value):
+        start = 0
+        while True:
+            idx = text.find(v, start)
+            if idx == -1:
+                break
+            spans.append((idx, idx + len(v)))
+            start = idx + len(v)
+    return spans
+
+
+def _year_near_any_occurrence(value: float, year: str, outputs: list[str]) -> bool:
+    """True if `year` appears within _PROXIMITY_WINDOW chars of at least one
+    occurrence of `value`, *within a single tool output*. A value retrieved
+    for the right period is normally restated near its period somewhere in
+    the same tool call's response (an ask_edgar answer's prose, or
+    extract_metrics' reasoning field).
+
+    Deliberately scoped per-output rather than to the whole run's
+    concatenated corpus: two unrelated tool outputs recorded back-to-back
+    can land within a few hundred chars of each other purely from being
+    adjacent in the join, which would make "proximity" meaningless once
+    several short outputs accumulate. Checking within one output's own text
+    preserves the actual boundary of "this number and this year were
+    stated together."
+    """
+    for text in outputs:
+        for start, end in _occurrence_spans(value, text):
+            window = text[max(0, start - _PROXIMITY_WINDOW): end + _PROXIMITY_WINDOW]
+            if year in window:
+                return True
+    return False
+
