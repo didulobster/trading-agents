@@ -1,0 +1,34 @@
+from __future__ import annotations
+
+from datetime import date
+from pydantic import BaseModel, Field
+
+
+class TechnicalIndicators(BaseModel):
+    """Raw, Python-computed values. No LLM ever writes to this model."""
+    sma_50: float | None = None
+    sma_200: float | None = None
+    rsi_14: float | None = None
+    macd: float | None = None
+    macd_signal: float | None = None
+    macd_histogram: float | None = None
+    bb_upper: float | None = None
+    bb_mid: float | None = None
+    bb_lower: float | None = None
+    last_close: float
+    volume_vs_20d_avg: float | None = None   # ratio, e.g. 1.4 = 40% above avg
+
+
+class TechnicalReport(BaseModel):
+    ticker: str
+    as_of_date: date
+    data_source: str = Field(description="'yfinance' or 'finnhub'")
+    bars_used: int = Field(description="count of daily bars the calc was run on")
+    indicators: TechnicalIndicators
+    interpretation: str
+    interpretation_flagged_numbers: list[str] = Field(
+        default_factory=list,
+        description="numbers in `interpretation` that could not be matched "
+                     "back to `indicators` — populated by the guard in "
+                     "technical_interpreter_port.py",
+    )
