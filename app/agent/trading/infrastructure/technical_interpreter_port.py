@@ -60,21 +60,36 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     than indicator values themselves (e.g. "RSI above 70") — treat this as a review
     signal, not an auto-reject.
 
-    Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
-    since those are label numbers (the SMA/RSI window length), not data values. This
-    narrows the false-positive surface but opens a corresponding gap: a fabricated
-    period ("the 55-day average") would slip through unflagged, since it's stripped
-    before the value-check ever sees it. See
-    test_flag_unmatched_numbers_does_not_catch_fabricated_period_label for that
-    documented boundary.
+    Two known transformations are normalized before flagging, each patched from a real
+    false positive rather than designed upfront — coverage is only as good as the
+    phrasing actually tested, not something derivable from first principles:
+
+    1. Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
+       since those are label numbers (the SMA/RSI window length), not data values. This
+       narrows the false-positive surface but opens a corresponding gap: a fabricated
+       period ("the 55-day average") would slip through unflagged, since it's stripped
+       before the value-check ever sees it. See
+       test_flag_unmatched_numbers_does_not_catch_fabricated_period_label for that
+       documented boundary.
+    2. "N%" mentions are checked against known_values/100 as well as known_values
+       directly — confirmed necessary when volume_vs_20d_avg=0.529 was faithfully
+       reported as "53%" and would otherwise have been flagged as fabricated.
     """
     known_values = [v for v in indicators.model_dump().values() if isinstance(v, (int, float))]
-    text_without_period_labels = re.sub(r"\b\d+-day\b", "", text)
-    mentioned = re.findall(r"-?\d+\.?\d*", text_without_period_labels)
+    text_no_periods = re.sub(r"\b\d+-day\b", "", text)
 
-    flagged = []
-    for m in mentioned:
+    flagged: list[str] = []
+
+    percent_pattern = re.compile(r"(-?\d+\.?\d*)%")
+    for m in percent_pattern.findall(text_no_periods):
+        ratio = float(m) / 100
+        if not any(abs(ratio - kv) <= max(0.01, abs(kv) * 0.02) for kv in known_values):
+            flagged.append(f"{m}%")
+    text_no_percents = percent_pattern.sub("", text_no_periods)
+
+    for m in re.findall(r"-?\d+\.?\d*", text_no_percents):
         val = float(m)
         if not any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
             flagged.append(m)
+
     return flagged
