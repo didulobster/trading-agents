@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 
-from app.agent.researcher import AGENT_MODEL, UsageSummary, log_cost
-from app.agent.trading.domain.technical_report import TechnicalIndicators
+from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
+from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 
 TECHNICAL_INTERPRETER_SYSTEM_PROMPT = """\
 You are a technical analysis interpreter. You will be given a set of already-computed
@@ -18,6 +19,12 @@ ANY numeric value. Every number in your response must be one of the numbers give
 you, used exactly as given (you may round for readability, e.g. 62.37 -> "around 62").
 If you are not given a value (None), do not guess or fabricate one — say the signal
 is unavailable.
+
+MACD PRECISION: `macd`, `macd_signal`, and `macd_histogram` are three distinct values —
+never refer to any of them as just "the MACD". A negative `macd_histogram` means the
+MACD line is below its signal line (a bearish crossover), NOT that the MACD line
+itself is below zero — those are different conditions and must not be conflated. Name
+the specific line you mean: "the MACD line", "the signal line", or "the histogram".
 
 Respond in 3-5 sentences of plain-language interpretation. No preamble, no headers.
 """
@@ -60,21 +67,93 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     than indicator values themselves (e.g. "RSI above 70") — treat this as a review
     signal, not an auto-reject.
 
-    Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
-    since those are label numbers (the SMA/RSI window length), not data values. This
-    narrows the false-positive surface but opens a corresponding gap: a fabricated
-    period ("the 55-day average") would slip through unflagged, since it's stripped
-    before the value-check ever sees it. See
-    test_flag_unmatched_numbers_does_not_catch_fabricated_period_label for that
-    documented boundary.
+    Three known transformations are normalized before flagging, each patched from a
+    real false positive rather than designed upfront — coverage is only as good as
+    the phrasing actually tested, not something derivable from first principles:
+
+    1. Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
+       since those are label numbers (the SMA/RSI window length), not data values. This
+       narrows the false-positive surface but opens a corresponding gap: a fabricated
+       period ("the 55-day average") would slip through unflagged, since it's stripped
+       before the value-check ever sees it. See
+       test_flag_unmatched_numbers_does_not_catch_fabricated_period_label for that
+       documented boundary.
+    2. "N%" mentions are checked against known_values/100 as well as known_values
+       directly — confirmed necessary when volume_vs_20d_avg=0.529 was faithfully
+       reported as "53%" and would otherwise have been flagged as fabricated.
+    3. "N% above/below" mentions are checked against (known_value - 1) * 100 —
+       a distinct transform from #2: "22% above the 20-day average" describes a
+       *delta* from a ratio-type value (volume_vs_20d_avg=1.2153 -> (1.2153-1)*100
+       = 21.5% =~ "around 22"), not the raw ratio-as-percentage. Matched (and
+       consumed) before the general percent pattern so the two don't collide.
     """
     known_values = [v for v in indicators.model_dump().values() if isinstance(v, (int, float))]
-    text_without_period_labels = re.sub(r"\b\d+-day\b", "", text)
-    mentioned = re.findall(r"-?\d+\.?\d*", text_without_period_labels)
+    text_no_periods = re.sub(r"\b\d+-day\b", "", text)
 
-    flagged = []
-    for m in mentioned:
+    flagged: list[str] = []
+
+    above_below_pattern = re.compile(r"(-?\d+\.?\d*)%\s*(?:above|below)")
+    for m in above_below_pattern.findall(text_no_periods):
+        delta_pct = float(m)
+        if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
+            flagged.append(f"{m}% above/below")
+    text_no_above_below = above_below_pattern.sub("", text_no_periods)
+
+    percent_pattern = re.compile(r"(-?\d+\.?\d*)%")
+    for m in percent_pattern.findall(text_no_above_below):
+        ratio = float(m) / 100
+        if not any(abs(ratio - kv) <= max(0.01, abs(kv) * 0.02) for kv in known_values):
+            flagged.append(f"{m}%")
+    text_no_percents = percent_pattern.sub("", text_no_above_below)
+
+    for m in re.findall(r"-?\d+\.?\d*", text_no_percents):
         val = float(m)
         if not any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
             flagged.append(m)
+
     return flagged
+
+
+def _format_technical_markdown(report: TechnicalReport) -> str:
+    ind = report.indicators
+    lines = [
+        f"# {report.ticker} — Technical Analysis",
+        f"**Date:** {report.as_of_date}",
+        f"**Source:** {report.data_source} ({report.bars_used} daily bars)",
+        "",
+        "## Indicators",
+        "",
+        "| Indicator | Value |",
+        "|---|---|",
+        f"| SMA(50) | {ind.sma_50} |",
+        f"| SMA(200) | {ind.sma_200} |",
+        f"| RSI(14) | {ind.rsi_14} |",
+        f"| MACD | {ind.macd} |",
+        f"| MACD Signal | {ind.macd_signal} |",
+        f"| MACD Histogram | {ind.macd_histogram} |",
+        f"| Bollinger Upper | {ind.bb_upper} |",
+        f"| Bollinger Mid | {ind.bb_mid} |",
+        f"| Bollinger Lower | {ind.bb_lower} |",
+        f"| Last Close | {ind.last_close} |",
+        f"| Volume vs 20d Avg | {ind.volume_vs_20d_avg} |",
+        "",
+        "## Interpretation",
+        "",
+        report.interpretation,
+    ]
+    if report.interpretation_flagged_numbers:
+        lines += [
+            "",
+            "## Flagged Numbers",
+            "",
+            "Numbers in the interpretation that could not be matched back to a "
+            "retrieved indicator value. Review before relying on them.",
+            "",
+            ", ".join(report.interpretation_flagged_numbers),
+        ]
+    return "\n".join(lines)
+
+
+def save_technical_report(report: TechnicalReport) -> Path:
+    content = _format_technical_markdown(report)
+    return _save_output(content, report.ticker.upper(), "technical")

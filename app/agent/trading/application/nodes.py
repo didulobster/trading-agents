@@ -12,7 +12,7 @@ from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
 from app.agent.trading.infrastructure.price_data_port import get_price_history
 from app.agent.trading.application.technical_indicators import compute_indicators
-from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators
+from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators, save_technical_report
 
 
 async def fundamentals_node(state: TradingState) -> dict:
@@ -38,6 +38,8 @@ async def technical_node(state: TradingState) -> dict:
         interpretation=interpretation,
         interpretation_flagged_numbers=flagged,
     )
+    vault_path = save_technical_report(report)
+    print(f"[technical] saved report to {vault_path}")
     return {"technical_report": report}
 
 

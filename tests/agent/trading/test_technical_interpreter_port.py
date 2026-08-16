@@ -45,3 +45,39 @@ def test_flag_unmatched_numbers_does_not_catch_fabricated_period_label():
     this test should be revisited rather than silently start failing."""
     text = "The 55-day moving average confirms the trend."
     assert _flag_unmatched_numbers(text, INDICATORS) == []
+
+
+def test_ratio_reported_as_percentage_does_not_false_positive():
+    """Real regression: volume_vs_20d_avg=0.5291233813779816 was faithfully
+    reported as 'about 53% of the 20-day average' (ratio * 100), which the
+    plain-number check alone would flag as fabricated since 53 doesn't match
+    any raw indicator value — only its percentage form does."""
+    indicators = TechnicalIndicators(last_close=24.10, volume_vs_20d_avg=0.5291233813779816)
+    text = "Volume is light, running at about 53% of the 20-day average."
+    assert _flag_unmatched_numbers(text, indicators) == []
+
+
+def test_fabricated_percentage_is_still_flagged():
+    """Percent-normalization shouldn't swallow a genuinely fabricated
+    percentage — only ones that map back to a real ratio value."""
+    indicators = TechnicalIndicators(last_close=24.10, volume_vs_20d_avg=0.5291233813779816)
+    text = "Volume is running at about 53% of average, with 90% analyst buy ratings."
+    assert _flag_unmatched_numbers(text, indicators) == ["90%"]
+
+
+def test_percentage_above_average_does_not_false_positive():
+    """Real regression, distinct from the 'N% of' case: volume_vs_20d_avg
+    =1.2153 was faithfully reported as 'about 22% above the 20-day average'
+    — a delta from the ratio ((1.2153-1)*100=21.5% =~ 22), not the raw
+    ratio-as-percentage (that would be 122%, a different phrasing)."""
+    indicators = TechnicalIndicators(last_close=350.0, volume_vs_20d_avg=1.2153)
+    text = "Volume is elevated, running about 22% above the 20-day average."
+    assert _flag_unmatched_numbers(text, indicators) == []
+
+
+def test_fabricated_above_below_percentage_is_still_flagged():
+    """The above/below transform shouldn't swallow a genuinely fabricated
+    delta percentage — only ones that map back to a real ratio value."""
+    indicators = TechnicalIndicators(last_close=350.0, volume_vs_20d_avg=1.2153)
+    text = "Volume is running about 22% above average, with sentiment 90% above normal."
+    assert _flag_unmatched_numbers(text, indicators) == ["90% above/below"]

@@ -8,12 +8,22 @@ produce it.
 SCOPE — read this before trusting it:
   Catches   : fabricated figures, fabricated quotations.
   Misses    : fabricated causation ("new Eurobond issuance drove the
-              increase"), wrong fiscal-year attribution of a real figure,
-              and any claim with no literal to check.
+              increase"), and any claim with no literal to check.
 
 The verifier answers "does this number exist in the source material", not
 "is this claim true". Those are different questions and only the first is
 mechanically decidable.
+
+Wrong fiscal-year attribution of a real figure used to be an unmitigated
+miss here too — a value from one period, mislabeled and used as another
+period's input, is individually real and passes this check every time.
+That specific case is now caught one layer upstream, in
+validate_calculate_inputs (app/agent/tools.py, check 4): every calculate()
+input declares a fiscal_period, and that check confirms the declared
+period's year actually appears near where the value was retrieved. This
+verifier still can't catch a mislabeled figure that never went through
+calculate() — e.g. a raw retrieved number stated directly in prose without
+a computation. That gap remains open.
 """
 
 from __future__ import annotations
