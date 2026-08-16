@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 
-from app.agent.researcher import AGENT_MODEL, UsageSummary, log_cost
-from app.agent.trading.domain.technical_report import TechnicalIndicators
+from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
+from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 
 TECHNICAL_INTERPRETER_SYSTEM_PROMPT = """\
 You are a technical analysis interpreter. You will be given a set of already-computed
@@ -111,3 +112,48 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
             flagged.append(m)
 
     return flagged
+
+
+def _format_technical_markdown(report: TechnicalReport) -> str:
+    ind = report.indicators
+    lines = [
+        f"# {report.ticker} — Technical Analysis",
+        f"**Date:** {report.as_of_date}",
+        f"**Source:** {report.data_source} ({report.bars_used} daily bars)",
+        "",
+        "## Indicators",
+        "",
+        "| Indicator | Value |",
+        "|---|---|",
+        f"| SMA(50) | {ind.sma_50} |",
+        f"| SMA(200) | {ind.sma_200} |",
+        f"| RSI(14) | {ind.rsi_14} |",
+        f"| MACD | {ind.macd} |",
+        f"| MACD Signal | {ind.macd_signal} |",
+        f"| MACD Histogram | {ind.macd_histogram} |",
+        f"| Bollinger Upper | {ind.bb_upper} |",
+        f"| Bollinger Mid | {ind.bb_mid} |",
+        f"| Bollinger Lower | {ind.bb_lower} |",
+        f"| Last Close | {ind.last_close} |",
+        f"| Volume vs 20d Avg | {ind.volume_vs_20d_avg} |",
+        "",
+        "## Interpretation",
+        "",
+        report.interpretation,
+    ]
+    if report.interpretation_flagged_numbers:
+        lines += [
+            "",
+            "## Flagged Numbers",
+            "",
+            "Numbers in the interpretation that could not be matched back to a "
+            "retrieved indicator value. Review before relying on them.",
+            "",
+            ", ".join(report.interpretation_flagged_numbers),
+        ]
+    return "\n".join(lines)
+
+
+def save_technical_report(report: TechnicalReport) -> Path:
+    content = _format_technical_markdown(report)
+    return _save_output(content, report.ticker.upper(), "technical")

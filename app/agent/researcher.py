@@ -112,6 +112,8 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if mode == "news":
         filename = f"{ticker}-news-{timestamp}.md"
+    elif mode == "technical":
+        filename = f"{ticker}-technical-{timestamp}.md"
     else:
         filename = f"{ticker}-{timestamp}.md"
     out_path = MEMO_DIR / ticker / filename
