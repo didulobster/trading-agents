@@ -165,6 +165,8 @@ class ChunkRepository:
         results: list[RetrievedChunk] = []
         for row in rows:
             similarity = row.pop("similarity")
+            if row["embedding"] is not None:
+                row["embedding"] = row["embedding"].to_list()
             chunk = Chunk.model_validate(row)
             results.append(RetrievedChunk(chunk=chunk, similarity=similarity))
         return results
@@ -225,6 +227,8 @@ class ChunkRepository:
         results: list[RetrievedChunk] = []
         for row in rows:
             similarity = row.pop("similarity")
+            if row["embedding"] is not None:
+                row["embedding"] = row["embedding"].to_list()
             chunk = Chunk.model_validate(row)
             results.append(RetrievedChunk(chunk=chunk, similarity=float(similarity)))
         return results

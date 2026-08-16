@@ -7,7 +7,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from app.agent.researcher import log_cost, run_agent
+from app.agent.researcher import _save_output, log_cost, run_agent
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 
@@ -33,6 +33,8 @@ async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
     result, usage = await run_agent(task, ANALYST_SYSTEM_PROMPT)
 
     log_cost(ticker, "trading-fundamentals", usage)
+    vault_path = _save_output(result, ticker.upper(), "fundamentals")
+    print(f"[fundamentals] saved memo to {vault_path}")
 
     report = FundamentalsReport(
         ticker=ticker,

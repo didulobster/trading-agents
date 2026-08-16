@@ -55,7 +55,11 @@ structured due-diligence review of a company using SEC EDGAR filings.
 Before starting the research checklist:
 1. Call check_corpus to see what filings are available.
 2. Call check_latest_filings to see if SEC EDGAR has newer reports.
-3. If new filings are found, call ingest_ticker to pull them in.
+3. If new filings are found, check their form types before calling
+   ingest_ticker. Only 10-K/10-Q filings are useful for this checklist —
+   don't spend an ingest call chasing 8-Ks or other forms, and don't
+   assume a missing prior-year 10-K exists just because check_latest_filings
+   reports new_filings_count > 0.
 4. Only then proceed with the research checklist.
 
 ## Research checklist
@@ -64,7 +68,11 @@ well-formed question, read the result, then move on. Do not skip an item; if
 the corpus can't answer it, note that explicitly and continue.
 
 1. Free cash flow trend — Is free cash flow positive, and how does its
-   3-year growth compare to revenue growth?
+   growth compare to revenue growth? Use as many years of 10-K data as
+   check_corpus shows (up to 3). If fewer than two 10-Ks are available,
+   compare FCF margin across the available 10-Qs instead (e.g. H1 2026
+   vs. H1 2025) rather than searching for a prior-year 10-K that doesn't
+   exist.
 
 2. Risk factor changes — What risk-factor language was added, removed, or
    escalated between the two most recent 10-Ks? Focus on substantive
@@ -81,7 +89,9 @@ the corpus can't answer it, note that explicitly and continue.
    available, compare across 10-Qs instead.
 
 4. Stock-based compensation — What is SBC as a percentage of revenue, and
-   is that ratio stable, rising, or falling?
+   is that ratio stable, rising, or falling? If only one 10-K is available,
+   compare SBC% across 10-Qs instead, and flag any one-time IPO-vesting
+   charges separately from run-rate SBC.
 
 5. Segment profitability — How do operating margins differ across reported
    segments, and is any segment's margin deteriorating while its revenue
@@ -102,6 +112,11 @@ the corpus can't answer it, note that explicitly and continue.
    A company can report "no material legal proceedings" while carrying an
    unresolved enforcement matter. Report anything disclosed as pending,
    under review, or unaccrued, and state how long it has been disclosed.
+
+Note on recent IPOs: if check_corpus shows only one 10-K, do not attempt
+to retrieve or compare FY data from before the company's IPO year — it
+was privately held and has no SEC filings for that period. Treat it as
+an expected, one-line Data Gap, not something to re-query.
 
 ## Question-phrasing rules (critical — retrieval quality depends on these)
 - Name the company AND the specific fiscal years in EVERY question.

@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 WATCHLIST_PATH = Path("watchlist.yaml")
-MEMO_DIR = Path.home() / "Library/Mobile Documents/iCloud~md~obsidian/Documents/EDGAR-MEMO/memos"
+MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]
 
 # Pricing per million tokens — add new models as needed
 _MODEL_PRICING = {
@@ -114,7 +114,7 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
         filename = f"{ticker}-news-{timestamp}.md"
     else:
         filename = f"{ticker}-{timestamp}.md"
-    out_path = MEMO_DIR / filename
+    out_path = MEMO_DIR / ticker / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
     return out_path
@@ -215,6 +215,16 @@ class UsageSummary:
         self.output_tokens = 0
 
 
+def _strip_preamble(text: str) -> str:
+    """Drop any scratch/transition text the model wrote before the output's
+    top-level heading (e.g. "Let me compile the research memo.")."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            return "\n".join(lines[i:])
+    return text
+
+
 async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSummary]:
     """
     Run the agent loop: send task, process tool calls, return final text
@@ -261,6 +271,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
             final = "".join(
                 b.text for b in response.content if b.type == "text"
             )
+            final = _strip_preamble(final)
             final = verify_memo(final, get_provenance_corpus(), get_calc_results())
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
@@ -297,9 +308,16 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         system=system_prompt,
         messages=messages,
     )
+    u = response.usage
+    usage.input_tokens += u.input_tokens
+    usage.cache_write_tokens += u.cache_creation_input_tokens
+    usage.cache_read_tokens += u.cache_read_input_tokens
+    usage.output_tokens += u.output_tokens
+
     final = "".join(b.text for b in response.content if b.type == "text")
+    final = _strip_preamble(final)
     final = verify_memo(final, get_provenance_corpus(), get_calc_results())
-    return final
+    return final, usage
 
 
 def main() -> None:
