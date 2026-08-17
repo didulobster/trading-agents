@@ -183,18 +183,54 @@ def _computed_forms(values) -> set[str]:
     return out
 
 
-def _rejected_forms(rejected: list[dict] | None) -> dict[str, dict]:
-    """Map string forms of an unretried rejected calculate() result back to
-    the record (value/reason/expression) that produced it."""
-    out: dict[str, dict] = {}
+def _rejected_match_tolerance(value: float) -> float:
+    """How far a memo figure may sit from a rejected calculate() result and
+    still count as the same derivation.
+
+    Deliberately numeric, not a set of pre-rounded strings: an earlier
+    version matched by intersecting rounded-string forms of both sides, which
+    missed a real case — a rejected expression whose true result was
+    18.1503 (rounds to 18.2) was stated in the memo as 18.1, its own
+    rounding error, off the true value by 0.05. No string form of 18.1503
+    is "18.1", so an exact-string match can never catch a value the model
+    itself rounded wrong — only a numeric distance check can. Ratios and
+    percentages are reported to 1 decimal, so a flat floor of 0.1 (a full
+    step in the last displayed digit) plus a small relative term covers
+    that rounding slop without being so loose it matches unrelated figures.
+    """
+    return max(0.1, abs(value) * 0.01)
+
+
+def _split_retried_rejected(
+    rejected: list[dict] | None, computed_values: list[float] | None
+) -> list[dict]:
+    """Rejected attempts whose result was never matched by a later passing
+    calculate() call — i.e. still lacking a validated derivation."""
+    computed = list(computed_values or [])
+    out = []
     for r in rejected or []:
         try:
-            f = float(r.get("value"))
+            rv = float(r.get("value"))
         except (TypeError, ValueError):
             continue
-        for s in {f"{f:.1f}", f"{f:.2f}", str(round(f, 1)), str(round(f, 2))}:
-            out[s] = r
+        tol = _rejected_match_tolerance(rv)
+        if any(abs(rv - cv) <= tol for cv in computed):
+            continue
+        out.append(r)
     return out
+
+
+def _find_rejected_match(value: float, rejected: list[dict]) -> dict | None:
+    """The rejected-and-unretried record whose true result `value` matches,
+    within `_rejected_match_tolerance` — or None."""
+    for r in rejected:
+        try:
+            rv = float(r["value"])
+        except (TypeError, ValueError):
+            continue
+        if abs(rv - value) <= _rejected_match_tolerance(rv):
+            return r
+    return None
 
 
 
@@ -269,7 +305,7 @@ def verify_answer(
     # A rejected attempt later backed by a passing calculate() call (same
     # numeric result) is validated, regardless of whether the caller already
     # filtered it out — don't rely solely on the caller's bookkeeping.
-    rejected = {k: v for k, v in _rejected_forms(rejected_calcs).items() if k not in computed}
+    unretried_rejected = _split_retried_rejected(rejected_calcs, computed_values)
 
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
     raw_chunks = {cid: t for cid, t in chunk_texts.items()}
@@ -293,17 +329,16 @@ def verify_answer(
         bare = raw.replace(",", "")
 
         # Matches a calculate() call that was rejected and never
-        # successfully retried: real number, unvalidated derivation. Flag
-        # it alongside whatever the verified/unverified checks below find —
-        # the number will usually verify against the corpus (that's exactly
-        # how this slips through unnoticed otherwise), so this needs its
-        # own channel rather than reusing `unverified`.
-        rejected_hit = rejected.get(bare)
-        if rejected_hit is None:
-            rejected_hit = next(
-                (rejected[f] for f in _computed_forms([bare]) if f in rejected),
-                None,
-            )
+        # successfully retried: real (or near-real) number, unvalidated
+        # derivation. Flag it alongside whatever the verified/unverified
+        # checks below find — the number will usually verify against the
+        # corpus (that's exactly how this slips through unnoticed
+        # otherwise), so this needs its own channel rather than reusing
+        # `unverified`.
+        try:
+            rejected_hit = _find_rejected_match(float(bare), unretried_rejected)
+        except ValueError:
+            rejected_hit = None
         if rejected_hit is not None:
             report.flagged.append(Finding(
                 "derivation", raw,

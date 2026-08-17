@@ -42,6 +42,46 @@ def test_number_matching_retried_calc_is_not_flagged():
     assert report.flagged == []
 
 
+def test_near_boundary_rounding_error_still_matches_rejected_calc():
+    """Reproduces the reported ACN gap: an Asia Pacific segment margin whose
+    rejected calculate() call ('1810.0 / 9972.305 * 100') truly evaluates to
+    18.1503 (rounds to 18.2), but the memo states 18.1 — the model's own
+    rounding error, off the true value by ~0.05. The prior matcher compared
+    pre-rounded string forms of both sides ({"18.2","18.15"} vs {"18.1"}),
+    which never intersect no matter how the true value is rounded, since
+    18.1 isn't a rounded form of 18.1503 at all. Five sibling segment-margin
+    figures that happened to round cleanly were caught; this near-boundary
+    one wasn't — until matching became a numeric distance check."""
+    answer = "Asia Pacific operating margin was 18.1% in FY2025."
+    corpus = {0: answer}
+    rejected = [{
+        "value": 1810.0 / 9972.305 * 100,
+        "reason": "Rejected: no tool returned these figures during this run: 9972.305",
+        "expression": "1810.0 / 9972.305 * 100",
+    }]
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=rejected)
+
+    assert len(report.flagged) == 1
+    assert report.flagged[0].value == "18.1"
+
+
+def test_unrelated_number_far_from_any_rejected_value_is_not_flagged():
+    """The numeric-tolerance matcher must stay tight enough not to flag
+    figures that simply aren't related to any rejected calculation."""
+    answer = "Revenue was 64270 in FY2023."
+    corpus = {0: answer}
+    rejected = [{
+        "value": 18.15,
+        "reason": "Rejected: fiscal-period mismatch",
+        "expression": "1810.0 / 9972.305 * 100",
+    }]
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=rejected)
+
+    assert report.flagged == []
+
+
 def test_verify_memo_adds_unbacked_derivations_section():
     memo = "Free cash flow grew 26.2% year over year."
     corpus = "Free cash flow grew 26.2% year over year, per the MD&A."
