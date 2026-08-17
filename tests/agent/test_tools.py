@@ -1,6 +1,9 @@
+import pytest
+
 from app.agent.tools import (
     reset_run_provenance,
     record_tool_output,
+    safe_calculate,
     validate_calculate_inputs,
 )
 
@@ -27,9 +30,9 @@ def test_reproduces_reported_cross_fiscal_year_mismatch():
         "25.2 / 21.0",
         [
             {"value": 25.2, "label": "FY2023 debt", "fiscal_period": "FY2023",
-             "source": "V 10-K 2023 §Item 8"},
+             "source": "V 10-K 2023 §Item 8", "unit": "billions"},
             {"value": 21.0, "label": "FY2023 operating income", "fiscal_period": "FY2023",
-             "source": "V 10-K 2023 §Item 7"},
+             "source": "V 10-K 2023 §Item 7", "unit": "billions"},
         ],
     )
 
@@ -55,9 +58,9 @@ def test_correct_fiscal_period_pairing_passes():
         "25.2 / 24.0",
         [
             {"value": 25.2, "label": "FY2025 debt", "fiscal_period": "FY2025",
-             "source": "V 10-K 2025 §Item 8"},
+             "source": "V 10-K 2025 §Item 8", "unit": "billions"},
             {"value": 24.0, "label": "FY2025 operating income", "fiscal_period": "FY2025",
-             "source": "V 10-K 2025 §Item 7"},
+             "source": "V 10-K 2025 §Item 7", "unit": "billions"},
         ],
     )
 
@@ -74,7 +77,7 @@ def test_unparseable_fiscal_period_skips_check_rather_than_reject():
         "25.2 * 2",
         [
             {"value": 25.2, "label": "debt", "fiscal_period": "most recent annual filing",
-             "source": "V 10-K §Item 8"},
+             "source": "V 10-K §Item 8", "unit": "billions"},
         ],
     )
 
@@ -102,7 +105,7 @@ def test_documents_false_positive_risk_when_period_stated_far_from_value():
     err = validate_calculate_inputs(
         "25200 * 2",
         [{"value": 25200, "label": "debt", "fiscal_period": "FY2025",
-          "source": "X 10-K 2025"}],
+          "source": "X 10-K 2025", "unit": "millions"}],
     )
 
     assert err is not None
@@ -127,8 +130,101 @@ def test_value_retrieved_multiple_times_passes_if_any_occurrence_matches():
         "25.2 * 2",
         [
             {"value": 25.2, "label": "FY2025 debt", "fiscal_period": "FY2025",
-             "source": "V 10-K 2025 §Item 8"},
+             "source": "V 10-K 2025 §Item 8", "unit": "billions"},
         ],
     )
 
     assert err is None
+
+
+def test_missing_unit_is_rejected():
+    """Every declared input must state the scale it's reported at — a
+    figure retrieved without a unit is exactly the gap that let a
+    thousands-scale figure get divided by a millions-scale figure with
+    nothing to catch it."""
+    record_tool_output("Total debt was $25.2 billion. [V 10-K 2025 §Item 8]")
+
+    err = validate_calculate_inputs(
+        "25.2 * 2",
+        [{"value": 25.2, "label": "FY2025 debt", "fiscal_period": "FY2025",
+          "source": "V 10-K 2025 §Item 8"}],
+    )
+
+    assert err is not None
+    assert "unit" in err
+
+
+def test_invalid_unit_is_rejected():
+    record_tool_output("Total debt was $25.2 billion. [V 10-K 2025 §Item 8]")
+
+    err = validate_calculate_inputs(
+        "25.2 * 2",
+        [{"value": 25.2, "label": "FY2025 debt", "fiscal_period": "FY2025",
+          "source": "V 10-K 2025 §Item 8", "unit": "billion dollars"}],
+    )
+
+    assert err is not None
+    assert "unit" in err
+
+
+def test_reproduces_reported_acn_leverage_units_bug():
+    """Reproduces the reported ACN run: current debt ($114,484 thousand)
+    and noncurrent debt ($5,034,169 thousand) retrieved from the balance
+    sheet, operating income ($10,226 million) retrieved from the segment
+    table — both individually real and correctly attributed to FY2025, but
+    at mismatched scales. Without normalization the raw literals produce
+    503.486x; the correct leverage is ~0.50x. validate_calculate_inputs
+    must accept the call (every check besides units already passes), and
+    safe_calculate must apply the declared units rather than the model
+    doing the thousands->millions conversion by hand."""
+    record_tool_output(
+        "As of the FY2025 balance sheet date, current portion of long-term "
+        "debt was $114,484 thousand. [ACN 10-K 2025 §Item 8]"
+    )
+    record_tool_output(
+        "As of the FY2025 balance sheet date, long-term debt was "
+        "$5,034,169 thousand. [ACN 10-K 2025 §Item 8]"
+    )
+    record_tool_output(
+        "FY2025 operating income by segment totaled $10,226 million. "
+        "[ACN 10-K 2025 §Item 7]"
+    )
+
+    expression = "(114484 + 5034169) / 10226"
+    inputs = [
+        {"value": 114484, "label": "current portion of long-term debt",
+         "fiscal_period": "FY2025", "source": "ACN 10-K 2025 §Item 8",
+         "unit": "thousands"},
+        {"value": 5034169, "label": "long-term debt",
+         "fiscal_period": "FY2025", "source": "ACN 10-K 2025 §Item 8",
+         "unit": "thousands"},
+        {"value": 10226, "label": "operating income",
+         "fiscal_period": "FY2025", "source": "ACN 10-K 2025 §Item 7",
+         "unit": "millions"},
+    ]
+
+    assert validate_calculate_inputs(expression, inputs) is None
+
+    result = float(safe_calculate(expression, inputs))
+    assert result == pytest.approx(0.5035, abs=0.001)
+
+
+def test_same_unit_inputs_are_unaffected_by_normalization():
+    """Two figures declared in the same unit must produce the same result
+    as before units existed — normalization should be a no-op when scales
+    already match."""
+    record_tool_output("FY2025 debt was $25.2 billion. [V 10-K 2025 §Item 8]")
+    record_tool_output(
+        "FY2025 operating income was $24.0 billion. [V 10-K 2025 §Item 7]"
+    )
+
+    expression = "25.2 / 24.0"
+    inputs = [
+        {"value": 25.2, "label": "FY2025 debt", "fiscal_period": "FY2025",
+         "source": "V 10-K 2025 §Item 8", "unit": "billions"},
+        {"value": 24.0, "label": "FY2025 operating income", "fiscal_period": "FY2025",
+         "source": "V 10-K 2025 §Item 7", "unit": "billions"},
+    ]
+
+    result = float(safe_calculate(expression, inputs))
+    assert result == pytest.approx(25.2 / 24.0, abs=1e-9)
