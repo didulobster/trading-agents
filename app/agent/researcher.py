@@ -109,16 +109,18 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 
 def _save_output(content: str, ticker: str, mode: str) -> Path:
     """Save output with timestamp. Returns the path."""
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    now = datetime.now()
+    date = now.strftime("%Y%m%d")
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
     if mode == "news":
         filename = f"{ticker}-news-{timestamp}.md"
         out_path = MEMO_DIR / ticker / filename
     elif mode == "technical":
         filename = f"{ticker}-technical-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / timestamp / filename
+        out_path = MEMO_DIR / ticker / date / filename
     elif mode == "fundamentals":
         filename = f"{ticker}-fundamental-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / timestamp / filename
+        out_path = MEMO_DIR / ticker / date / filename
     else:
         filename = f"{ticker}-{timestamp}.md"
         out_path = MEMO_DIR / ticker / filename
