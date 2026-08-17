@@ -7,7 +7,7 @@ def setup_function():
 
 
 def test_save_output_writes_provenance_sibling(tmp_path, monkeypatch):
-    """The saved report gets a -provenance.txt sibling holding everything
+    """The saved report gets a -provenance.md sibling holding everything
     the tools returned this run, so a suspect figure in the report can be
     traced (or shown absent) after the process exits."""
     monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
@@ -15,7 +15,7 @@ def test_save_output_writes_provenance_sibling(tmp_path, monkeypatch):
 
     path = researcher._save_output("# Memo", "ACN", "fundamentals")
 
-    sibling = path.with_name(f"{path.stem}-provenance.txt")
+    sibling = path.with_name(f"{path.stem}-provenance.md")
     assert sibling.exists()
     assert "64,896" in sibling.read_text()
 
@@ -30,7 +30,7 @@ def test_save_output_skips_provenance_for_technical_mode(tmp_path, monkeypatch):
 
     path = researcher._save_output("# Technical report", "ACN", "technical")
 
-    assert not path.with_name(f"{path.stem}-provenance.txt").exists()
+    assert not path.with_name(f"{path.stem}-provenance.md").exists()
 
 
 def test_save_output_skips_provenance_when_corpus_empty(tmp_path, monkeypatch):
@@ -38,4 +38,4 @@ def test_save_output_skips_provenance_when_corpus_empty(tmp_path, monkeypatch):
 
     path = researcher._save_output("# Memo", "ACN", "fundamentals")
 
-    assert not path.with_name(f"{path.stem}-provenance.txt").exists()
+    assert not path.with_name(f"{path.stem}-provenance.md").exists()

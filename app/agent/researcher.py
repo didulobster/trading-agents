@@ -130,15 +130,17 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
     # Audit artifact: the run's full provenance corpus, saved beside the
     # report so any figure in it can be traced to — or shown absent from —
     # what the tools actually returned, instead of reconstructing the
-    # corpus by inference after the process exits. Skipped for the
-    # technical interpreter, which doesn't use the research tools: at its
-    # save time the module-global corpus still holds the preceding
-    # fundamentals run's text, and writing it would pair the wrong
-    # evidence with the report.
+    # corpus by inference after the process exits. Saved as .md (not .txt)
+    # so Obsidian's file explorer, which hides unknown extensions by
+    # default, shows it beside its report. Skipped for the technical
+    # interpreter, which doesn't use the research tools: at its save time
+    # the module-global corpus still holds the preceding fundamentals
+    # run's text, and writing it would pair the wrong evidence with the
+    # report.
     if mode != "technical":
         corpus = get_provenance_corpus()
         if corpus.strip():
-            out_path.with_name(f"{out_path.stem}-provenance.txt").write_text(corpus)
+            out_path.with_name(f"{out_path.stem}-provenance.md").write_text(corpus)
 
     return out_path
 
