@@ -238,6 +238,7 @@ USE_STUBS = False
 
 async def execute_tool(name: str, inputs: dict) -> str:
     print(f"  [tool call] {name}({inputs})")
+    record_log_line(f"  [tool call] {name}({inputs})")
     result = await _dispatch(name, inputs)
 
     # Feed tool output into the provenance corpus so calculate() can verify
@@ -256,9 +257,13 @@ async def execute_tool(name: str, inputs: dict) -> str:
         clean = re.sub(r"sim=\d\.\d+", "sim=", clean)
         record_tool_output(clean)
 
-    # Truncate noisy results in the console; the model still gets the full text
+    # Truncate noisy results in the console; the model still gets the full
+    # text, and so does the session log — a 300-char preview would gut the
+    # saved trace's audit value (tracing a memo figure back to the exact
+    # tool output that returned it is the whole point of the file)
     preview = result if len(result) < 300 else result[:300] + " …"
     print(f"  [tool result] {preview}", file=sys.stderr)
+    record_log_line(f"  [tool result] {result}")
     return result
 
 
@@ -511,12 +516,23 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
 _RETRIEVED_TEXT: list[str] = []
 _CALC_RESULTS: list[float] = []
 _REJECTED_CALC_ATTEMPTS: list[dict] = []
+_SESSION_LOG: list[str] = []
 
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
     _RETRIEVED_TEXT.clear()
     _CALC_RESULTS.clear()
     _REJECTED_CALC_ATTEMPTS.clear()
+    _SESSION_LOG.clear()
+
+def record_log_line(text: str) -> None:
+    """Append a line to the run's session log — the full terminal trace
+    (tool calls, tool results, agent commentary, turn markers) saved
+    beside the report for post-run auditing."""
+    _SESSION_LOG.append(text)
+
+def get_session_log() -> str:
+    return "\n".join(_SESSION_LOG)
 
 def record_calc_result(value: str | float) -> None:
     try:

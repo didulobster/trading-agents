@@ -6,6 +6,7 @@ import app.agent.tools as tools_module
 from app.agent.tools import (
     execute_tool,
     get_provenance_corpus,
+    get_session_log,
     reset_run_provenance,
     record_tool_output,
     record_calc_result,
@@ -298,3 +299,21 @@ def test_similarity_scores_are_stripped_from_provenance(monkeypatch):
     corpus = get_provenance_corpus()
     assert "0.516" not in corpus and "0.528" not in corpus
     assert "64,896" in corpus  # the actual figures are still recorded
+
+
+def test_session_log_records_full_untruncated_tool_results(monkeypatch):
+    """The console shows a 300-char preview, but the session log saved
+    beside the report must carry the full tool result — a truncated trace
+    can't answer 'which tool output produced this memo figure'."""
+    long_tail = "The final figure is $9,876 million."
+    long_result = "x" * 400 + " " + long_tail
+
+    async def fake_dispatch(name, inputs):
+        return long_result
+
+    monkeypatch.setattr(tools_module, "_dispatch", fake_dispatch)
+    asyncio.run(execute_tool("ask_edgar", {"question": "revenue?"}))
+
+    log = get_session_log()
+    assert "[tool call] ask_edgar" in log
+    assert long_tail in log  # beyond the 300-char console preview
