@@ -126,6 +126,20 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
         out_path = MEMO_DIR / ticker / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
+
+    # Audit artifact: the run's full provenance corpus, saved beside the
+    # report so any figure in it can be traced to — or shown absent from —
+    # what the tools actually returned, instead of reconstructing the
+    # corpus by inference after the process exits. Skipped for the
+    # technical interpreter, which doesn't use the research tools: at its
+    # save time the module-global corpus still holds the preceding
+    # fundamentals run's text, and writing it would pair the wrong
+    # evidence with the report.
+    if mode != "technical":
+        corpus = get_provenance_corpus()
+        if corpus.strip():
+            out_path.with_name(f"{out_path.stem}-provenance.txt").write_text(corpus)
+
     return out_path
 
 def _print_usage_summary(
