@@ -112,11 +112,16 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if mode == "news":
         filename = f"{ticker}-news-{timestamp}.md"
+        out_path = MEMO_DIR / ticker / filename
     elif mode == "technical":
         filename = f"{ticker}-technical-{timestamp}.md"
+        out_path = MEMO_DIR / ticker / timestamp / filename
+    elif mode == "fundamentals":
+        filename = f"{ticker}-fundamental-{timestamp}.md"
+        out_path = MEMO_DIR / ticker / timestamp / filename
     else:
         filename = f"{ticker}-{timestamp}.md"
-    out_path = MEMO_DIR / ticker / filename
+        out_path = MEMO_DIR / ticker / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
     return out_path
