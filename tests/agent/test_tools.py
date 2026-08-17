@@ -3,6 +3,9 @@ import pytest
 from app.agent.tools import (
     reset_run_provenance,
     record_tool_output,
+    record_calc_result,
+    record_rejected_calc,
+    get_unretried_rejected_calcs,
     safe_calculate,
     validate_calculate_inputs,
 )
@@ -228,3 +231,41 @@ def test_same_unit_inputs_are_unaffected_by_normalization():
 
     result = float(safe_calculate(expression, inputs))
     assert result == pytest.approx(25.2 / 24.0, abs=1e-9)
+
+
+def test_rejected_calc_surfaces_as_unretried_if_never_retried():
+    """Reproduces the reported ACN FCF gap: a calculate() call rejected for
+    fiscal-period mismatch, whose result the model then used in the memo
+    anyway without ever making a passing call. The would-be result must
+    surface via get_unretried_rejected_calcs() so the memo verifier has a
+    chance to flag it, even though citation_verifier alone would pass it
+    (the raw FCF figures are legitimately retrieved text)."""
+    expression = "(10874.4 - 8614.518) / 8614.518 * 100"
+    inputs = [
+        {"value": 10874.4, "label": "FY2025 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+        {"value": 8614.518, "label": "FY2023 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+    ]
+    record_rejected_calc(expression, inputs, "Rejected: fiscal-period mismatch")
+
+    unretried = get_unretried_rejected_calcs()
+    assert len(unretried) == 1
+    assert unretried[0]["value"] == pytest.approx(26.233, abs=0.001)
+
+
+def test_rejected_calc_dropped_once_successfully_retried():
+    """The same derivation, later backed by a passing calculate() call with
+    correctly labeled inputs, must no longer be reported as unretried —
+    the model did the right thing on retry."""
+    expression = "(10874.4 - 8614.518) / 8614.518 * 100"
+    inputs = [
+        {"value": 10874.4, "label": "FY2025 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+        {"value": 8614.518, "label": "FY2023 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+    ]
+    record_rejected_calc(expression, inputs, "Rejected: fiscal-period mismatch")
+    record_calc_result(safe_calculate(expression, inputs))
+
+    assert get_unretried_rejected_calcs() == []

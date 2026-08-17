@@ -30,7 +30,7 @@ from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, reset_run_provenance
+from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_unretried_rejected_calcs, reset_run_provenance
 from app.application.memo_verifier import verify_memo
 
 load_dotenv()
@@ -281,7 +281,8 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
                 b.text for b in response.content if b.type == "text"
             )
             final = _strip_preamble(final)
-            final = verify_memo(final, get_provenance_corpus(), get_calc_results())
+            final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+                               get_unretried_rejected_calcs())
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
 
@@ -325,7 +326,8 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
 
     final = "".join(b.text for b in response.content if b.type == "text")
     final = _strip_preamble(final)
-    final = verify_memo(final, get_provenance_corpus(), get_calc_results())
+    final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+                        get_unretried_rejected_calcs())
     return final, usage
 
 

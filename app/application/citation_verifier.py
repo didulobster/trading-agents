@@ -76,6 +76,11 @@ class VerificationReport:
     verified: list[Finding] = field(default_factory=list)
     unverified: list[Finding] = field(default_factory=list)
     skipped: list[Finding] = field(default_factory=list)
+    # Numbers that exist in the source material (so they're NOT "unverified")
+    # but that also match a calculate() call this run rejected and the model
+    # never successfully retried — the number may well be correct, but no
+    # passing tool call in this run's trace backs how it was derived.
+    flagged: list[Finding] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -84,10 +89,14 @@ class VerificationReport:
     def summary(self) -> str:
         lines = [
             f"Citation check: {len(self.verified)} verified, "
-            f"{len(self.unverified)} UNVERIFIED, {len(self.skipped)} skipped"
+            f"{len(self.unverified)} UNVERIFIED, {len(self.skipped)} skipped, "
+            f"{len(self.flagged)} flagged (unbacked derivation)"
         ]
         for f in self.unverified:
             lines.append(f"  UNVERIFIED {f.kind}: {f.value}")
+            lines.append(f"      context: …{f.context}…")
+        for f in self.flagged:
+            lines.append(f"  UNBACKED {f.kind}: {f.value}")
             lines.append(f"      context: …{f.context}…")
         return "\n".join(lines)
 
@@ -174,6 +183,20 @@ def _computed_forms(values) -> set[str]:
     return out
 
 
+def _rejected_forms(rejected: list[dict] | None) -> dict[str, dict]:
+    """Map string forms of an unretried rejected calculate() result back to
+    the record (value/reason/expression) that produced it."""
+    out: dict[str, dict] = {}
+    for r in rejected or []:
+        try:
+            f = float(r.get("value"))
+        except (TypeError, ValueError):
+            continue
+        for s in {f"{f:.1f}", f"{f:.2f}", str(round(f, 1)), str(round(f, 2))}:
+            out[s] = r
+    return out
+
+
 
 _CORPUS_NUM_RE = re.compile(r"-?\(?[\d,]+\.?\d*\)?")
 
@@ -221,6 +244,7 @@ def verify_answer(
     answer: str,
     chunk_texts: dict[int, str],
     computed_values: list[float] | None = None,
+    rejected_calcs: list[dict] | None = None,
 ) -> VerificationReport:
     """
     answer          : the generated answer text
@@ -229,11 +253,23 @@ def verify_answer(
     computed_values : results returned by calculate() during this run.
                       Without these, every legitimately computed ratio is
                       reported unverified and the report becomes noise.
+    rejected_calcs  : calculate() calls rejected this run and never
+                      successfully retried — each a dict with `value`
+                      (what the expression would have evaluated to),
+                      `reason`, and `expression`. A number matching one of
+                      these is real (it'll usually also verify against the
+                      corpus) but its derivation was never validated by a
+                      passing tool call; recorded in `report.flagged`
+                      rather than `report.unverified`.
 
     Returns a VerificationReport. `unverified` is what needs a human look.
     """
     report = VerificationReport()
     computed = _computed_forms(computed_values)
+    # A rejected attempt later backed by a passing calculate() call (same
+    # numeric result) is validated, regardless of whether the caller already
+    # filtered it out — don't rely solely on the caller's bookkeeping.
+    rejected = {k: v for k, v in _rejected_forms(rejected_calcs).items() if k not in computed}
 
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
     raw_chunks = {cid: t for cid, t in chunk_texts.items()}
@@ -254,9 +290,30 @@ def verify_answer(
             report.skipped.append(Finding("number", raw, context))
             continue
 
+        bare = raw.replace(",", "")
+
+        # Matches a calculate() call that was rejected and never
+        # successfully retried: real number, unvalidated derivation. Flag
+        # it alongside whatever the verified/unverified checks below find —
+        # the number will usually verify against the corpus (that's exactly
+        # how this slips through unnoticed otherwise), so this needs its
+        # own channel rather than reusing `unverified`.
+        rejected_hit = rejected.get(bare)
+        if rejected_hit is None:
+            rejected_hit = next(
+                (rejected[f] for f in _computed_forms([bare]) if f in rejected),
+                None,
+            )
+        if rejected_hit is not None:
+            report.flagged.append(Finding(
+                "derivation", raw,
+                f"{context} [matches a calculate() call rejected for: "
+                f"{rejected_hit['reason'][:120]} — never successfully "
+                f"retried]",
+            ))
+
         # A figure matching a calculate() result is verified as computed,
         # not fabricated. chunk id -1 marks "produced by the calculator".
-        bare = raw.replace(",", "")
         if bare in computed or _computed_forms([bare]) & computed:
             report.verified.append(Finding("computed", raw, context, -1))
             continue
