@@ -153,19 +153,23 @@ def _corpus_number_tokens(text: str) -> list[str]:
     return [m.group().rstrip(".") for m in _NUMBER_RE.finditer(text) if m.group().rstrip(".")]
 
 
-def _matches_corpus_token(variants: set[str], token: str) -> bool:
-    """True if a memo number's string variants match this single corpus
-    token — either exactly, or as an integer truncation of a more precise
-    filing figure (filing writes "1,364.1", memo writes "1364").
+def _matches_corpus_token(raw: str, variants: set[str], token: str) -> bool:
+    """True if the memo number `raw` matches this single corpus token —
+    exactly, as an integer truncation of a more precise filing figure
+    (filing writes "1,364.1", memo writes "1364"), or as a rounding of it
+    at the memo's own displayed precision (extract_metrics returns
+    10874.36, memo writes "10,874.4" — within half a step of the memo's
+    last decimal, so a legitimate restatement, not an invention).
 
     Deliberately NOT a substring check (`variant in token` or `variant in
     text`): that allowed a memo figure to "verify" merely by occurring
     inside an unrelated, larger corpus number that happens to contain the
     same digits — e.g. a fabricated "420.5" matched because "3,420.5"
-    (a different figure entirely) appeared somewhere in the corpus. Matching
-    against whole tokens, with only the one documented truncation case
-    handled explicitly, closes that gap while keeping the truncation
-    feature the substring check was originally added for.
+    (a different figure entirely) appeared somewhere in the corpus.
+    Matching against whole tokens, with truncation and rounding as the
+    only numeric slop — both bounded by the memo's displayed precision —
+    closes that gap while keeping the restatement cases the substring
+    check was originally added for.
     """
     bare_token = token.replace(",", "")
     for v in variants:
@@ -174,7 +178,10 @@ def _matches_corpus_token(variants: set[str], token: str) -> bool:
             return True
         if bare_token.startswith(bare_v + "."):
             return True
-    return False
+    try:
+        return abs(float(bare_token) - float(raw.replace(",", ""))) <= _half_step(raw)
+    except ValueError:
+        return False
 
 
 def _normalize_text(s: str) -> str:
@@ -404,11 +411,13 @@ def verify_answer(
 
         # Matches a calculate() call that was rejected and never
         # successfully retried: real (or near-real) number, unvalidated
-        # derivation. Flag it alongside whatever the verified/unverified
-        # checks below find — the number will usually verify against the
-        # corpus (that's exactly how this slips through unnoticed
-        # otherwise), so this needs its own channel rather than reusing
-        # `unverified`.
+        # derivation. This needs its own channel rather than reusing
+        # `unverified` — the number will usually verify against the corpus
+        # (that's exactly how this slips through unnoticed otherwise). It
+        # also supersedes the verified/unverified classification entirely:
+        # the flagged entry carries the rejection reason, and listing the
+        # same figure in both report sections reads as two separate
+        # problems when it's one.
         try:
             rejected_hit = _find_rejected_match(float(bare), unretried_rejected)
         except ValueError:
@@ -420,6 +429,7 @@ def verify_answer(
                 f"{rejected_hit['reason'][:120]} — never successfully "
                 f"retried]",
             ))
+            continue
 
         # A figure matching a calculate() result is verified as computed,
         # not fabricated. chunk id -1 marks "produced by the calculator".
@@ -430,7 +440,7 @@ def verify_answer(
         variants = _number_variants(raw)
         hit = None
         for cid, tokens in chunk_tokens.items():
-            if any(_matches_corpus_token(variants, tok) for tok in tokens):
+            if any(_matches_corpus_token(raw, variants, tok) for tok in tokens):
                 hit = cid
                 break
         if hit is None:

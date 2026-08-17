@@ -180,6 +180,45 @@ def test_scale_restatement_of_real_figure_still_verifies():
     assert {f.value for f in report.verified} == {"877.4", "615"}
 
 
+def test_rounded_restatement_of_retrieved_figure_is_not_flagged():
+    """Reproduces a reported false positive: extract_metrics returned
+    free_cash_flow: 10874.36, a passing calculate() call consumed that
+    exact value, and the memo restated it as $10,874.4M — a one-decimal
+    rounding of a legitimately sourced figure. The token matcher's only
+    numeric case was integer truncation ("1364" vs "1,364.1"), so a
+    rounding fell through and got flagged as unverified. A corpus token
+    within half a step of the memo's last displayed decimal is a
+    restatement, not an invention."""
+    answer = "Free cash flow reached $10,874.4M in FY2025."
+    corpus = {0: '{"free_cash_flow": 10874.36, "fiscal_period": "FY2025"}'}
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=[])
+
+    assert report.unverified == []
+    assert {f.value for f in report.verified} == {"10,874.4"}
+
+
+def test_figure_matching_rejected_calc_is_not_also_listed_unverified():
+    """Reproduces a reported redundancy: 0.50 (a leverage ratio whose
+    calculate() calls were all rejected and never retried) appeared in
+    both "Unverified Figures" and "Unbacked Derivations" — two detectors
+    reporting the same underlying problem as if it were two. The unbacked
+    entry carries the rejection reason, so it supersedes the
+    verified/unverified classification."""
+    answer = "Leverage rose to 0.50x in FY2025."
+    corpus = {0: "The filing discusses debt levels but no ratio figures."}
+    rejected = [{
+        "value": 0.5035,
+        "reason": "Rejected: no tool returned these figures during this run",
+        "expression": "(114484 + 5034169) / 10226000",
+    }]
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=rejected)
+
+    assert {f.value for f in report.flagged} == {"0.50"}
+    assert report.unverified == []
+
+
 def test_verify_memo_adds_unbacked_derivations_section():
     memo = "Free cash flow grew 26.2% year over year."
     corpus = "Free cash flow grew 26.2% year over year, per the MD&A."
