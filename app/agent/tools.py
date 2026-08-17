@@ -138,8 +138,20 @@ TOOLS = [
                             "label": {"type": "string", "description": "e.g. 'total net sales'"},
                             "fiscal_period": {"type": "string", "description": "e.g. 'FY2024'"},
                             "source": {"type": "string", "description": "e.g. 'ASML 20-F 2026 §Item 6'"},
+                            "unit": {
+                                "type": "string",
+                                "enum": ["ones", "thousands", "millions", "billions", "percent", "ratio"],
+                                "description": (
+                                    "The scale this figure is actually reported at in the "
+                                    "filing — e.g. a balance-sheet line in thousands and a "
+                                    "segment-table line in millions both appear, unconverted, "
+                                    "in the same 10-K. Declare the real scale here instead of "
+                                    "converting by hand in the expression; the tool normalizes "
+                                    "before combining values reported at different scales."
+                                ),
+                            },
                         },
-                        "required": ["value", "label", "fiscal_period", "source"],
+                        "required": ["value", "label", "fiscal_period", "source", "unit"],
                     },
                 },
             },
@@ -165,25 +177,53 @@ _ALLOWED_OPS = {
 }
 
 
-def safe_calculate(expression: str) -> str:
+# Scale factors for each unit a `calculate` input can declare. A figure's
+# literal in the expression is normalized by its declared unit before the
+# arithmetic runs, so a thousands-scale figure and a millions-scale figure
+# combine correctly even though the model never wrote a conversion factor.
+_UNIT_SCALES = {
+    "ones": 1.0,
+    "thousands": 1_000.0,
+    "millions": 1_000_000.0,
+    "billions": 1_000_000_000.0,
+    "percent": 1.0,
+    "ratio": 1.0,
+}
+
+
+def safe_calculate(expression: str, inputs: list[dict] | None = None) -> str:
     try:
         node = ast.parse(expression, mode="eval").body
-        return str(_eval_node(node))
+        scale_by_value = _scale_by_value(inputs or [])
+        return str(_eval_node(node, scale_by_value))
     except Exception as e:
         return f"Error evaluating '{expression}': {e}"
 
 
-def _eval_node(node):
+def _scale_by_value(inputs: list[dict]) -> dict[float, float]:
+    out: dict[float, float] = {}
+    for i in inputs:
+        if i.get("value") is None:
+            continue
+        scale = _UNIT_SCALES.get(i.get("unit"))
+        if scale is not None:
+            out[float(i["value"])] = scale
+    return out
+
+
+def _eval_node(node, scale_by_value: dict[float, float] | None = None):
+    scale_by_value = scale_by_value or {}
     if isinstance(node, ast.Constant):
         if isinstance(node.value, (int, float)):
-            return node.value
+            value = float(node.value)
+            return value * scale_by_value.get(value, 1.0)
         raise ValueError("only numeric constants allowed")
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_OPS:
         return _ALLOWED_OPS[type(node.op)](
-            _eval_node(node.left), _eval_node(node.right)
+            _eval_node(node.left, scale_by_value), _eval_node(node.right, scale_by_value)
         )
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_OPS:
-        return _ALLOWED_OPS[type(node.op)](_eval_node(node.operand))
+        return _ALLOWED_OPS[type(node.op)](_eval_node(node.operand, scale_by_value))
     raise ValueError(f"disallowed expression element: {type(node).__name__}")
 
 
@@ -224,7 +264,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
         )
         if err:
             return err
-        result = safe_calculate(inputs["expression"])
+        result = safe_calculate(inputs["expression"], inputs.get("inputs", []))
         record_calc_result(result)
         return result
 
@@ -328,14 +368,24 @@ _UNIT_MULTIPLIERS = {1000.0, 1000000.0, 1_000_000_000.0}
 
 def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None:
     """
-    Four checks, in order of how cheaply they fail:
+    Five checks, in order of how cheaply they fail:
       1. no unit-conversion multipliers (fingerprint of a remembered figure)
       2. every literal in the expression is declared in `inputs`
-      3. every declared input actually appeared in some tool output this run
-      4. every declared input's fiscal_period year actually appears near
+      3. every declared input names a valid `unit` — the scale it's stated
+         at in the filing. Two individually-retrieved, individually-correct
+         figures (a balance-sheet line in thousands, a segment-table line
+         in millions) can still combine into a wrong ratio if nothing
+         normalizes them onto the same scale. Checks 1-2 and 4-5 confirm a
+         figure is real and correctly attributed; none of them confirm two
+         real figures were combined at the same scale — that's this check's
+         job, and it's what lets safe_calculate() normalize automatically
+         instead of relying on the model to convert by hand (which check 1
+         already forbids doing inside the expression).
+      4. every declared input actually appeared in some tool output this run
+      5. every declared input's fiscal_period year actually appears near
          where that value was retrieved — catches a real value paired with
          the wrong period's label (e.g. FY2025's debt figure declared as
-         FY2023's), which check 3 alone can't see: it only confirms the
+         FY2023's), which check 4 alone can't see: it only confirms the
          number exists somewhere in this run's retrieved text, not that it
          was retrieved *for the period being claimed*. This is the exact
          gap citation_verifier.py's docstring names as out of its scope:
@@ -368,7 +418,27 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"and source."
         )
  
-    # 3 — declared but never returned by any tool
+    # 3 — every declared input states a valid unit
+    bad_units = [
+        i for i in inputs
+        if i.get("value") is not None
+        and float(i["value"]) not in _OPERATION_SCALARS
+        and i.get("unit") not in _UNIT_SCALES
+    ]
+    if bad_units:
+        detail = "; ".join(
+            f"{i['value']} ({i.get('label', 'unlabelled')}) unit={i.get('unit')!r}"
+            for i in bad_units
+        )
+        return (
+            f"Rejected: missing or invalid `unit` for: {detail}. Declare the "
+            f"scale each figure is actually reported at in the filing — one "
+            f"of {sorted(_UNIT_SCALES)}. This lets calculate normalize a "
+            f"thousands-scale figure and a millions-scale figure onto the "
+            f"same footing before combining them; do not convert by hand."
+        )
+
+    # 4 — declared but never returned by any tool
     corpus = _provenance_corpus()
     if corpus:
         unsourced = [
@@ -391,7 +461,7 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
                 f"retrieved figures."
             )
 
-        # 4 — real value, wrong period label
+        # 5 — real value, wrong period label
         outputs = _RETRIEVED_TEXT
         mismatched = []
         for i in inputs:

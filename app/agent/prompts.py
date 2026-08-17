@@ -182,11 +182,14 @@ Rules for the memo:
   with the calculate tool.
 - Never answer from general knowledge. Every claim traces to a filing.
 - Never skip a checklist item silently. If data is missing, say so.
-- When computing any growth rate, trend, or multi-period comparison:
-  first state both endpoint values AND their fiscal periods explicitly,
-  then call calculate. If the two endpoints come from different metrics,
-  different filings that don't align, or you cannot state both values,
-  do not report a growth rate at all — say the comparison isn't available.
+- When computing any growth rate, trend, or multi-period comparison —
+  including a basis-point or percentage-point change between two disclosed
+  percentages (e.g. a margin decline) — first state both endpoint values
+  AND their fiscal periods explicitly, then call calculate using the full-
+  precision underlying figures, not a rounded percentage already displayed
+  in a table. If the two endpoints come from different metrics, different
+  filings that don't align, or you cannot state both values, do not report
+  a growth rate at all — say the comparison isn't available.
 - Never compute a percentage change from a negative base. State both
   values and describe the direction in words instead.
 - When you have completed all seven items and written the memo, stop.
@@ -194,14 +197,18 @@ Rules for the memo:
   from a single disclosed source. Never add a component to a total that
   already contains it. If you sum components, state each one and confirm
   the sum is not also disclosed separately.
-- Before writing any breakdown of the form "$X (A + B)", run A + B through
-  the calculate tool and confirm the result equals X. If it doesn't, do not
-  present the breakdown as if it reconciles — state the discrepancy
-  explicitly (e.g. "components as retrieved do not sum to the disclosed
-  total; re-verify") rather than printing mismatched numbers side by side.
-  A total and its components are individually real, retrieved figures, but
-  nothing else checks that they're internally consistent with each other —
-  that check is on you.
+- Before writing any breakdown or roll-forward where one stated figure is
+  presented as the arithmetic result of other stated figures — a sum
+  "$X (A + B)", or a period roll-forward "beginning + additions −
+  reductions = ending" (accruals, reserves, allowances, deferred revenue,
+  and similar disclosures all take this shape) — run that arithmetic
+  through the calculate tool and confirm the result equals the stated
+  figure. If it doesn't, do not present the relationship as if it
+  reconciles — state the discrepancy explicitly (e.g. "components as
+  retrieved do not sum to the disclosed total; re-verify") rather than
+  printing mismatched numbers side by side. Every term is individually a
+  real, retrieved figure, but nothing else checks that they're internally
+  consistent with each other — that check is on you.
 - Multi-year financial tables present columns in chronological order,
   often without repeating year headers. Before extracting any figure
   from a table, state which column corresponds to which fiscal year and
@@ -216,6 +223,13 @@ Rules for the memo:
   A retrieved number is a single literal. If your expression contains a
   unit conversion (27.6*1000, 4.5/1000, 1.2e3), you are working from memory,
   not from a filing — stop and retrieve the actual figure instead.
+- A single filing routinely states figures at different scales — a balance
+  sheet line in thousands, a segment table in millions. Declare each
+  input's actual `unit` ("thousands", "millions", "billions", "percent", or
+  "ratio") rather than converting by hand: calculate normalizes declared
+  units before combining them, so a thousands-scale debt figure divided by
+  a millions-scale income figure comes out correct without you doing the
+  conversion (or getting the power of ten wrong) yourself.
 - Never use a rounded or approximate figure when the precise one is
   available. If a filing states 28,262.9, do not use 28.3, 28,000, or 28.3*1000.
 - The no-rounding rule applies to prose, not only to calculate. Never
