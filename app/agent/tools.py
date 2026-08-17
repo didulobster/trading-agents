@@ -247,8 +247,13 @@ async def execute_tool(name: str, inputs: dict) -> str:
     #   - the verifier's warning block: a flagged figure appears inside the
     #     answer text, and recording it would make the fabrication count
     #     as "returned by a tool" for later calculate calls
+    #   - similarity scores in ask_edgar citation lines: retrieval
+    #     diagnostics, not filing figures. Left in, every sim=0.XXX becomes
+    #     a corpus number the verifier's scale-tolerant fallback can match
+    #     a fabricated memo figure against (516.5/1000 ≈ sim=0.516)
     if name != "calculate":
         clean = result.split("WARNING — these figures")[0]
+        clean = re.sub(r"sim=\d\.\d+", "sim=", clean)
         record_tool_output(clean)
 
     # Truncate noisy results in the console; the model still gets the full text

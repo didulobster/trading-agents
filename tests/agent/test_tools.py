@@ -1,6 +1,11 @@
+import asyncio
+
 import pytest
 
+import app.agent.tools as tools_module
 from app.agent.tools import (
+    execute_tool,
+    get_provenance_corpus,
     reset_run_provenance,
     record_tool_output,
     record_calc_result,
@@ -269,3 +274,27 @@ def test_rejected_calc_dropped_once_successfully_retried():
     record_calc_result(safe_calculate(expression, inputs))
 
     assert get_unretried_rejected_calcs() == []
+
+
+def test_similarity_scores_are_stripped_from_provenance(monkeypatch):
+    """ask_edgar citation lines carry retrieval diagnostics (sim=0.516)
+    that are not filing figures. Recorded verbatim, every sim score became
+    a corpus number the verifier's scale fallback could match a fabricated
+    memo figure against ($516.5M / 1000 ≈ sim=0.516 — the exact mechanism
+    behind a reported run's invented capex column). The scores must be
+    stripped before the output enters the provenance corpus; the model
+    still sees them in the raw tool result."""
+    async def fake_dispatch(name, inputs):
+        return (
+            "Revenue was $64,896 million. [ACN 10-K 2025 §Item 7]\n"
+            "Sources:\n  [ACN 10-K 2025 §Item 7] sim=0.516\n"
+            "  [ACN 10-K 2025 §Item 8] sim=0.528"
+        )
+
+    monkeypatch.setattr(tools_module, "_dispatch", fake_dispatch)
+    result = asyncio.run(execute_tool("ask_edgar", {"question": "revenue?"}))
+
+    assert "sim=0.516" in result  # model still sees the scores
+    corpus = get_provenance_corpus()
+    assert "0.516" not in corpus and "0.528" not in corpus
+    assert "64,896" in corpus  # the actual figures are still recorded

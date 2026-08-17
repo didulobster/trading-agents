@@ -298,24 +298,54 @@ def _corpus_values(corpus: str) -> list[float]:
     return out
 
 
-def _matches_with_scale(value: float, corpus_values: list[float]) -> bool:
+def _half_step(raw: str) -> float:
+    """Half of one step in `raw`'s last displayed decimal place — the
+    largest distance a source figure can sit from `raw` while still
+    legitimately rounding to it. "877.4" -> 0.05; "615" -> 0.5."""
+    bare = raw.replace(",", "")
+    decimals = len(bare.split(".")[1]) if "." in bare else 0
+    return 0.5 * 10 ** -decimals
+
+
+def _matches_with_scale(value: float, raw: str, corpus_values: list[float]) -> bool:
     """
     True if `value` matches a corpus figure directly or after a unit change.
 
     Filings that report in thousands are routinely restated in millions in a
     memo: the corpus holds 877,433 and the memo says 877.4. Comparison is
-    numeric with a tolerance sized to the memo's precision, not string-based.
+    numeric, and the tolerance is direction-aware:
+
+    - corpus figure scaled DOWN to the memo's units: the memo is a rounded
+      restatement of a more precise source figure, so the tolerance is the
+      memo's own rounding slop — half a step in its last displayed decimal
+      (`_half_step`). 877,433/1000 = 877.433 rounds to the memo's 877.4.
+    - memo figure scaled DOWN to a corpus figure: the memo is claiming MORE
+      precision than the corpus figure carries, which a rounded restatement
+      can never legitimately do — so only an essentially exact match (tight
+      relative tolerance, no absolute floor) counts.
+
+    An earlier version used max(0.05, x*0.0005) symmetrically in both
+    directions. After dividing by 1000, that 0.05 absolute floor is a ±50
+    window on the original number — wide enough that six fabricated memo
+    figures ($11,474.4M operating cash flow, $600.0M capex, ...) all
+    "verified" against nothing but citation similarity scores (516.5/1000 ≈
+    sim=0.516) and unrelated one-decimal percentages in prose (11,474.4/1000
+    ≈ "11.5%"). In a dense corpus nearly any 3-5 digit number collided with
+    something.
     """
     av = abs(value)
+    half = _half_step(raw)
     for c in corpus_values:
         ac = abs(c)
         if ac == av:
             return True
-        # corpus in thousands, memo in millions (and the reverse)
         for scale in (1000.0, 1_000_000.0):
-            if ac and abs(ac / scale - av) <= max(0.05, av * 0.0005):
+            # corpus in thousands, memo in millions: memo may be rounded
+            if ac and abs(ac / scale - av) <= half:
                 return True
-            if av and abs(av / scale - ac) <= max(0.05, ac * 0.0005):
+            # memo in thousands, corpus in millions: memo may not invent
+            # precision beyond the corpus figure — near-exact only
+            if av and ac and abs(av / scale - ac) <= ac * 0.0005:
                 return True
     return False
 
@@ -406,7 +436,7 @@ def verify_answer(
         if hit is None:
             # Fall back to scale-aware numeric comparison (thousands vs millions)
             try:
-                if _matches_with_scale(float(bare), _corpus_nums):
+                if _matches_with_scale(float(bare), raw, _corpus_nums):
                     hit = -2
             except ValueError:
                 pass

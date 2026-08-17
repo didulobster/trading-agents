@@ -129,6 +129,57 @@ def test_truncated_decimal_still_matches_more_precise_corpus_figure():
     assert len(report.verified) == 1
 
 
+def test_fabricated_table_figures_cannot_verify_against_percentages():
+    """Reproduces the second reported ACN fabrication: a fully invented
+    three-year OCF/capex table ($11,474.4M / $9,131.0M / $9,524.3M and
+    $600.0M / $516.5M / $528.2M) whose six numbers appear nowhere in the
+    tool trace — the only cash-flow ask_edgar calls explicitly said the
+    data wasn't retrievable. They evaded the token-anchored check via the
+    scale fallback's old symmetric tolerance: after dividing by 1000, its
+    0.05 absolute floor was a ±50 window on the original number, so
+    11,474.4/1000 ≈ 11.47 'matched' an unrelated '11.5%' in prose and
+    516.5/1000 ≈ 0.5165 'matched' a citation similarity score sim=0.516.
+    With direction-aware tolerances (and sim scores kept out of the corpus
+    at the source, tested separately in test_tools), a fabricated figure
+    can no longer verify against percentages it has no relation to."""
+    corpus = {0: (
+        "The filing does not contain the complete operating cash flow "
+        "figures. Revenue grew 11.5% in local currency. Operating margin "
+        "was 9.1% for one segment and 9.5% for another. Free cash flow "
+        "was 10,874.36.\nSources:\n  [ACN 10-K 2025 §Item 7] sim=\n"
+        "  [ACN 10-K 2025 §Item 8] sim="
+    )}
+    memo = (
+        "| Operating Cash Flow ($M) | 11,474.4 | 9,131.0 | 9,524.3 |\n"
+        "| Capital Expenditures ($M) | 600.0 | 516.5 | 528.2 |\n"
+        "Free cash flow was 10,874.36 in FY2025."
+    )
+
+    report = verify_answer(memo, corpus, computed_values=[], rejected_calcs=[])
+
+    unverified = {f.value for f in report.unverified}
+    assert {"11,474.4", "9,131.0", "9,524.3", "600.0", "516.5", "528.2"} <= unverified
+    assert {f.value for f in report.verified} == {"10,874.36"}
+
+
+def test_scale_restatement_of_real_figure_still_verifies():
+    """The legitimate cases the scale fallback exists for must survive the
+    tightened tolerances: a thousands-scale corpus figure restated rounded
+    in millions (877,433 -> 877.4), and the same restated to a whole
+    number (615,433 -> 615) — the memo's precision is its rounding slop,
+    half a step in the last displayed decimal."""
+    corpus = {0: (
+        "Total revenues were $877,433 thousand. Business optimization "
+        "costs were $615,433 thousand."
+    )}
+    memo = "Revenue was $877.4M against optimization costs of $615M."
+
+    report = verify_answer(memo, corpus, computed_values=[], rejected_calcs=[])
+
+    assert report.unverified == []
+    assert {f.value for f in report.verified} == {"877.4", "615"}
+
+
 def test_verify_memo_adds_unbacked_derivations_section():
     memo = "Free cash flow grew 26.2% year over year."
     corpus = "Free cash flow grew 26.2% year over year, per the MD&A."
