@@ -223,6 +223,13 @@ Rules for the memo:
   A retrieved number is a single literal. If your expression contains a
   unit conversion (27.6*1000, 4.5/1000, 1.2e3), you are working from memory,
   not from a filing — stop and retrieve the actual figure instead.
+- A single filing routinely states figures at different scales — a balance
+  sheet line in thousands, a segment table in millions. Declare each
+  input's actual `unit` ("thousands", "millions", "billions", "percent", or
+  "ratio") rather than converting by hand: calculate normalizes declared
+  units before combining them, so a thousands-scale debt figure divided by
+  a millions-scale income figure comes out correct without you doing the
+  conversion (or getting the power of ten wrong) yourself.
 - Never use a rounded or approximate figure when the precise one is
   available. If a filing states 28,262.9, do not use 28.3, 28,000, or 28.3*1000.
 - The no-rounding rule applies to prose, not only to calculate. Never
