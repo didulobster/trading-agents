@@ -24,6 +24,16 @@ period's year actually appears near where the value was retrieved. This
 verifier still can't catch a mislabeled figure that never went through
 calculate() — e.g. a raw retrieved number stated directly in prose without
 a computation. That gap remains open.
+
+A prior version matched corpus figures by raw substring search
+(`variant in text`), which let a fabricated number "verify" merely by
+occurring inside an unrelated, larger corpus number — a made-up "$420.5M"
+passed because "$3,420.5" (a different figure) appeared somewhere in the
+retrieved text. Matching is now token-anchored (`_matches_corpus_token`):
+a memo number must equal a whole corpus number token, not just be found
+somewhere inside one. The one legitimate case the substring check
+existed for — a memo truncating a filing's more precise decimal, e.g.
+memo "1364" for filing "1,364.1" — is still handled explicitly.
 """
 
 from __future__ import annotations
@@ -131,6 +141,40 @@ def _number_variants(raw: str) -> set[str]:
         variants.add(f"{val:,.2f}")
 
     return {v for v in variants if v}
+
+
+def _corpus_number_tokens(text: str) -> list[str]:
+    """Every standalone numeric token in `text`, as `_NUMBER_RE` finds it.
+
+    finditer already tokenizes atomically — on "$3,420.5 thousand" it
+    yields the single token "3,420.5", never a spurious "420.5" — so this
+    exists to make that tokenization explicit and reusable, not to add new
+    parsing behavior."""
+    return [m.group().rstrip(".") for m in _NUMBER_RE.finditer(text) if m.group().rstrip(".")]
+
+
+def _matches_corpus_token(variants: set[str], token: str) -> bool:
+    """True if a memo number's string variants match this single corpus
+    token — either exactly, or as an integer truncation of a more precise
+    filing figure (filing writes "1,364.1", memo writes "1364").
+
+    Deliberately NOT a substring check (`variant in token` or `variant in
+    text`): that allowed a memo figure to "verify" merely by occurring
+    inside an unrelated, larger corpus number that happens to contain the
+    same digits — e.g. a fabricated "420.5" matched because "3,420.5"
+    (a different figure entirely) appeared somewhere in the corpus. Matching
+    against whole tokens, with only the one documented truncation case
+    handled explicitly, closes that gap while keeping the truncation
+    feature the substring check was originally added for.
+    """
+    bare_token = token.replace(",", "")
+    for v in variants:
+        bare_v = v.replace(",", "")
+        if v == token or bare_v == bare_token:
+            return True
+        if bare_token.startswith(bare_v + "."):
+            return True
+    return False
 
 
 def _normalize_text(s: str) -> str:
@@ -308,7 +352,7 @@ def verify_answer(
     unretried_rejected = _split_retried_rejected(rejected_calcs, computed_values)
 
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
-    raw_chunks = {cid: t for cid, t in chunk_texts.items()}
+    chunk_tokens = {cid: _corpus_number_tokens(t) for cid, t in chunk_texts.items()}
     _corpus_nums = _corpus_values("\n".join(chunk_texts.values()))
 
     # --- numbers -----------------------------------------------------------
@@ -355,8 +399,8 @@ def verify_answer(
 
         variants = _number_variants(raw)
         hit = None
-        for cid, text in raw_chunks.items():
-            if any(v in text for v in variants):
+        for cid, tokens in chunk_tokens.items():
+            if any(_matches_corpus_token(variants, tok) for tok in tokens):
                 hit = cid
                 break
         if hit is None:
