@@ -30,7 +30,7 @@ from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, reset_run_provenance
+from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
 
 load_dotenv()
@@ -58,8 +58,10 @@ _MODEL_PRICING = {
 }
 
 def _trace(msg: str) -> None:
-    """Print to stderr so tool traces don't pollute the memo output."""
-    print(msg, file=sys.stderr) 
+    """Print to stderr so tool traces don't pollute the memo output.
+    Also recorded in the session log saved beside the report."""
+    print(msg, file=sys.stderr)
+    record_log_line(msg)
 
 def _load_watchlist() -> list[dict]:
     """Load the watchlist YAML. Returns empty list if missing."""
@@ -126,6 +128,22 @@ def _save_output(content: str, ticker: str, mode: str) -> Path:
         out_path = MEMO_DIR / ticker / filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
+
+    # Audit artifact: the run's full session log — every terminal trace
+    # line plus untruncated tool results — saved beside the report so any
+    # figure in it can be traced to (or shown absent from) the exact turn
+    # and tool output that produced it, instead of reconstructing the run
+    # by inference after the process exits. Saved as .md (not .txt) so
+    # Obsidian's file explorer, which hides unknown extensions by default,
+    # shows it beside its report. Skipped for the technical interpreter,
+    # which doesn't use the research tools: at its save time the
+    # module-global log still holds the preceding fundamentals run's
+    # trace, and writing it would pair the wrong evidence with the report.
+    if mode != "technical":
+        session_log = get_session_log()
+        if session_log.strip():
+            out_path.with_name(f"{out_path.stem}-provenance.md").write_text(session_log)
+
     return out_path
 
 def _print_usage_summary(
@@ -281,7 +299,8 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
                 b.text for b in response.content if b.type == "text"
             )
             final = _strip_preamble(final)
-            final = verify_memo(final, get_provenance_corpus(), get_calc_results())
+            final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+                               get_unretried_rejected_calcs())
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
 
@@ -325,7 +344,8 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
 
     final = "".join(b.text for b in response.content if b.type == "text")
     final = _strip_preamble(final)
-    final = verify_memo(final, get_provenance_corpus(), get_calc_results())
+    final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+                        get_unretried_rejected_calcs())
     return final, usage
 
 

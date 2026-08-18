@@ -238,6 +238,7 @@ USE_STUBS = False
 
 async def execute_tool(name: str, inputs: dict) -> str:
     print(f"  [tool call] {name}({inputs})")
+    record_log_line(f"  [tool call] {name}({inputs})")
     result = await _dispatch(name, inputs)
 
     # Feed tool output into the provenance corpus so calculate() can verify
@@ -247,13 +248,22 @@ async def execute_tool(name: str, inputs: dict) -> str:
     #   - the verifier's warning block: a flagged figure appears inside the
     #     answer text, and recording it would make the fabrication count
     #     as "returned by a tool" for later calculate calls
+    #   - similarity scores in ask_edgar citation lines: retrieval
+    #     diagnostics, not filing figures. Left in, every sim=0.XXX becomes
+    #     a corpus number the verifier's scale-tolerant fallback can match
+    #     a fabricated memo figure against (516.5/1000 ≈ sim=0.516)
     if name != "calculate":
         clean = result.split("WARNING — these figures")[0]
+        clean = re.sub(r"sim=\d\.\d+", "sim=", clean)
         record_tool_output(clean)
 
-    # Truncate noisy results in the console; the model still gets the full text
+    # Truncate noisy results in the console; the model still gets the full
+    # text, and so does the session log — a 300-char preview would gut the
+    # saved trace's audit value (tracing a memo figure back to the exact
+    # tool output that returned it is the whole point of the file)
     preview = result if len(result) < 300 else result[:300] + " …"
     print(f"  [tool result] {preview}", file=sys.stderr)
+    record_log_line(f"  [tool result] {result}")
     return result
 
 
@@ -263,6 +273,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
             inputs["expression"], inputs.get("inputs", [])
         )
         if err:
+            record_rejected_calc(inputs["expression"], inputs.get("inputs", []), err)
             return err
         result = safe_calculate(inputs["expression"], inputs.get("inputs", []))
         record_calc_result(result)
@@ -504,12 +515,25 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
  
 _RETRIEVED_TEXT: list[str] = []
 _CALC_RESULTS: list[float] = []
- 
+_REJECTED_CALC_ATTEMPTS: list[dict] = []
+_SESSION_LOG: list[str] = []
+
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
     _RETRIEVED_TEXT.clear()
     _CALC_RESULTS.clear()
- 
+    _REJECTED_CALC_ATTEMPTS.clear()
+    _SESSION_LOG.clear()
+
+def record_log_line(text: str) -> None:
+    """Append a line to the run's session log — the full terminal trace
+    (tool calls, tool results, agent commentary, turn markers) saved
+    beside the report for post-run auditing."""
+    _SESSION_LOG.append(text)
+
+def get_session_log() -> str:
+    return "\n".join(_SESSION_LOG)
+
 def record_calc_result(value: str | float) -> None:
     try:
         _CALC_RESULTS.append(float(value))
@@ -518,6 +542,41 @@ def record_calc_result(value: str | float) -> None:
 
 def get_calc_results() -> list[float]:
     return list(_CALC_RESULTS)
+
+def record_rejected_calc(expression: str, inputs: list[dict], reason: str) -> None:
+    """Record a calculate() call the guard rejected. Also evaluates the raw
+    expression regardless of *why* it was rejected (bad unit, unsourced
+    literal, fiscal-period mismatch, ...) — the arithmetic is usually still
+    valid even when the guard's business-logic checks fail — so a later
+    memo number that traces back to this unvalidated derivation can be
+    caught even if the model never retried the call."""
+    attempted = safe_calculate(expression, inputs)
+    try:
+        value = float(attempted)
+    except (TypeError, ValueError):
+        value = None
+    _REJECTED_CALC_ATTEMPTS.append({
+        "expression": expression,
+        "reason": reason,
+        "attempted_result": value,
+    })
+
+def get_unretried_rejected_calcs() -> list[dict]:
+    """Rejected calculate() attempts whose would-be result was never
+    matched by a later successful calculate() call in this run — i.e. the
+    model used (or may use) this number without ever validating it."""
+    retried = {round(v, 2) for v in _CALC_RESULTS}
+    out = []
+    for att in _REJECTED_CALC_ATTEMPTS:
+        v = att["attempted_result"]
+        if v is None or round(v, 2) in retried:
+            continue
+        out.append({
+            "value": v,
+            "reason": att["reason"],
+            "expression": att["expression"],
+        })
+    return out
 
 def get_provenance_corpus() -> str:
     return "\n".join(_RETRIEVED_TEXT)
