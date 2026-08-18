@@ -1,8 +1,17 @@
+import asyncio
+
 import pytest
 
+import app.agent.tools as tools_module
 from app.agent.tools import (
+    execute_tool,
+    get_provenance_corpus,
+    get_session_log,
     reset_run_provenance,
     record_tool_output,
+    record_calc_result,
+    record_rejected_calc,
+    get_unretried_rejected_calcs,
     safe_calculate,
     validate_calculate_inputs,
 )
@@ -228,3 +237,83 @@ def test_same_unit_inputs_are_unaffected_by_normalization():
 
     result = float(safe_calculate(expression, inputs))
     assert result == pytest.approx(25.2 / 24.0, abs=1e-9)
+
+
+def test_rejected_calc_surfaces_as_unretried_if_never_retried():
+    """Reproduces the reported ACN FCF gap: a calculate() call rejected for
+    fiscal-period mismatch, whose result the model then used in the memo
+    anyway without ever making a passing call. The would-be result must
+    surface via get_unretried_rejected_calcs() so the memo verifier has a
+    chance to flag it, even though citation_verifier alone would pass it
+    (the raw FCF figures are legitimately retrieved text)."""
+    expression = "(10874.4 - 8614.518) / 8614.518 * 100"
+    inputs = [
+        {"value": 10874.4, "label": "FY2025 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+        {"value": 8614.518, "label": "FY2023 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+    ]
+    record_rejected_calc(expression, inputs, "Rejected: fiscal-period mismatch")
+
+    unretried = get_unretried_rejected_calcs()
+    assert len(unretried) == 1
+    assert unretried[0]["value"] == pytest.approx(26.233, abs=0.001)
+
+
+def test_rejected_calc_dropped_once_successfully_retried():
+    """The same derivation, later backed by a passing calculate() call with
+    correctly labeled inputs, must no longer be reported as unretried —
+    the model did the right thing on retry."""
+    expression = "(10874.4 - 8614.518) / 8614.518 * 100"
+    inputs = [
+        {"value": 10874.4, "label": "FY2025 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+        {"value": 8614.518, "label": "FY2023 FCF", "fiscal_period": "FY2025",
+         "source": "ACN 10-K 2025", "unit": "millions"},
+    ]
+    record_rejected_calc(expression, inputs, "Rejected: fiscal-period mismatch")
+    record_calc_result(safe_calculate(expression, inputs))
+
+    assert get_unretried_rejected_calcs() == []
+
+
+def test_similarity_scores_are_stripped_from_provenance(monkeypatch):
+    """ask_edgar citation lines carry retrieval diagnostics (sim=0.516)
+    that are not filing figures. Recorded verbatim, every sim score became
+    a corpus number the verifier's scale fallback could match a fabricated
+    memo figure against ($516.5M / 1000 ≈ sim=0.516 — the exact mechanism
+    behind a reported run's invented capex column). The scores must be
+    stripped before the output enters the provenance corpus; the model
+    still sees them in the raw tool result."""
+    async def fake_dispatch(name, inputs):
+        return (
+            "Revenue was $64,896 million. [ACN 10-K 2025 §Item 7]\n"
+            "Sources:\n  [ACN 10-K 2025 §Item 7] sim=0.516\n"
+            "  [ACN 10-K 2025 §Item 8] sim=0.528"
+        )
+
+    monkeypatch.setattr(tools_module, "_dispatch", fake_dispatch)
+    result = asyncio.run(execute_tool("ask_edgar", {"question": "revenue?"}))
+
+    assert "sim=0.516" in result  # model still sees the scores
+    corpus = get_provenance_corpus()
+    assert "0.516" not in corpus and "0.528" not in corpus
+    assert "64,896" in corpus  # the actual figures are still recorded
+
+
+def test_session_log_records_full_untruncated_tool_results(monkeypatch):
+    """The console shows a 300-char preview, but the session log saved
+    beside the report must carry the full tool result — a truncated trace
+    can't answer 'which tool output produced this memo figure'."""
+    long_tail = "The final figure is $9,876 million."
+    long_result = "x" * 400 + " " + long_tail
+
+    async def fake_dispatch(name, inputs):
+        return long_result
+
+    monkeypatch.setattr(tools_module, "_dispatch", fake_dispatch)
+    asyncio.run(execute_tool("ask_edgar", {"question": "revenue?"}))
+
+    log = get_session_log()
+    assert "[tool call] ask_edgar" in log
+    assert long_tail in log  # beyond the 300-char console preview

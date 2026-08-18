@@ -24,6 +24,16 @@ period's year actually appears near where the value was retrieved. This
 verifier still can't catch a mislabeled figure that never went through
 calculate() — e.g. a raw retrieved number stated directly in prose without
 a computation. That gap remains open.
+
+A prior version matched corpus figures by raw substring search
+(`variant in text`), which let a fabricated number "verify" merely by
+occurring inside an unrelated, larger corpus number — a made-up "$420.5M"
+passed because "$3,420.5" (a different figure) appeared somewhere in the
+retrieved text. Matching is now token-anchored (`_matches_corpus_token`):
+a memo number must equal a whole corpus number token, not just be found
+somewhere inside one. The one legitimate case the substring check
+existed for — a memo truncating a filing's more precise decimal, e.g.
+memo "1364" for filing "1,364.1" — is still handled explicitly.
 """
 
 from __future__ import annotations
@@ -76,6 +86,11 @@ class VerificationReport:
     verified: list[Finding] = field(default_factory=list)
     unverified: list[Finding] = field(default_factory=list)
     skipped: list[Finding] = field(default_factory=list)
+    # Numbers that exist in the source material (so they're NOT "unverified")
+    # but that also match a calculate() call this run rejected and the model
+    # never successfully retried — the number may well be correct, but no
+    # passing tool call in this run's trace backs how it was derived.
+    flagged: list[Finding] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -84,10 +99,14 @@ class VerificationReport:
     def summary(self) -> str:
         lines = [
             f"Citation check: {len(self.verified)} verified, "
-            f"{len(self.unverified)} UNVERIFIED, {len(self.skipped)} skipped"
+            f"{len(self.unverified)} UNVERIFIED, {len(self.skipped)} skipped, "
+            f"{len(self.flagged)} flagged (unbacked derivation)"
         ]
         for f in self.unverified:
             lines.append(f"  UNVERIFIED {f.kind}: {f.value}")
+            lines.append(f"      context: …{f.context}…")
+        for f in self.flagged:
+            lines.append(f"  UNBACKED {f.kind}: {f.value}")
             lines.append(f"      context: …{f.context}…")
         return "\n".join(lines)
 
@@ -122,6 +141,47 @@ def _number_variants(raw: str) -> set[str]:
         variants.add(f"{val:,.2f}")
 
     return {v for v in variants if v}
+
+
+def _corpus_number_tokens(text: str) -> list[str]:
+    """Every standalone numeric token in `text`, as `_NUMBER_RE` finds it.
+
+    finditer already tokenizes atomically — on "$3,420.5 thousand" it
+    yields the single token "3,420.5", never a spurious "420.5" — so this
+    exists to make that tokenization explicit and reusable, not to add new
+    parsing behavior."""
+    return [m.group().rstrip(".") for m in _NUMBER_RE.finditer(text) if m.group().rstrip(".")]
+
+
+def _matches_corpus_token(raw: str, variants: set[str], token: str) -> bool:
+    """True if the memo number `raw` matches this single corpus token —
+    exactly, as an integer truncation of a more precise filing figure
+    (filing writes "1,364.1", memo writes "1364"), or as a rounding of it
+    at the memo's own displayed precision (extract_metrics returns
+    10874.36, memo writes "10,874.4" — within half a step of the memo's
+    last decimal, so a legitimate restatement, not an invention).
+
+    Deliberately NOT a substring check (`variant in token` or `variant in
+    text`): that allowed a memo figure to "verify" merely by occurring
+    inside an unrelated, larger corpus number that happens to contain the
+    same digits — e.g. a fabricated "420.5" matched because "3,420.5"
+    (a different figure entirely) appeared somewhere in the corpus.
+    Matching against whole tokens, with truncation and rounding as the
+    only numeric slop — both bounded by the memo's displayed precision —
+    closes that gap while keeping the restatement cases the substring
+    check was originally added for.
+    """
+    bare_token = token.replace(",", "")
+    for v in variants:
+        bare_v = v.replace(",", "")
+        if v == token or bare_v == bare_token:
+            return True
+        if bare_token.startswith(bare_v + "."):
+            return True
+    try:
+        return abs(float(bare_token) - float(raw.replace(",", ""))) <= _half_step(raw)
+    except ValueError:
+        return False
 
 
 def _normalize_text(s: str) -> str:
@@ -174,6 +234,56 @@ def _computed_forms(values) -> set[str]:
     return out
 
 
+def _rejected_match_tolerance(value: float) -> float:
+    """How far a memo figure may sit from a rejected calculate() result and
+    still count as the same derivation.
+
+    Deliberately numeric, not a set of pre-rounded strings: an earlier
+    version matched by intersecting rounded-string forms of both sides, which
+    missed a real case — a rejected expression whose true result was
+    18.1503 (rounds to 18.2) was stated in the memo as 18.1, its own
+    rounding error, off the true value by 0.05. No string form of 18.1503
+    is "18.1", so an exact-string match can never catch a value the model
+    itself rounded wrong — only a numeric distance check can. Ratios and
+    percentages are reported to 1 decimal, so a flat floor of 0.1 (a full
+    step in the last displayed digit) plus a small relative term covers
+    that rounding slop without being so loose it matches unrelated figures.
+    """
+    return max(0.1, abs(value) * 0.01)
+
+
+def _split_retried_rejected(
+    rejected: list[dict] | None, computed_values: list[float] | None
+) -> list[dict]:
+    """Rejected attempts whose result was never matched by a later passing
+    calculate() call — i.e. still lacking a validated derivation."""
+    computed = list(computed_values or [])
+    out = []
+    for r in rejected or []:
+        try:
+            rv = float(r.get("value"))
+        except (TypeError, ValueError):
+            continue
+        tol = _rejected_match_tolerance(rv)
+        if any(abs(rv - cv) <= tol for cv in computed):
+            continue
+        out.append(r)
+    return out
+
+
+def _find_rejected_match(value: float, rejected: list[dict]) -> dict | None:
+    """The rejected-and-unretried record whose true result `value` matches,
+    within `_rejected_match_tolerance` — or None."""
+    for r in rejected:
+        try:
+            rv = float(r["value"])
+        except (TypeError, ValueError):
+            continue
+        if abs(rv - value) <= _rejected_match_tolerance(rv):
+            return r
+    return None
+
+
 
 _CORPUS_NUM_RE = re.compile(r"-?\(?[\d,]+\.?\d*\)?")
 
@@ -195,24 +305,54 @@ def _corpus_values(corpus: str) -> list[float]:
     return out
 
 
-def _matches_with_scale(value: float, corpus_values: list[float]) -> bool:
+def _half_step(raw: str) -> float:
+    """Half of one step in `raw`'s last displayed decimal place — the
+    largest distance a source figure can sit from `raw` while still
+    legitimately rounding to it. "877.4" -> 0.05; "615" -> 0.5."""
+    bare = raw.replace(",", "")
+    decimals = len(bare.split(".")[1]) if "." in bare else 0
+    return 0.5 * 10 ** -decimals
+
+
+def _matches_with_scale(value: float, raw: str, corpus_values: list[float]) -> bool:
     """
     True if `value` matches a corpus figure directly or after a unit change.
 
     Filings that report in thousands are routinely restated in millions in a
     memo: the corpus holds 877,433 and the memo says 877.4. Comparison is
-    numeric with a tolerance sized to the memo's precision, not string-based.
+    numeric, and the tolerance is direction-aware:
+
+    - corpus figure scaled DOWN to the memo's units: the memo is a rounded
+      restatement of a more precise source figure, so the tolerance is the
+      memo's own rounding slop — half a step in its last displayed decimal
+      (`_half_step`). 877,433/1000 = 877.433 rounds to the memo's 877.4.
+    - memo figure scaled DOWN to a corpus figure: the memo is claiming MORE
+      precision than the corpus figure carries, which a rounded restatement
+      can never legitimately do — so only an essentially exact match (tight
+      relative tolerance, no absolute floor) counts.
+
+    An earlier version used max(0.05, x*0.0005) symmetrically in both
+    directions. After dividing by 1000, that 0.05 absolute floor is a ±50
+    window on the original number — wide enough that six fabricated memo
+    figures ($11,474.4M operating cash flow, $600.0M capex, ...) all
+    "verified" against nothing but citation similarity scores (516.5/1000 ≈
+    sim=0.516) and unrelated one-decimal percentages in prose (11,474.4/1000
+    ≈ "11.5%"). In a dense corpus nearly any 3-5 digit number collided with
+    something.
     """
     av = abs(value)
+    half = _half_step(raw)
     for c in corpus_values:
         ac = abs(c)
         if ac == av:
             return True
-        # corpus in thousands, memo in millions (and the reverse)
         for scale in (1000.0, 1_000_000.0):
-            if ac and abs(ac / scale - av) <= max(0.05, av * 0.0005):
+            # corpus in thousands, memo in millions: memo may be rounded
+            if ac and abs(ac / scale - av) <= half:
                 return True
-            if av and abs(av / scale - ac) <= max(0.05, ac * 0.0005):
+            # memo in thousands, corpus in millions: memo may not invent
+            # precision beyond the corpus figure — near-exact only
+            if av and ac and abs(av / scale - ac) <= ac * 0.0005:
                 return True
     return False
 
@@ -221,6 +361,7 @@ def verify_answer(
     answer: str,
     chunk_texts: dict[int, str],
     computed_values: list[float] | None = None,
+    rejected_calcs: list[dict] | None = None,
 ) -> VerificationReport:
     """
     answer          : the generated answer text
@@ -229,14 +370,26 @@ def verify_answer(
     computed_values : results returned by calculate() during this run.
                       Without these, every legitimately computed ratio is
                       reported unverified and the report becomes noise.
+    rejected_calcs  : calculate() calls rejected this run and never
+                      successfully retried — each a dict with `value`
+                      (what the expression would have evaluated to),
+                      `reason`, and `expression`. A number matching one of
+                      these is real (it'll usually also verify against the
+                      corpus) but its derivation was never validated by a
+                      passing tool call; recorded in `report.flagged`
+                      rather than `report.unverified`.
 
     Returns a VerificationReport. `unverified` is what needs a human look.
     """
     report = VerificationReport()
     computed = _computed_forms(computed_values)
+    # A rejected attempt later backed by a passing calculate() call (same
+    # numeric result) is validated, regardless of whether the caller already
+    # filtered it out — don't rely solely on the caller's bookkeeping.
+    unretried_rejected = _split_retried_rejected(rejected_calcs, computed_values)
 
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
-    raw_chunks = {cid: t for cid, t in chunk_texts.items()}
+    chunk_tokens = {cid: _corpus_number_tokens(t) for cid, t in chunk_texts.items()}
     _corpus_nums = _corpus_values("\n".join(chunk_texts.values()))
 
     # --- numbers -----------------------------------------------------------
@@ -254,23 +407,46 @@ def verify_answer(
             report.skipped.append(Finding("number", raw, context))
             continue
 
+        bare = raw.replace(",", "")
+
+        # Matches a calculate() call that was rejected and never
+        # successfully retried: real (or near-real) number, unvalidated
+        # derivation. This needs its own channel rather than reusing
+        # `unverified` — the number will usually verify against the corpus
+        # (that's exactly how this slips through unnoticed otherwise). It
+        # also supersedes the verified/unverified classification entirely:
+        # the flagged entry carries the rejection reason, and listing the
+        # same figure in both report sections reads as two separate
+        # problems when it's one.
+        try:
+            rejected_hit = _find_rejected_match(float(bare), unretried_rejected)
+        except ValueError:
+            rejected_hit = None
+        if rejected_hit is not None:
+            report.flagged.append(Finding(
+                "derivation", raw,
+                f"{context} [matches a calculate() call rejected for: "
+                f"{rejected_hit['reason'][:120]} — never successfully "
+                f"retried]",
+            ))
+            continue
+
         # A figure matching a calculate() result is verified as computed,
         # not fabricated. chunk id -1 marks "produced by the calculator".
-        bare = raw.replace(",", "")
         if bare in computed or _computed_forms([bare]) & computed:
             report.verified.append(Finding("computed", raw, context, -1))
             continue
 
         variants = _number_variants(raw)
         hit = None
-        for cid, text in raw_chunks.items():
-            if any(v in text for v in variants):
+        for cid, tokens in chunk_tokens.items():
+            if any(_matches_corpus_token(raw, variants, tok) for tok in tokens):
                 hit = cid
                 break
         if hit is None:
             # Fall back to scale-aware numeric comparison (thousands vs millions)
             try:
-                if _matches_with_scale(float(bare), _corpus_nums):
+                if _matches_with_scale(float(bare), raw, _corpus_nums):
                     hit = -2
             except ValueError:
                 pass
