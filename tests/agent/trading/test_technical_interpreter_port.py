@@ -89,6 +89,73 @@ def test_fabricated_above_below_percentage_is_still_flagged():
 
 
 # ---------------------------------------------------------------------------
+# Negative indicator values. Every fixture above is positive, but a bearish
+# MACD is ordinary — these use the real values from a live V run whose
+# macd_histogram was -1.2157936592253513, reported as "around -1.22".
+# ---------------------------------------------------------------------------
+
+BEARISH_INDICATORS = TechnicalIndicators(
+    sma_50=330.1245,
+    sma_200=317.8891,
+    rsi_14=41.2033,
+    macd=-2.4471,
+    macd_signal=-1.2313,
+    macd_histogram=-1.2157936592253513,
+    bb_upper=352.11,
+    bb_mid=335.42,
+    bb_lower=318.73,
+    last_close=327.55,
+    volume_vs_20d_avg=0.8842,
+)
+
+
+def test_negative_values_reported_faithfully_do_not_false_positive():
+    """Rounded restatements of negative indicators must match: the sign has
+    to survive parsing in ordinary sentence positions (mid-sentence, after
+    a preposition, inside parentheses, after an em-dash)."""
+    text = (
+        "The MACD line at -2.45 sits below its signal line at -1.23, with a "
+        "bearish histogram of around -1.22. Momentum is weak — -1.22 confirms "
+        "the crossover, and the histogram (-1.22) has not yet turned."
+    )
+    assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == []
+
+
+def test_fabricated_negative_value_is_still_flagged():
+    """The sign parsing must not become a hole: an invented negative value
+    is caught like any other fabrication."""
+    text = "The histogram is around -1.22, and a momentum score of -5.3 confirms weakness."
+    assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == ["-5.3"]
+
+
+def test_hyphenated_range_is_not_read_as_a_negative_number():
+    """Real false positive, and a parsing bug rather than a tolerance one:
+    'the 318.73-352.11 band' had its hyphen read as a minus sign, turning a
+    faithful bb_upper mention into a fabricated '-352.11'. Unlike the
+    accepted threshold false positives ('RSI above 70'), the number here was
+    a genuine indicator value the scanner mangled before comparing it."""
+    text = "Price trades within a Bollinger band spanning 318.73-352.11 currently."
+    assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == []
+
+
+def test_hyphenated_percentage_range_is_not_read_as_negative():
+    """Same bug in the percent scanner: '88%-89%' must not parse its second
+    endpoint as -89%. Both endpoints are faithful restatements of
+    volume_vs_20d_avg=0.8842 (0.88 and 0.89 sit inside the ratio
+    tolerance), so a correctly-parsed scan flags neither; before the fix
+    the second one surfaced as a fabricated '-89%'."""
+    text = "Volume ran 88%-89% of the 20-day average through the week."
+    assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == []
+
+
+def test_fabricated_value_inside_a_range_is_still_flagged():
+    """Range handling must not create a blind spot: a fabricated endpoint
+    after the hyphen is still checked as a value, just a positive one."""
+    text = "Price trades within a band spanning 318.73-999.99 currently."
+    assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == ["999.99"]
+
+
+# ---------------------------------------------------------------------------
 # Step-4 isolation: interpret_indicators end-to-end against a mocked model
 # response — no live vendor call, no API key, no cost-log side effect. The
 # direct _flag_unmatched_numbers tests above check the guard's matching
@@ -171,6 +238,22 @@ def test_injected_fabricated_number_is_flagged_through_interpret(monkeypatch):
     )
 
     assert flagged == ["812"]
+
+
+def test_bearish_interpretation_produces_no_flags(monkeypatch):
+    """The negative-value path through the full wiring: a faithful bearish
+    interpretation, where the sign is load-bearing on three separate
+    values, must come back clean."""
+    _mock_model_response(monkeypatch, (
+        "V is in a bearish phase. The MACD line at -2.45 sits below its "
+        "signal line at -1.23, leaving the histogram at around -1.22. RSI "
+        "near 41 is soft without being oversold, and price at 327.55 sits "
+        "in the lower half of the 318.73-352.11 Bollinger band."
+    ))
+
+    _, flagged = asyncio.run(interpret_indicators("V", BEARISH_INDICATORS))
+
+    assert flagged == []
 
 
 def test_injected_fabricated_period_slips_through_mocked_response(monkeypatch):

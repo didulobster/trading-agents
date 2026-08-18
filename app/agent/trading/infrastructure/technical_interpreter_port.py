@@ -57,6 +57,15 @@ async def interpret_indicators(ticker: str, indicators: TechnicalIndicators) -> 
     return interpretation, flagged
 
 
+# A number with an optional sign, where '-' is read as a sign only if the
+# preceding character can't make it a separator instead: a digit or '.' means
+# a numeric range ("318.73-352.11"), a '%' means a percentage range
+# ("88%-89%"). Both are ordinary phrasings, and reading their hyphen as a
+# minus turns the second endpoint into a negative number that matches no
+# indicator value.
+_SIGNED_NUMBER = r"(?<![\d.%])-?\d+\.?\d*"
+
+
 def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[str]:
     """Cheap guard, not a full verifier: extract numbers mentioned in the interpretation
     and check each is within rounding tolerance of some value actually in `indicators`.
@@ -86,27 +95,36 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
        *delta* from a ratio-type value (volume_vs_20d_avg=1.2153 -> (1.2153-1)*100
        = 21.5% =~ "around 22"), not the raw ratio-as-percentage. Matched (and
        consumed) before the general percent pattern so the two don't collide.
+
+    A leading '-' counts as a sign only where it can't be a range separator
+    (_SIGNED_NUMBER). Negative indicator values are ordinary — a bearish
+    macd_histogram of -1.2158 gets reported as "around -1.22" — so the sign
+    has to parse, but reading every hyphen as one turned a faithful
+    "318.73-352.11" band into a fabricated "-352.11" and flagged a real
+    bb_upper value. This is a parsing fix, not a tolerance one: unlike the
+    threshold false positives above ("RSI above 70"), the number was a
+    genuine indicator value that the scanner mangled before comparing it.
     """
     known_values = [v for v in indicators.model_dump().values() if isinstance(v, (int, float))]
     text_no_periods = re.sub(r"\b\d+-day\b", "", text)
 
     flagged: list[str] = []
 
-    above_below_pattern = re.compile(r"(-?\d+\.?\d*)%\s*(?:above|below)")
+    above_below_pattern = re.compile(rf"({_SIGNED_NUMBER})%\s*(?:above|below)")
     for m in above_below_pattern.findall(text_no_periods):
         delta_pct = float(m)
         if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
             flagged.append(f"{m}% above/below")
     text_no_above_below = above_below_pattern.sub("", text_no_periods)
 
-    percent_pattern = re.compile(r"(-?\d+\.?\d*)%")
+    percent_pattern = re.compile(rf"({_SIGNED_NUMBER})%")
     for m in percent_pattern.findall(text_no_above_below):
         ratio = float(m) / 100
         if not any(abs(ratio - kv) <= max(0.01, abs(kv) * 0.02) for kv in known_values):
             flagged.append(f"{m}%")
     text_no_percents = percent_pattern.sub("", text_no_above_below)
 
-    for m in re.findall(r"-?\d+\.?\d*", text_no_percents):
+    for m in re.findall(_SIGNED_NUMBER, text_no_percents):
         val = float(m)
         if not any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
             flagged.append(m)
