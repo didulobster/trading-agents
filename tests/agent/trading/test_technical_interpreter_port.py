@@ -148,6 +148,28 @@ def test_hyphenated_percentage_range_is_not_read_as_negative():
     assert _flag_unmatched_numbers(text, BEARISH_INDICATORS) == []
 
 
+def test_hyphenated_above_below_range_is_not_read_as_negative():
+    """The third occurrence site of the range bug, and the one that needed
+    more than the lookbehind. With volume_vs_20d_avg=1.2153 (+21.53% vs the
+    20-day average), 'roughly 21%-22% above' is faithful at both endpoints.
+    The sign parsed correctly once _SIGNED_NUMBER was applied here, but the
+    pattern still matched only the endpoint touching the keyword, so
+    consuming '22% above' orphaned '21%' for the general percent rule —
+    which tested it as a ratio (0.21 vs 1.2153) when it is a delta, and
+    flagged it. The match now spans both endpoints."""
+    indicators = TechnicalIndicators(last_close=350.0, volume_vs_20d_avg=1.2153)
+    text = "Volume ran roughly 21%-22% above the 20-day average."
+    assert _flag_unmatched_numbers(text, indicators) == []
+
+
+def test_fabricated_endpoint_in_above_below_range_is_still_flagged():
+    """Spanning the range must not let a fabricated endpoint ride along:
+    each endpoint is checked against the delta transform on its own."""
+    indicators = TechnicalIndicators(last_close=350.0, volume_vs_20d_avg=1.2153)
+    text = "Volume ran roughly 21%-99% above the 20-day average."
+    assert _flag_unmatched_numbers(text, indicators) == ["99% above/below"]
+
+
 def test_fabricated_value_inside_a_range_is_still_flagged():
     """Range handling must not create a blind spot: a fabricated endpoint
     after the hyphen is still checked as a value, just a positive one."""

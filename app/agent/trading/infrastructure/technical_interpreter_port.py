@@ -95,6 +95,11 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
        *delta* from a ratio-type value (volume_vs_20d_avg=1.2153 -> (1.2153-1)*100
        = 21.5% =~ "around 22"), not the raw ratio-as-percentage. Matched (and
        consumed) before the general percent pattern so the two don't collide.
+       Both endpoints of a range ("21%-22% above the 20-day average") are
+       captured by the one match, because only the endpoint touching the
+       keyword carries the "above/below" context — matching it alone leaves
+       the other orphaned for the general percent rule, which then tests a
+       delta as though it were a ratio and flags faithful text.
 
     A leading '-' counts as a sign only where it can't be a range separator
     (_SIGNED_NUMBER). Negative indicator values are ordinary — a bearish
@@ -110,11 +115,14 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
 
     flagged: list[str] = []
 
-    above_below_pattern = re.compile(rf"({_SIGNED_NUMBER})%\s*(?:above|below)")
-    for m in above_below_pattern.findall(text_no_periods):
-        delta_pct = float(m)
-        if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
-            flagged.append(f"{m}% above/below")
+    above_below_pattern = re.compile(
+        rf"({_SIGNED_NUMBER})%(?:\s*-\s*({_SIGNED_NUMBER})%)?\s*(?:above|below)"
+    )
+    for endpoints in above_below_pattern.findall(text_no_periods):
+        for m in (e for e in endpoints if e):
+            delta_pct = float(m)
+            if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
+                flagged.append(f"{m}% above/below")
     text_no_above_below = above_below_pattern.sub("", text_no_periods)
 
     percent_pattern = re.compile(rf"({_SIGNED_NUMBER})%")
