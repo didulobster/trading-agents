@@ -1,15 +1,29 @@
 import os
-from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
-from psycopg_pool import AsyncConnectionPool
-from dotenv import load_dotenv
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 load_dotenv(override=True)
 
+# Best-effort only, and deliberately placed above the langgraph imports:
+# langgraph.checkpoint.serde._msgpack freezes STRICT_MSGPACK_ENABLED into a
+# module-level constant at import time, so setting this afterwards does
+# nothing. Even here it wins the race only if this module is imported before
+# anything else pulls in langgraph — graph.py's `from langgraph.graph import
+# ...` triggers the same constant. To make strict mode hold process-wide,
+# export LANGGRAPH_STRICT_MSGPACK=true in the environment before Python starts.
+#
+# This flag is NOT what protects this checkpointer. It only changes the default
+# for serializers built without an explicit allowlist; build_serde() passes
+# allowed_msgpack_modules directly, which enforces the list either way.
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
-DB_URI = os.getenv("TRADING_CHECKPOINT_DB_URI")  
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: E402
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
+from psycopg_pool import AsyncConnectionPool  # noqa: E402
+
+DB_URI = os.getenv("TRADING_CHECKPOINT_DB_URI")
 
 connection_kwargs = {"autocommit": True, "prepare_threshold": 0}
 
@@ -24,13 +38,23 @@ ALLOWED_MSGPACK_MODULES = [
 ]
 
 
+def build_serde() -> JsonPlusSerializer:
+    """The serializer this checkpointer actually uses.
+
+    Exposed so tests exercise the real configuration instead of constructing
+    their own equivalent — a test that builds its own JsonPlusSerializer would
+    keep passing even if this module stopped passing the allowlist, which is
+    precisely the regression worth catching.
+    """
+    return JsonPlusSerializer(allowed_msgpack_modules=ALLOWED_MSGPACK_MODULES)
+
+
 @asynccontextmanager
 async def build_checkpointer():
     async with AsyncConnectionPool(
         conninfo=DB_URI, max_size=10, kwargs=connection_kwargs, open=False
     ) as pool:
         await pool.open()
-        serde = JsonPlusSerializer(allowed_msgpack_modules=ALLOWED_MSGPACK_MODULES)
-        checkpointer = AsyncPostgresSaver(pool, serde=serde)
+        checkpointer = AsyncPostgresSaver(pool, serde=build_serde())
         await checkpointer.setup()  # idempotent — creates tables once
         yield checkpointer

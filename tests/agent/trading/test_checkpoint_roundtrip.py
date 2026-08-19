@@ -1,10 +1,19 @@
 """Checkpoint fidelity for the custom domain types in TradingState.
 
-`ALLOWED_MSGPACK_MODULES` exists because LANGGRAPH_STRICT_MSGPACK refuses to
-deserialize any type not explicitly registered. The failure it guards against
-is real but delayed: a new domain type lands in TradingState, everything works
-in-process while the object is still in memory, and the break only surfaces
-when a *different* process reads that checkpoint back out of Postgres.
+`ALLOWED_MSGPACK_MODULES` is what restricts checkpoint deserialization to known
+types. The failure it guards against is real but delayed: a new domain type
+lands in TradingState, everything works in-process while the object is still in
+memory, and the break only surfaces when a *different* process reads that
+checkpoint back out of Postgres.
+
+Note the enforcement comes from passing `allowed_msgpack_modules` explicitly,
+NOT from the LANGGRAPH_STRICT_MSGPACK environment variable. That variable is
+read once into a module-level constant when langgraph is first imported, so
+checkpointer.py setting it afterwards has no effect, and langgraph consults it
+only for serializers built *without* an explicit allowlist. Asserting the
+variable would therefore prove nothing about whether anything is enforced —
+`test_build_serde_blocks_a_type_outside_the_allowlist` checks the behaviour
+instead.
 
 Two tiers here, because they have different costs:
 
@@ -26,7 +35,6 @@ awkward. `interrupt_after` stops at a node boundary deterministically.
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
 from datetime import date
 from enum import Enum
@@ -46,6 +54,7 @@ from app.agent.trading.infrastructure.checkpointer import (
     ALLOWED_MSGPACK_MODULES,
     DB_URI,
     build_checkpointer,
+    build_serde,
 )
 from app.agent.trading.infrastructure.graph import build_trading_graph
 
@@ -80,10 +89,10 @@ def _sample_report() -> TechnicalReport:
 # ---------------------------------------------------------------------------
 
 def test_technical_report_survives_msgpack_roundtrip():
-    """The registered-type path: dump and reload a TechnicalReport through the
-    same serializer the checkpointer uses, under strict msgpack."""
-    assert os.environ.get("LANGGRAPH_STRICT_MSGPACK") == "true"
-    serde = JsonPlusSerializer(allowed_msgpack_modules=ALLOWED_MSGPACK_MODULES)
+    """The registered-type path: dump and reload a TechnicalReport through
+    build_serde() — the same serializer the checkpointer uses in production,
+    not an equivalent rebuilt here."""
+    serde = build_serde()
     report = _sample_report()
 
     restored = serde.loads_typed(serde.dumps_typed(report))
@@ -102,7 +111,7 @@ def test_technical_report_survives_msgpack_roundtrip():
 def test_full_trading_state_survives_msgpack_roundtrip():
     """A whole TradingState dict, as the checkpointer actually stores it —
     two custom report types nested in one payload."""
-    serde = JsonPlusSerializer(allowed_msgpack_modules=ALLOWED_MSGPACK_MODULES)
+    serde = build_serde()
     state: TradingState = {
         "ticker": "ACN",
         "fundamentals_report": FundamentalsReport(
@@ -121,6 +130,28 @@ def test_full_trading_state_survives_msgpack_roundtrip():
 
     assert restored == state
     assert restored["technical_report"].indicators.rsi_14 == 41.2033
+
+
+class _UnregisteredModel(BaseModel):
+    value: int
+
+
+def test_build_serde_blocks_a_type_outside_the_allowlist():
+    """Proves the *production* serializer enforces the allowlist, not merely
+    that registered types survive a round-trip.
+
+    Without this, every test above would keep passing if build_serde() ever
+    stopped passing `allowed_msgpack_modules`: langgraph's default in that
+    case is permissive — it warns and allows unregistered types — so the
+    registered types would still round-trip cleanly while the guard had
+    silently become a no-op. This is the test that fails in that scenario.
+    """
+    serde = build_serde()
+
+    restored = serde.loads_typed(serde.dumps_typed(_UnregisteredModel(value=7)))
+
+    assert isinstance(restored, dict)
+    assert restored == {"value": 7}
 
 
 def test_unregistered_top_level_type_degrades_to_a_dict_without_raising():
