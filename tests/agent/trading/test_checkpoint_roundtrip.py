@@ -275,6 +275,43 @@ requires_postgres = pytest.mark.skipif(
 )
 
 
+@requires_postgres
+def test_build_checkpointer_wires_in_the_allowlisted_serde():
+    """build_serde() is proven to enforce the allowlist above; this confirms
+    build_checkpointer actually hands that output to AsyncPostgresSaver
+    rather than some other serde construction that merely looks equivalent.
+
+    The two can drift independently: a refactor that dropped the argument
+    (`serde=JsonPlusSerializer()`) would leave the whole suite green, because
+    a permissive serializer round-trips *registered* types perfectly well —
+    and registered types are all the round-trip tests exercise. The guard
+    would be a silent no-op with nothing to notice it.
+
+    Asserted through behaviour rather than by reading
+    `serde._allowed_msgpack_modules`: that attribute is private, and
+    langgraph normalizes the list into a set at construction, so comparing
+    it to ALLOWED_MSGPACK_MODULES is both fragile across versions and false.
+    """
+
+    async def check():
+        async with build_checkpointer() as checkpointer:
+            serde = checkpointer.serde
+
+            blocked = serde.loads_typed(serde.dumps_typed(_UnregisteredModel(value=7)))
+            assert isinstance(blocked, dict), (
+                "the checkpointer's serde admitted an unregistered type — "
+                "allowed_msgpack_modules is not wired through build_serde()"
+            )
+
+            # and the same object still round-trips the registered types, so
+            # this is enforcement rather than a serializer that breaks
+            # everything equally
+            report = _sample_report()
+            assert serde.loads_typed(serde.dumps_typed(report)) == report
+
+    asyncio.run(check())
+
+
 def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
     """Replace the network and vault I/O, keep everything else real.
 
