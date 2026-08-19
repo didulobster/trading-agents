@@ -12,7 +12,12 @@ from app.agent.trading.application.nodes import (
 from app.agent.trading.domain.trading_state import TradingState
 
 
-def build_trading_graph(checkpointer):
+def build_trading_graph(checkpointer, interrupt_after=None):
+    """`interrupt_after` takes a list of node names to stop after, e.g.
+    ["technical"]. Used by the checkpoint round-trip test to stop the graph
+    deterministically at a node boundary — the stub nodes downstream have no
+    I/O to await and complete within microseconds of each other, so there is
+    no wall-clock window in which an OS signal could land between them."""
     builder = StateGraph(TradingState)
 
     builder.add_node("fundamentals", fundamentals_node)
@@ -32,4 +37,6 @@ def build_trading_graph(checkpointer):
     builder.add_edge("risk", "synthesizer")
     builder.add_edge("synthesizer", END)
 
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(
+        checkpointer=checkpointer, interrupt_after=interrupt_after or []
+    )
