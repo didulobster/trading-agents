@@ -251,7 +251,13 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
     the TechnicalReport being checkpointed carries genuine float values rather
     than round numbers that could mask a precision loss in the round-trip.
     """
-    df = pd.read_csv(FIXTURE, index_col=0, parse_dates=True)
+    # utc=True is required, not incidental: the fixture spans a DST change, so
+    # its timestamps carry mixed -04:00/-05:00 offsets and both `parse_dates`
+    # and `format="ISO8601"` leave the index as strings. technical_node calls
+    # df.index[-1].date(), which needs real Timestamps. Midnight-local to UTC
+    # is a same-day shift at both offsets, so as_of_date is unaffected.
+    df = pd.read_csv(FIXTURE, index_col=0)
+    df.index = pd.to_datetime(df.index, utc=True)
 
     async def fake_fundamentals(ticker: str):
         return FundamentalsReport(
@@ -307,18 +313,30 @@ def test_technical_report_survives_interrupt_and_a_fresh_checkpointer(
             final = await graph.ainvoke(None, config=config)
             return resumed, final
 
-    before, next_nodes = asyncio.run(phase_1())
-    # confirms the interrupt landed exactly where intended, not a node early
-    # or late — without this the test could pass on a graph that never ran
-    assert next_nodes == ("news",)
-    assert before is not None
+    async def cleanup():
+        """Every run writes a thread to the real checkpoint database, so drop
+        it afterwards — otherwise the dev DB accumulates one dead thread per
+        test run, and a checkpoint table full of test rows is exactly the
+        kind of noise that makes a real resume harder to inspect later."""
+        async with build_checkpointer() as checkpointer:
+            await checkpointer.adelete_thread(thread_id)
 
-    after, final = asyncio.run(phase_2())
+    try:
+        before, next_nodes = asyncio.run(phase_1())
+        # confirms the interrupt landed exactly where intended, not a node
+        # early or late — without this the test could pass on a graph that
+        # never ran
+        assert next_nodes == ("news",)
+        assert before is not None
 
-    assert isinstance(after, TechnicalReport)
-    assert after == before
-    assert after.indicators.rsi_14 == before.indicators.rsi_14
-    assert after.indicators.macd_histogram == before.indicators.macd_histogram
-    assert after.bars_used == before.bars_used
-    # the resumed run reaches the end and still sees the checkpointed report
-    assert final["decision_memo"].technical_signal == before.interpretation
+        after, final = asyncio.run(phase_2())
+
+        assert isinstance(after, TechnicalReport)
+        assert after == before
+        assert after.indicators.rsi_14 == before.indicators.rsi_14
+        assert after.indicators.macd_histogram == before.indicators.macd_histogram
+        assert after.bars_used == before.bars_used
+        # the resumed run reaches the end and still sees the checkpointed report
+        assert final["decision_memo"].technical_signal == before.interpretation
+    finally:
+        asyncio.run(cleanup())
