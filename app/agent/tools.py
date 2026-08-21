@@ -38,7 +38,11 @@ TOOLS = [
         "description": (
             "Ingest SEC filings for a ticker not in the corpus or lacking "
             "history. Slow: 30-60s per filing. Call once with limit=3. "
-            "Defaults to 10-K; set form_type to '10-Q' or '8-K' for others."
+            "Omit form_type to auto-detect the filer's form family: 10-K "
+            "for a domestic filer, or 20-F for a foreign private issuer "
+            "(e.g. ASML) — those never file a 10-K. Pass form_type "
+            "explicitly for a specific type: '10-Q'/'8-K' (domestic) or "
+            "'6-K' (foreign private issuer's interim/current report)."
         ),
         "input_schema": {
             "type": "object",
@@ -47,7 +51,10 @@ TOOLS = [
                 "limit": {"type": "integer"},
                 "form_type": {
                     "type": "string",
-                    "description": "Filing type to ingest: '10-K', '10-Q', or '8-K'. Default: '10-K'",
+                    "description": (
+                        "Filing type to ingest: '10-K', '10-Q', '8-K', "
+                        "'20-F', or '6-K'. Omit to auto-detect."
+                    ),
                 },
             },
             "required": ["ticker"],
@@ -92,10 +99,15 @@ TOOLS = [
     {
         "name": "check_latest_filings",
         "description": (
-            "Check SEC EDGAR for the latest filings (10-K, 10-Q, 8-K) for a "
-            "ticker and compare with what is already in the corpus. Returns "
-            "which filings are new and not yet ingested. Use this to ensure "
-            "the corpus has the most recent reports before running analysis."
+            "Check SEC EDGAR for the latest filings for a ticker and "
+            "compare with what is already in the corpus. Auto-detects "
+            "whether the filer uses domestic forms (10-K/10-Q/8-K) or is a "
+            "foreign private issuer using 20-F/6-K instead — the response's "
+            "form_types_searched field states which family was checked, so "
+            "a zero total_on_sec with domestic form types searched does NOT "
+            "mean the company has no SEC filings at all. Returns which "
+            "filings are new and not yet ingested. Use this to ensure the "
+            "corpus has the most recent reports before running analysis."
         ),
         "input_schema": {
             "type": "object",

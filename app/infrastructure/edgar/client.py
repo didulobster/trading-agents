@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 class EdgarRateLimitError(Exception):
     pass
 
+# Domestic filers report annual/quarterly/current results on 10-K/10-Q/8-K.
+# Foreign private issuers (e.g. ASML, a Dutch company) use 20-F (annual) and
+# 6-K (interim/current) instead — they never file a 10-K, so searching for
+# domestic form types alone makes a real SEC filer look like it has no
+# filings at all.
+DOMESTIC_FORM_TYPES = ["10-K", "10-Q", "8-K"]
+FOREIGN_PRIVATE_ISSUER_FORM_TYPES = ["20-F", "6-K"]
+
 class EdgarClient:
     """
     Minimal SEC EDGAR client.
@@ -127,6 +135,26 @@ class EdgarClient:
             )
 
         return filings
+
+    async def default_form_types(self, cik: str) -> list[str]:
+        """
+        Which form-type family this filer actually uses, so callers that
+        don't pin an explicit form_types list don't silently search only
+        domestic forms against a foreign private issuer (or vice versa).
+
+        Detected from filing history rather than the submissions JSON's
+        `category`/`sic` fields — neither of those distinguishes domestic
+        from foreign filers directly, but a 20-F in the recent filing list
+        is unambiguous: only foreign private issuers file that form.
+        """
+        cik_padded = cik.zfill(10)
+        url = self.SUBMISSIONS_URL.format(cik=cik_padded)
+        resp = await self._throttled_get(url)
+        data = resp.json()
+        recent_forms = data.get("filings", {}).get("recent", {}).get("form", [])
+        if "20-F" in recent_forms:
+            return FOREIGN_PRIVATE_ISSUER_FORM_TYPES
+        return DOMESTIC_FORM_TYPES
 
     async def download_filing(
         self,
