@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from app.agent.researcher import AGENT_MODEL, UsageSummary, log_cost
+from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
 from app.agent.trading.domain.errors import VendorError
-from app.agent.trading.domain.news_digest import NewsItem
+from app.agent.trading.domain.news_digest import (
+    AGGREGATED_RELEVANCE,
+    NewsDigest,
+    NewsItem,
+    SentimentSummary,
+)
 
 BATCH_SIZE = 15
 DIGEST_MAX_TOKENS = 1500
@@ -235,3 +241,137 @@ async def build_digest(
     cost = log_cost(ticker, "trading-news", usage)
     _assert_within_budget(cost)
     return items, issues, cost
+
+
+def _format_sentiment_markdown(
+    digest: NewsDigest,
+    summary: SentimentSummary,
+    issues: list[str] | None = None,
+) -> str:
+    """Render the digest and its aggregate for the vault.
+
+    Every number that qualifies the signal is on the page, not just the
+    signal: a +0.60 over four articles and a +0.60 over forty are different
+    claims, and the reader cannot tell them apart from the score.
+    """
+    counted = [i for i in digest.items if i.relevance in AGGREGATED_RELEVANCE]
+    other = [i for i in digest.items if i.relevance not in AGGREGATED_RELEVANCE]
+    window_days = (digest.as_of_date - digest.window_start).days
+
+    lines = [
+        f"# {digest.ticker} — News Sentiment",
+        f"**Analysis date (as-of):** {digest.as_of_date}",
+        f"**Window:** {digest.window_start} → {digest.as_of_date} ({window_days} days)",
+        f"**Source:** {digest.data_source}",
+        "",
+        "## Signal",
+        "",
+        "| Measure | Value |",
+        "|---|---|",
+        f"| Net score | {summary.net_score:+.3f} |",
+        f"| Positive | {summary.positive} |",
+        f"| Negative | {summary.negative} |",
+        f"| Neutral | {summary.neutral} |",
+        f"| Articles counted | {summary.article_count} |",
+        f"| Excluded as not primarily about {digest.ticker} | "
+        f"{summary.excluded_by_relevance} |",
+        "",
+    ]
+
+    caveats = []
+    if summary.article_count == 0:
+        caveats.append(
+            "**No articles were primarily about this company.** A net score of "
+            "0.000 here is an absence of evidence, not neutral evidence — do not "
+            "read it as the market being indifferent."
+        )
+    elif summary.article_count < 5:
+        caveats.append(
+            f"**Thin sample.** The score rests on {summary.article_count} "
+            f"article(s); a single item moves it materially."
+        )
+    if digest.truncated_by_cap:
+        caveats.append(
+            f"**Truncated.** The vendor returned {digest.raw_article_count} "
+            f"articles and the cap kept the newest {len(digest.items)}, so this "
+            f"digest is a sample of the window rather than all of it. Coverage "
+            f"is skewed toward the most recent days."
+        )
+    if issues:
+        caveats.append(
+            f"**{len(issues)} digest integrity issue(s)** — see the section below; "
+            f"articles may be missing from this digest."
+        )
+    if caveats:
+        lines += ["## Caveats", ""] + [f"- {c}" for c in caveats] + [""]
+
+    lines += [
+        "## Coverage",
+        "",
+        "| Stage | Count |",
+        "|---|---|",
+        f"| Returned by vendor | {digest.raw_article_count} |",
+        f"| Dropped: outside the window | {digest.dropped_out_of_window} |",
+        f"| Dropped: missing/zero timestamp | {digest.dropped_missing_date} |",
+        f"| Kept after filter, dedup and cap | {digest.deduped_count} |",
+        f"| In this digest | {len(digest.items)} |",
+        "",
+    ]
+
+    lines += [f"## Articles about {digest.ticker} ({len(counted)})", ""]
+    if counted:
+        for i in counted:
+            lines += [
+                f"### [{i.published_date}] {i.headline}",
+                f"*{i.sentiment}* · {i.source} · [link]({i.url})",
+                "",
+                i.summary,
+                "",
+            ]
+    else:
+        lines += ["_None. Nothing in the window was primarily about this company._", ""]
+
+    if other:
+        lines += [
+            f"## Other coverage in the feed ({len(other)})",
+            "",
+            "Tagged with this ticker by the vendor but not primarily about the "
+            "company, so excluded from the score. Kept for context.",
+            "",
+            "| Date | Relevance | Sentiment | Headline |",
+            "|---|---|---|---|",
+        ]
+        for i in other:
+            headline = i.headline.replace("|", "\\|")
+            lines.append(
+                f"| {i.published_date} | {i.relevance} | {i.sentiment} | {headline} |"
+            )
+        lines.append("")
+
+    if issues:
+        lines += [
+            "## Digest integrity issues",
+            "",
+            "Structural problems in the model's response, surfaced rather than "
+            "absorbed. A missing index means an article was dropped from the digest.",
+            "",
+        ] + [f"- {i}" for i in issues] + [""]
+
+    return "\n".join(lines)
+
+
+def save_sentiment_report(
+    digest: NewsDigest,
+    summary: SentimentSummary,
+    issues: list[str] | None = None,
+    cost_usd: float | None = None,
+    provenance: str | None = None,
+) -> Path:
+    content = _format_sentiment_markdown(digest, summary, issues)
+    return _save_output(
+        content,
+        digest.ticker.upper(),
+        "sentiment",
+        cost_usd=cost_usd,
+        provenance=provenance,
+    )
