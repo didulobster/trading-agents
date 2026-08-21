@@ -12,7 +12,7 @@ def verify_memo(memo: str, provenance_corpus: str,
     report = verify_answer(memo, {0: provenance_corpus},
                            computed_values=computed_values,
                            rejected_calcs=rejected_calcs)
-    if report.ok and not report.flagged:
+    if report.ok and not report.flagged and not report.underived:
         return memo
 
     lines = ["", "---", ""]
@@ -39,6 +39,20 @@ def verify_memo(memo: str, provenance_corpus: str,
             "with a passing calculate call before relying on it.", "",
         ]
         for f in report.flagged:
+            lines.append(f"- **figure:** `{f.value}`")
+            lines.append(f"  - context: …{f.context.strip()}…")
+
+    if report.underived:
+        lines += [
+            "", "## Underived Arithmetic", "",
+            "The following figures were not returned by any tool, but each "
+            "equals a sum or difference of other figures in this memo that "
+            "were independently verified — a total stated in prose instead "
+            "of run through calculate(). The inputs are real; only this "
+            "arithmetic step is unvalidated. Lower risk than the figures "
+            "above — re-derive with calculate() to confirm.", "",
+        ]
+        for f in report.underived:
             lines.append(f"- **figure:** `{f.value}`")
             lines.append(f"  - context: …{f.context.strip()}…")
 
