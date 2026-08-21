@@ -103,3 +103,52 @@ async def test_post_dated_item_in_digest_raises_lookahead_leak(monkeypatch):
 
     with pytest.raises(AssertionError, match="Lookahead leak"):
         await nodes.news_node({"ticker": "ACN", "as_of_date": AS_OF})
+
+
+# ---------------------------------------------------------------------------
+# sentiment_node — deterministic aggregation, no LLM
+# ---------------------------------------------------------------------------
+
+def _digest(items: list[NewsItem]) -> NewsDigest:
+    return NewsDigest(
+        ticker="ACN",
+        as_of_date=AS_OF,
+        window_start=AS_OF - timedelta(days=14),
+        items=items,
+        raw_article_count=len(items),
+        deduped_count=len(items),
+        dropped_out_of_window=0,
+        dropped_missing_date=0,
+        truncated_by_cap=False,
+    )
+
+
+@pytest.mark.anyio
+async def test_sentiment_node_aggregates_counts_and_net_score():
+    items = [
+        _item(AS_OF, "positive"),
+        _item(AS_OF - timedelta(days=1), "positive"),
+        _item(AS_OF - timedelta(days=2), "positive"),
+        _item(AS_OF - timedelta(days=3), "negative"),
+        _item(AS_OF - timedelta(days=4), "neutral"),
+    ]
+
+    update = await nodes.sentiment_node({"news_digest": _digest(items)})
+
+    s = update["sentiment_summary"]
+    assert (s.positive, s.negative, s.neutral) == (3, 1, 1)
+    assert s.article_count == 5
+    assert s.net_score == pytest.approx((3 - 1) / 5)
+    assert s.ticker == "ACN" and s.as_of_date == AS_OF
+
+
+@pytest.mark.anyio
+async def test_sentiment_node_handles_empty_digest_as_valid():
+    """Test 5's second half: absence of news is a valid result. net_score
+    is 0.0 with article_count 0 — not neutrality-with-evidence."""
+    update = await nodes.sentiment_node({"news_digest": _digest([])})
+
+    s = update["sentiment_summary"]
+    assert s.article_count == 0
+    assert s.net_score == 0.0
+    assert (s.positive, s.negative, s.neutral) == (0, 0, 0)

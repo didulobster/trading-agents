@@ -4,10 +4,11 @@ Goal here is proving the topology runs end-to-end and emits a
 schema-valid DecisionMemo, nothing more.
 """
 import asyncio
+from collections import Counter
 from datetime import date
 
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
-from app.agent.trading.domain.news_digest import NewsDigest
+from app.agent.trading.domain.news_digest import NewsDigest, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
@@ -95,8 +96,27 @@ async def news_node(state: TradingState) -> dict:
 
 
 async def sentiment_node(state: TradingState) -> dict:
-    print(f"[sentiment] STUB running for {state['ticker']}")
-    return {"sentiment_report": "STUB — Phase 4"}
+    """Deterministic aggregation over NewsDigest.items — no LLM, no network.
+
+    An empty digest (quiet ticker, nothing in the window) flows through as
+    net_score=0.0 with article_count=0; downstream consumers must not read
+    that as neutrality-with-evidence."""
+    digest: NewsDigest = state["news_digest"]
+    print(f"[sentiment] aggregating {len(digest.items)} items for {digest.ticker}")
+    counts = Counter(i.sentiment for i in digest.items)
+    pos, neg, neu = counts["positive"], counts["negative"], counts["neutral"]
+    total = pos + neg + neu
+    return {
+        "sentiment_summary": SentimentSummary(
+            ticker=digest.ticker,
+            as_of_date=digest.as_of_date,
+            positive=pos,
+            negative=neg,
+            neutral=neu,
+            net_score=(pos - neg) / total if total else 0.0,
+            article_count=total,
+        )
+    }
 
 
 async def debate_node(state: TradingState) -> dict:
@@ -117,14 +137,14 @@ async def synthesizer_node(state: TradingState) -> dict:
         bear_case="STUB",
         risk_debate_summary=state["risk_summary"],
         technical_signal=state["technical_report"].interpretation,
-        reasoning="STUB — synthesis logic not yet implemented. fundamentals_report is real (Phase 2); technical/news/sentiment/debate/risk are still stubs.",
+        reasoning="STUB — synthesis logic not yet implemented. fundamentals (Phase 2), technical (Phase 3), and news/sentiment (Phase 4) are real; debate/risk are still stubs.",
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,
         confidence=0.0,
         data_as_of_date=date.today(),
         data_gaps=[
             "synthesizer does not yet incorporate fundamentals_report into this memo — that's a later phase, not Phase 2's scope",
-            "technical/news/sentiment/debate/risk nodes are still stubs — no real data",
+            "debate/risk nodes are still stubs — no real data",
         ],
         assumptions=[],
         evidence=[],

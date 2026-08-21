@@ -59,6 +59,16 @@ async def run(ticker: str, thread_id: str | None, as_of: date) -> None:
             print(f"[digest issues] {issues}")
         print("--- end News Digest ---\n")
 
+    sentiment = result.get("sentiment_summary")
+    if sentiment is not None:
+        print("\n--- Sentiment Summary ---")
+        print(
+            f"+{sentiment.positive} / -{sentiment.negative} / ={sentiment.neutral} "
+            f"over {sentiment.article_count} articles  "
+            f"net_score={sentiment.net_score:+.2f}"
+        )
+        print("--- end Sentiment Summary ---\n")
+
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
 
