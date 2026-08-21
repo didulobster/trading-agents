@@ -48,6 +48,7 @@ from pydantic import BaseModel
 
 import app.agent.trading.application.nodes as nodes
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
+from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.checkpointer import (
@@ -81,6 +82,39 @@ def _sample_report() -> TechnicalReport:
         ),
         interpretation="Momentum is bearish; the histogram sits at around -1.22.",
         interpretation_flagged_numbers=["812"],
+    )
+
+
+def _sample_digest() -> NewsDigest:
+    """One populated item and every provenance counter non-default, so the
+    round-trip covers the nested list-of-models path and the bool/int fields."""
+    return NewsDigest(
+        ticker="ACN",
+        as_of_date=date(2026, 8, 19),
+        window_start=date(2026, 8, 5),
+        items=[
+            NewsItem(
+                headline="Acme beats estimates",
+                published_date=date(2026, 8, 18),
+                source="reuters",
+                url="https://example.com/1",
+                summary="Acme reported quarterly results above expectations.",
+                sentiment="positive",
+            ),
+            NewsItem(
+                headline="Sector roundup",
+                published_date=date(2026, 8, 12),
+                source="yahoo",
+                url="https://example.com/2",
+                summary="Routine sector coverage.",
+                sentiment="neutral",
+            ),
+        ],
+        raw_article_count=7,
+        deduped_count=2,
+        dropped_out_of_window=3,
+        dropped_missing_date=1,
+        truncated_by_cap=True,
     )
 
 
@@ -130,6 +164,33 @@ def test_full_trading_state_survives_msgpack_roundtrip():
 
     assert restored == state
     assert restored["technical_report"].indicators.rsi_14 == 41.2033
+
+
+def test_news_digest_survives_msgpack_roundtrip():
+    """Phase 4's types through the production serializer: the nested
+    list[NewsItem], the Literal sentiment, dates, and the provenance bools."""
+    serde = build_serde()
+    digest = _sample_digest()
+    summary = SentimentSummary(
+        ticker="ACN",
+        as_of_date=date(2026, 8, 19),
+        positive=1,
+        negative=0,
+        neutral=1,
+        net_score=0.5,
+        article_count=2,
+    )
+
+    restored_digest = serde.loads_typed(serde.dumps_typed(digest))
+    restored_summary = serde.loads_typed(serde.dumps_typed(summary))
+
+    assert restored_digest == digest
+    assert isinstance(restored_digest, NewsDigest)
+    assert all(isinstance(i, NewsItem) for i in restored_digest.items)
+    assert restored_digest.items[0].sentiment == "positive"
+    assert restored_digest.truncated_by_cap is True
+    assert restored_summary == summary
+    assert isinstance(restored_summary, SentimentSummary)
 
 
 class _UnregisteredModel(BaseModel):
@@ -344,12 +405,64 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
     async def fake_interpret(ticker: str, indicators):
         return "Stub interpretation, no numbers.", [], None
 
+    # The news ports are stubbed at the same seam the real node calls, so
+    # news_node's own body — the as_of guard, filter_and_dedup, the digest
+    # assembly, the lookahead post-assert — still runs for real, and the
+    # NewsDigest being checkpointed carries genuine filter-derived values.
+    from datetime import datetime, timedelta, timezone
+
+    from app.agent.trading.domain.news_digest import NewsItem
+
+    async def fake_fetch_news(ticker: str, as_of: date, lookback_days: int = 14):
+        raw = [
+            {
+                "headline": "Stub story one",
+                "datetime": int(
+                    datetime(
+                        as_of.year, as_of.month, as_of.day, 12, tzinfo=timezone.utc
+                    ).timestamp()
+                ),
+                "source": "stubwire",
+                "url": "https://example.com/1",
+                "summary": "body one",
+            },
+            {
+                "headline": "Stub story two",
+                "datetime": int(
+                    datetime(
+                        as_of.year, as_of.month, as_of.day, 12, tzinfo=timezone.utc
+                    ).timestamp()
+                )
+                - 3 * 86400,
+                "source": "stubwire",
+                "url": "https://example.com/2",
+                "summary": "body two",
+            },
+        ]
+        return raw, as_of - timedelta(days=lookback_days)
+
+    async def fake_build_digest(articles, ticker):
+        items = [
+            NewsItem(
+                headline=a["headline"],
+                published_date=a["_pub_date"],
+                source=a["source"],
+                url=a["url"],
+                summary=f"summary of {a['headline']}",
+                sentiment="positive" if i == 0 else "neutral",
+            )
+            for i, a in enumerate(articles)
+        ]
+        return items, [], None
+
     monkeypatch.setattr(nodes, "get_fundamentals_report", fake_fundamentals)
     monkeypatch.setattr(nodes, "get_price_history", fake_price_history)
     monkeypatch.setattr(nodes, "interpret_indicators", fake_interpret)
     monkeypatch.setattr(
         nodes, "save_technical_report", lambda report, cost_usd=None: tmp_path / "stub.md"
     )
+    monkeypatch.setattr(nodes, "fetch_company_news", fake_fetch_news)
+    monkeypatch.setattr(nodes, "build_digest", fake_build_digest)
 
 
 @requires_postgres
@@ -369,7 +482,9 @@ def test_technical_report_survives_interrupt_and_a_fresh_checkpointer(
     async def phase_1():
         async with build_checkpointer() as checkpointer:
             graph = build_trading_graph(checkpointer, interrupt_after=["technical"])
-            await graph.ainvoke({"ticker": "ACN"}, config=config)
+            await graph.ainvoke(
+                {"ticker": "ACN", "as_of_date": date(2026, 8, 19)}, config=config
+            )
             snapshot = await graph.aget_state(config)
             return snapshot.values["technical_report"], snapshot.next
 
@@ -406,5 +521,64 @@ def test_technical_report_survives_interrupt_and_a_fresh_checkpointer(
         assert after.bars_used == before.bars_used
         # the resumed run reaches the end and still sees the checkpointed report
         assert final["decision_memo"].technical_signal == before.interpretation
+    finally:
+        asyncio.run(cleanup())
+
+
+@requires_postgres
+def test_news_digest_survives_interrupt_and_a_fresh_checkpointer(
+    monkeypatch, tmp_path
+):
+    """Phase 4's exit-criterion round-trip: stop after `news`, close the
+    checkpointer, then read the NewsDigest back through a *new* connection
+    and compiled graph — the process-A-writes, process-B-reads case that a
+    missing ALLOWED_MSGPACK_MODULES entry breaks. The resume then runs the
+    real sentiment_node over the deserialized digest, which would fail on
+    the degraded-to-dict form an unregistered type comes back as."""
+    _stub_expensive_nodes(monkeypatch, tmp_path)
+    thread_id = f"test-news-checkpoint-roundtrip-{uuid.uuid4()}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    async def phase_1():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer, interrupt_after=["news"])
+            await graph.ainvoke(
+                {"ticker": "ACN", "as_of_date": date(2026, 8, 19)}, config=config
+            )
+            snapshot = await graph.aget_state(config)
+            return snapshot.values["news_digest"], snapshot.next
+
+    async def phase_2():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer)
+            snapshot = await graph.aget_state(config)
+            resumed = snapshot.values["news_digest"]
+            final = await graph.ainvoke(None, config=config)
+            return resumed, final
+
+    async def cleanup():
+        async with build_checkpointer() as checkpointer:
+            await checkpointer.adelete_thread(thread_id)
+
+    try:
+        before, next_nodes = asyncio.run(phase_1())
+        assert next_nodes == ("sentiment",)
+        assert isinstance(before, NewsDigest)
+        assert len(before.items) == 2
+
+        after, final = asyncio.run(phase_2())
+
+        assert isinstance(after, NewsDigest)
+        assert after == before
+        assert all(isinstance(i, NewsItem) for i in after.items)
+        assert after.items[0].published_date == date(2026, 8, 19)
+        assert after.as_of_date == date(2026, 8, 19)
+
+        # sentiment_node ran on the resumed side over the deserialized digest
+        summary = final["sentiment_summary"]
+        assert isinstance(summary, SentimentSummary)
+        assert summary.article_count == 2
+        assert (summary.positive, summary.neutral) == (1, 1)
+        assert summary.net_score == 0.5
     finally:
         asyncio.run(cleanup())
