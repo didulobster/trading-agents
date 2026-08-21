@@ -22,8 +22,8 @@ VALID_SENTIMENTS = {"positive", "negative", "neutral"}
 # model retype data it can copy wrong.
 SYSTEM_PROMPT = """You summarize financial news articles for an equity research pipeline.
 
-You will receive numbered articles. For EACH article, return one object:
-  index    - the article's number, copied exactly
+You will receive numbered articles, each marked [N]. For EACH article, return one object:
+  index    - the article's number N as a bare JSON integer: 0, not "0" and not "[0]"
   summary  - ONE sentence, max 25 words, describing what the article reports
   sentiment - exactly one of: positive, negative, neutral
 
@@ -70,6 +70,35 @@ async def _summarize_batch(
     return parsed, resp.usage
 
 
+def _parse_index(raw: Any) -> int:
+    """Coerce the model's `index` to an int, tolerating the bracketed form.
+
+    Observed on the first live run (FIG, 2026-08-21): a 3-article batch came
+    back with "index": "[0]", "[1]", "[2]" — the model echoing the `[0]`
+    marker this module renders in the prompt rather than the bare integer.
+    Every one of those articles was dropped, and all three happened to be the
+    most on-topic stories in the batch.
+
+    The bracketed form is unambiguous, so strip it rather than rejecting it:
+    a rejected index costs a real article, which is the exact data loss the
+    join exists to prevent. Genuinely ambiguous values still raise and get
+    flagged — bools (isinstance(True, int) is True, and int(True) == 1 would
+    silently claim index 1) and non-integral floats (int(1.7) == 1 would
+    silently claim the wrong article) are rejected rather than guessed at.
+    """
+    if isinstance(raw, bool):
+        raise ValueError(f"bool {raw!r} is not an article index")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if not raw.is_integer():
+            raise ValueError(f"non-integral index {raw!r}")
+        return int(raw)
+    if isinstance(raw, str):
+        return int(raw.strip().strip("[]").strip())
+    raise TypeError(f"index of type {type(raw).__name__}")
+
+
 def _join(
     articles: list[dict[str, Any]], parsed: list[dict[str, Any]]
 ) -> tuple[list[NewsItem], list[str]]:
@@ -86,7 +115,7 @@ def _join(
 
     for obj in parsed:
         try:
-            idx = int(obj["index"])
+            idx = _parse_index(obj["index"])
         except (KeyError, TypeError, ValueError):
             issues.append(f"unparseable index in {obj!r}")
             continue

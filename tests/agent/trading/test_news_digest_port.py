@@ -20,6 +20,7 @@ from app.agent.trading.infrastructure.news_digest_port import (
     BATCH_SIZE,
     _assert_within_budget,
     _join,
+    _parse_index,
     _render_batch,
     build_digest,
 )
@@ -70,6 +71,45 @@ def test_join_flags_missing_duplicate_and_invalid_enum():
     input_headlines = {a["headline"] for a in articles}
     assert all(i.headline in input_headlines for i in items)
     assert all(i.published_date == date(2025, 3, 10) for i in items)
+
+
+def test_bracketed_index_is_accepted_not_dropped():
+    """Regression, from the first live run (FIG, 2026-08-21): Haiku returned
+    "index": "[0]" for a 3-article batch — echoing the prompt's own [N]
+    marker — and all three articles were dropped as unparseable. They were
+    the most on-topic stories in the batch, so the cost of rejecting an
+    unambiguous form is real article loss."""
+    articles = _articles(3)
+    parsed = [
+        {"index": "[0]", "summary": "s0", "sentiment": "neutral"},
+        {"index": "[1]", "summary": "s1", "sentiment": "positive"},
+        {"index": " [2] ", "summary": "s2", "sentiment": "negative"},
+    ]
+
+    items, issues = _join(articles, parsed)
+
+    assert issues == []
+    assert [i.headline for i in items] == ["headline 0", "headline 1", "headline 2"]
+    assert [i.sentiment for i in items] == ["neutral", "positive", "negative"]
+
+
+def test_parse_index_accepts_unambiguous_forms_and_rejects_guesswork():
+    assert _parse_index(3) == 3
+    assert _parse_index("3") == 3
+    assert _parse_index("[3]") == 3
+    assert _parse_index(" [3] ") == 3
+    assert _parse_index(3.0) == 3
+
+    # a bool must not become index 1 via int(True); a non-integral float must
+    # not silently truncate onto the wrong article
+    with pytest.raises(ValueError):
+        _parse_index(True)
+    with pytest.raises(ValueError):
+        _parse_index(1.7)
+    with pytest.raises(ValueError):
+        _parse_index("first")
+    with pytest.raises(TypeError):
+        _parse_index(None)
 
 
 def test_join_flags_out_of_range_and_unparseable_indices():
