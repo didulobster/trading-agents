@@ -116,8 +116,27 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
  
     return prompt
 
-def _save_output(content: str, ticker: str, mode: str, cost_usd: float | None = None) -> Path:
-    """Save output with timestamp. Returns the path."""
+# Modes whose provenance must NOT fall back to the research agent's session
+# log. These are trading-pipeline artifacts that never call the research
+# tools, so at their save time the module-global log still holds whatever
+# trace the preceding fundamentals run left behind — writing it would pair
+# the wrong evidence with the report. They supply their own provenance or
+# get none.
+_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision"}
+
+
+def _save_output(
+    content: str,
+    ticker: str,
+    mode: str,
+    cost_usd: float | None = None,
+    provenance: str | None = None,
+) -> Path:
+    """Save output with timestamp. Returns the path.
+
+    `provenance`, when given, is written verbatim to the sidecar file instead
+    of the research agent's session log.
+    """
     if cost_usd is not None:
         content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({AGENT_MODEL})\n"
     now = datetime.now()
@@ -132,6 +151,9 @@ def _save_output(content: str, ticker: str, mode: str, cost_usd: float | None = 
     elif mode == "fundamentals":
         filename = f"{ticker}-fundamental-{timestamp}.md"
         out_path = MEMO_DIR / ticker / date / filename
+    elif mode in ("sentiment", "decision"):
+        filename = f"{ticker}-{mode}-{timestamp}.md"
+        out_path = MEMO_DIR / ticker / date / filename
     else:
         filename = f"{ticker}-{timestamp}.md"
         out_path = MEMO_DIR / ticker / filename
@@ -144,14 +166,12 @@ def _save_output(content: str, ticker: str, mode: str, cost_usd: float | None = 
     # and tool output that produced it, instead of reconstructing the run
     # by inference after the process exits. Saved as .md (not .txt) so
     # Obsidian's file explorer, which hides unknown extensions by default,
-    # shows it beside its report. Skipped for the technical interpreter,
-    # which doesn't use the research tools: at its save time the
-    # module-global log still holds the preceding fundamentals run's
-    # trace, and writing it would pair the wrong evidence with the report.
-    if mode != "technical":
-        session_log = get_session_log()
-        if session_log.strip():
-            out_path.with_name(f"{out_path.stem}-provenance.md").write_text(session_log)
+    # shows it beside its report. See _NO_SESSION_LOG_MODES for which modes
+    # must not inherit this log.
+    if provenance is None and mode not in _NO_SESSION_LOG_MODES:
+        provenance = get_session_log()
+    if provenance and provenance.strip():
+        out_path.with_name(f"{out_path.stem}-provenance.md").write_text(provenance)
 
     return out_path
 
