@@ -14,6 +14,7 @@ DIGEST_MAX_TOKENS = 1500
 NEWS_BUDGET_USD = 0.20
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral"}
+VALID_RELEVANCE = {"primary", "mentioned", "unrelated"}
 
 # Design rule: the model receives numbered articles and returns only
 # {index, summary, sentiment}. Python joins the result back onto the trusted
@@ -22,15 +23,38 @@ VALID_SENTIMENTS = {"positive", "negative", "neutral"}
 # model retype data it can copy wrong.
 SYSTEM_PROMPT = """You summarize financial news articles for an equity research pipeline.
 
-You will receive numbered articles, each marked [N]. For EACH article, return one object:
-  index    - the article's number N as a bare JSON integer: 0, not "0" and not "[0]"
-  summary  - ONE sentence, max 25 words, describing what the article reports
+The user message names one COMPANY UNDER ANALYSIS, then gives numbered articles
+marked [N]. The articles come from a vendor feed tagged with that company's
+ticker, but many of them turn out to be about other companies, sector trends, or
+the market as a whole. Judging that is part of your job.
+
+For EACH article, return one object:
+  index     - the article's number N as a bare JSON integer: 0, not "0" and not "[0]"
+  summary   - ONE sentence, max 25 words, describing what the article reports
+  relevance - exactly one of: primary, mentioned, unrelated
   sentiment - exactly one of: positive, negative, neutral
 
-Rules:
-- Sentiment is about the likely effect on the company's equity, not the tone of the writing.
+Relevance is about the COMPANY UNDER ANALYSIS, and nothing else:
+- "primary"   - the article is substantially about that company: its results,
+                products, guidance, management, stock, or an event directly
+                involving it. An analyst rating or price target on that company
+                counts as primary.
+- "mentioned" - the company appears or is clearly implicated, but the article is
+                mainly about something else: a sector trend, an index move, a
+                competitor, a partner, or a broad market column.
+- "unrelated" - the company is not meaningfully involved at all. A feed tag is
+                not involvement. If the article is about a different company and
+                the company under analysis plays no part, it is unrelated.
+
+Sentiment is also about the COMPANY UNDER ANALYSIS:
+- Score the likely effect on THAT company's equity, not the tone of the writing
+  and not the effect on whichever company the article happens to be about.
+- If relevance is "unrelated", sentiment must be "neutral" — an article that does
+  not involve the company cannot be evidence about it.
 - "neutral" is the correct answer for routine coverage, analyst-roundup pieces, and
   anything where the direction is genuinely unclear. Do not force a direction.
+
+Other rules:
 - Summarize ONLY what the provided text says. Do not add context, do not add figures
   that are not in the text, do not speculate about causes or consequences.
 - Return one object per input article. Never merge, skip, or invent articles.
@@ -38,22 +62,26 @@ Rules:
 """
 
 
-def _render_batch(articles: list[dict[str, Any]]) -> str:
-    lines = []
+def _render_batch(articles: list[dict[str, Any]], ticker: str) -> str:
+    """The ticker heads the batch because relevance and sentiment are both
+    judged against it. Without it the model scored each article against
+    whichever company that article was about, which is how a Netflix
+    sell-off ended up as a data point in MSFT's aggregate."""
+    lines = [f"COMPANY UNDER ANALYSIS: {ticker.upper()}", ""]
     for i, a in enumerate(articles):
         body = (a.get("summary") or "").strip()[:600]   # truncate long bodies
         lines.append(f"[{i}] HEADLINE: {a.get('headline', '')}\n    BODY: {body}")
-    return "\n\n".join(lines)
+    return "\n".join(lines[:2]) + "\n" + "\n\n".join(lines[2:])
 
 
 async def _summarize_batch(
-    client: AsyncAnthropic, articles: list[dict[str, Any]]
+    client: AsyncAnthropic, articles: list[dict[str, Any]], ticker: str
 ) -> tuple[list[dict[str, Any]], Any]:
     resp = await client.messages.create(
         model=AGENT_MODEL,
         max_tokens=DIGEST_MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _render_batch(articles)}],
+        messages=[{"role": "user", "content": _render_batch(articles, ticker)}],
     )
     text = "".join(b.text for b in resp.content if b.type == "text").strip()
     text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -139,6 +167,16 @@ def _join(
             issues.append(f"index {i}: invalid sentiment {sentiment!r} -> neutral")
             sentiment = "neutral"
 
+        # Degrades to "mentioned", the middle value, rather than either
+        # extreme: "unrelated" would drop a real article out of the aggregate
+        # over a formatting slip, and "primary" would admit possible noise.
+        # "mentioned" keeps the item in the digest for audit while holding it
+        # out of a primary-only aggregate, and the issue makes it visible.
+        relevance = str(obj.get("relevance", "")).strip().lower()
+        if relevance not in VALID_RELEVANCE:
+            issues.append(f"index {i}: invalid relevance {relevance!r} -> mentioned")
+            relevance = "mentioned"
+
         items.append(
             NewsItem(
                 headline=art.get("headline", ""),   # from vendor, not model
@@ -147,6 +185,7 @@ def _join(
                 url=art.get("url", ""),
                 summary=str(obj.get("summary", "")).strip(),
                 sentiment=sentiment,
+                relevance=relevance,
             )
         )
 
@@ -183,7 +222,7 @@ async def build_digest(
 
     for start in range(0, len(articles), BATCH_SIZE):
         batch = articles[start : start + BATCH_SIZE]
-        parsed, batch_usage = await _summarize_batch(client, batch)
+        parsed, batch_usage = await _summarize_batch(client, batch, ticker)
         usage.input_tokens += batch_usage.input_tokens
         usage.cache_write_tokens += batch_usage.cache_creation_input_tokens or 0
         usage.cache_read_tokens += batch_usage.cache_read_input_tokens or 0

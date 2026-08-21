@@ -100,6 +100,7 @@ def _sample_digest() -> NewsDigest:
                 url="https://example.com/1",
                 summary="Acme reported quarterly results above expectations.",
                 sentiment="positive",
+                relevance="primary",
             ),
             NewsItem(
                 headline="Sector roundup",
@@ -108,6 +109,7 @@ def _sample_digest() -> NewsDigest:
                 url="https://example.com/2",
                 summary="Routine sector coverage.",
                 sentiment="neutral",
+                relevance="mentioned",
             ),
         ],
         raw_article_count=7,
@@ -179,6 +181,7 @@ def test_news_digest_survives_msgpack_roundtrip():
         neutral=1,
         net_score=0.5,
         article_count=2,
+        excluded_by_relevance=3,
     )
 
     restored_digest = serde.loads_typed(serde.dumps_typed(digest))
@@ -188,6 +191,8 @@ def test_news_digest_survives_msgpack_roundtrip():
     assert isinstance(restored_digest, NewsDigest)
     assert all(isinstance(i, NewsItem) for i in restored_digest.items)
     assert restored_digest.items[0].sentiment == "positive"
+    assert [i.relevance for i in restored_digest.items] == ["primary", "mentioned"]
+    assert restored_summary.excluded_by_relevance == 3
     assert restored_digest.truncated_by_cap is True
     assert restored_summary == summary
     assert isinstance(restored_summary, SentimentSummary)
@@ -450,6 +455,7 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
                 url=a["url"],
                 summary=f"summary of {a['headline']}",
                 sentiment="positive" if i == 0 else "neutral",
+                relevance="primary",
             )
             for i, a in enumerate(articles)
         ]

@@ -52,7 +52,10 @@ async def run(ticker: str, thread_id: str | None, as_of: date) -> None:
             f"truncated_by_cap={digest.truncated_by_cap}"
         )
         for item in digest.items:
-            print(f"[{item.published_date}] ({item.sentiment}) {item.headline}")
+            print(
+                f"[{item.published_date}] {item.relevance:9} ({item.sentiment}) "
+                f"{item.headline}"
+            )
             print(f"    {item.summary}")
         issues = result.get("news_digest_issues") or []
         if issues:
@@ -67,6 +70,16 @@ async def run(ticker: str, thread_id: str | None, as_of: date) -> None:
             f"over {sentiment.article_count} articles  "
             f"net_score={sentiment.net_score:+.2f}"
         )
+        if sentiment.excluded_by_relevance:
+            print(
+                f"({sentiment.excluded_by_relevance} of "
+                f"{sentiment.article_count + sentiment.excluded_by_relevance} "
+                f"digest articles excluded as not primarily about "
+                f"{sentiment.ticker})"
+            )
+        if sentiment.article_count == 0:
+            print("(no articles primarily about this company — net_score is "
+                  "an absence of evidence, not neutral evidence)")
         print("--- end Sentiment Summary ---\n")
 
     memo = result["decision_memo"]
