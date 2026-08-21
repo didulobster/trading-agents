@@ -215,7 +215,7 @@ class IngestionService:
             if existing:
                 continue
 
-            parsed_sections = parse_filing(Path(doc.local_path))
+            parsed_sections = parse_filing(Path(doc.local_path), form_type=doc.document_type)
             section_models = [
                 Section(
                     document_id=doc.id,
