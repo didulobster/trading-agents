@@ -359,11 +359,21 @@ This section forces a verdict, but only when the review has enough
 completed findings to support one.
 
 Evidentiary coverage gate — check this FIRST: count how many of the twelve
-checklist items ended in a genuine Data Gap (the corpus could not answer
-it) rather than a finding, including "not disclosed by this filer" answers
-which are findings, not gaps. If more than four of the twelve are Data
-Gaps, OR item 10(a) — the ICFR/material-weakness question — is itself a
-Data Gap, do not assign an earnings quality tier. Instead write exactly
+TOP-LEVEL checklist items (1 through 12) ended with NO finding at all —
+the item's section is entirely a Data Gap — versus a finding, including
+"not disclosed by this filer" answers, which are findings, not gaps. This
+count is over the twelve top-level items only. A top-level item with
+several lettered sub-parts (e.g. item 7's (a)/(b)/(c), item 9's two-part
+structure, item 10's (a)/(b)/(c)) counts as ONE gap only if EVERY sub-part
+failed to produce a finding; if even one sub-part produced a finding, the
+whole item counts as answered, not gapped, and its other gapped sub-parts
+belong only in the Data Gaps list, not in this count. State the resulting
+number explicitly (e.g. "1 of 12 items fully gapped") before comparing it
+to the threshold — do not describe the Data Gaps list's sub-part entries
+as if each were one of the twelve. If more than four of the twelve
+top-level items are fully gapped by that count, OR item 10(a) specifically
+— the ICFR/material-weakness question — is itself a Data Gap, do not
+assign an earnings quality tier. Instead write exactly
 "**Verdict: INSUFFICIENT_EVIDENCE**" as the first line of this section,
 followed by the list of gapped items and why each is gapped, and stop —
 do not also state CLEAN/MIXED/IMPAIRED alongside INSUFFICIENT_EVIDENCE.
