@@ -4,13 +4,22 @@ import json
 from datetime import date
 
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
-from app.agent.trading.infrastructure.graph import build_trading_graph
+from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
 
 
-async def run(ticker: str, thread_id: str | None, as_of: date) -> None:
-    thread_id = thread_id or f"trading-{ticker}"
+async def run(
+    ticker: str, thread_id: str | None, as_of: date, analysts: list[str] | None
+) -> None:
+    # A subset run has a different topology, so it gets its own default thread:
+    # resuming a full run's checkpoint under a narrower graph would report the
+    # cached fundamentals/technical of an earlier run as if this run produced
+    # them. An explicit --thread-id still overrides, deliberately.
+    suffix = "" if analysts is None else "-" + "+".join(sorted(analysts))
+    thread_id = thread_id or f"trading-{ticker}{suffix}"
+    if analysts is not None:
+        print(f"Analysts: {', '.join(sorted(analysts))} (others skipped)")
     async with build_checkpointer() as checkpointer:
-        graph = build_trading_graph(checkpointer)
+        graph = build_trading_graph(checkpointer, analysts=analysts)
         config = {"configurable": {"thread_id": thread_id}}
         state = await graph.aget_state(config)
 
@@ -96,8 +105,19 @@ def main() -> None:
         default=date.today(),  # today() appears exactly once, at the boundary
         help="Analysis date. All news is bounded at or before this date.",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        choices=ALL_ANALYSTS,
+        metavar="ANALYST",
+        help=(
+            "Run only this analyst; repeat to select several "
+            f"(choices: {', '.join(ALL_ANALYSTS)}). Default: all of them. "
+            "The synthesizer still runs and records the others as data gaps."
+        ),
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.ticker, args.thread_id, args.as_of))
+    asyncio.run(run(args.ticker, args.thread_id, args.as_of, args.only))
 
 
 if __name__ == "__main__":

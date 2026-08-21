@@ -163,14 +163,32 @@ async def risk_node(state: TradingState) -> dict:
     return {"risk_summary": "STUB — Phase 6"}
 
 
+# What each analyst leg is expected to leave behind in state. A partial run is
+# a legitimate mode (--only), so a missing report is recorded as a data gap
+# rather than raising — but the memo must never present a gap as a finding.
+ANALYST_OUTPUTS = {
+    "fundamentals": "fundamentals_report",
+    "technical": "technical_report",
+    "news": "news_digest",
+}
+
+
 async def synthesizer_node(state: TradingState) -> dict:
     print(f"[synthesizer] STUB running for {state['ticker']}")
+    missing = sorted(
+        name for name, key in ANALYST_OUTPUTS.items() if state.get(key) is None
+    )
+    technical = state.get("technical_report")
     memo = DecisionMemo(
         ticker=state["ticker"],
         bull_case="STUB",
         bear_case="STUB",
         risk_debate_summary=state["risk_summary"],
-        technical_signal=state["technical_report"].interpretation,
+        technical_signal=(
+            technical.interpretation
+            if technical is not None
+            else "NOT RUN — technical analyst was excluded from this run"
+        ),
         reasoning="STUB — synthesis logic not yet implemented. fundamentals (Phase 2), technical (Phase 3), and news/sentiment (Phase 4) are real; debate/risk are still stubs.",
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,
@@ -179,6 +197,11 @@ async def synthesizer_node(state: TradingState) -> dict:
         data_gaps=[
             "synthesizer does not yet incorporate fundamentals_report into this memo — that's a later phase, not Phase 2's scope",
             "debate/risk nodes are still stubs — no real data",
+        ]
+        + [
+            f"{name} analyst did not run — this memo carries no {name} evidence "
+            f"at all, which is not the same as that evidence being neutral"
+            for name in missing
         ],
         assumptions=[],
         evidence=[],
