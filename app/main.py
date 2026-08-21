@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.trading.domain.decision_memo import DecisionMemo
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.graph import build_trading_graph
 from app.application.citations import format_citation_tag
@@ -43,7 +44,15 @@ load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
 claude_model = os.getenv("LLM_CLAUDE_MODEL")
 
-app = FastAPI(title="RAG Skeleton")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_pool()
+    async with build_checkpointer() as checkpointer:
+        app.state.trading_graph = build_trading_graph(checkpointer)
+        yield
+    await close_pool()
+
+app = FastAPI(title="RAG Skeleton", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,14 +60,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-def startup():
-    init_pool()
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await close_pool()
 
 # ---- Request / response models ----
 
@@ -346,9 +347,41 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
     )
 
 
+class TradingAnalysisRequest(BaseModel):
+    ticker: str
+    thread_id: str | None = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with build_checkpointer() as checkpointer:
-        app.state.trading_graph = build_trading_graph(checkpointer)
-        yield
+class TradingAnalysisResponse(BaseModel):
+    ticker: str
+    thread_id: str
+    status: Literal["completed", "resumed", "started"]
+    decision_memo: DecisionMemo
+
+
+@app.post("/trading/analyze", response_model=TradingAnalysisResponse)
+async def trading_analyze(req: TradingAnalysisRequest) -> TradingAnalysisResponse:
+    if not req.ticker.strip():
+        raise HTTPException(400, "ticker must not be empty")
+
+    ticker = req.ticker.strip().upper()
+    thread_id = req.thread_id or f"trading-{ticker}"
+    graph = app.state.trading_graph
+    config = {"configurable": {"thread_id": thread_id}}
+    state = await graph.aget_state(config)
+
+    if state.values and not state.next:
+        status: Literal["completed", "resumed", "started"] = "completed"
+        result = state.values
+    elif state.next:
+        status = "resumed"
+        result = await graph.ainvoke(None, config=config)
+    else:
+        status = "started"
+        result = await graph.ainvoke({"ticker": ticker}, config=config)
+
+    return TradingAnalysisResponse(
+        ticker=ticker,
+        thread_id=thread_id,
+        status=status,
+        decision_memo=result["decision_memo"],
+    )
