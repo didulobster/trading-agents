@@ -35,6 +35,9 @@ ALLOWED_MSGPACK_MODULES = [
     ("app.agent.trading.domain.fundamentals_report", "FundamentalsReport"),
     ("app.agent.trading.domain.technical_report", "TechnicalReport"),
     ("app.agent.trading.domain.technical_report", "TechnicalIndicators"),
+    ("app.agent.trading.domain.news_digest", "NewsItem"),
+    ("app.agent.trading.domain.news_digest", "NewsDigest"),
+    ("app.agent.trading.domain.news_digest", "SentimentSummary"),
 ]
 
 
