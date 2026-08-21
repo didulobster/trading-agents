@@ -8,7 +8,12 @@ from collections import Counter
 from datetime import date
 
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
-from app.agent.trading.domain.news_digest import NewsDigest, SentimentSummary
+from app.agent.trading.domain.news_digest import (
+    AGGREGATED_RELEVANCE,
+    NewsDigest,
+    NewsItem,
+    SentimentSummary,
+)
 from app.agent.trading.domain.technical_report import TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
@@ -98,12 +103,40 @@ async def news_node(state: TradingState) -> dict:
 async def sentiment_node(state: TradingState) -> dict:
     """Deterministic aggregation over NewsDigest.items — no LLM, no network.
 
-    An empty digest (quiet ticker, nothing in the window) flows through as
-    net_score=0.0 with article_count=0; downstream consumers must not read
-    that as neutrality-with-evidence."""
+    Only articles whose relevance is in AGGREGATED_RELEVANCE are counted.
+    The vendor feed tags broad sector coverage with the requested ticker, so
+    aggregating everything measures the sector rather than the company.
+
+    Two different situations both produce net_score=0.0 with
+    article_count=0 — a genuinely quiet ticker, and a noisy feed where
+    nothing was actually about the company — and neither is
+    neutrality-with-evidence. `excluded_by_relevance` is what tells them
+    apart downstream."""
     digest: NewsDigest = state["news_digest"]
-    print(f"[sentiment] aggregating {len(digest.items)} items for {digest.ticker}")
-    counts = Counter(i.sentiment for i in digest.items)
+
+    # A checkpoint written before a NewsItem field was added deserializes with
+    # the outer NewsDigest intact but its items left as plain dicts — pydantic
+    # cannot rebuild a child that is missing a now-required field, and nothing
+    # raises at the read. Without this the first symptom is an AttributeError
+    # on the new field, several frames from the actual cause. Same reason
+    # news_node refuses to run without as_of_date: name the real problem at
+    # the point it becomes knowable.
+    stale = [i for i in digest.items if not isinstance(i, NewsItem)]
+    if stale:
+        raise TypeError(
+            f"news_digest.items holds {len(stale)} {type(stale[0]).__name__} "
+            f"entr{'y' if len(stale) == 1 else 'ies'} instead of NewsItem — this "
+            f"checkpoint predates a NewsItem schema change and cannot be resumed. "
+            f"Re-run the ticker under a new --thread-id."
+        )
+
+    relevant = [i for i in digest.items if i.relevance in AGGREGATED_RELEVANCE]
+    excluded = len(digest.items) - len(relevant)
+    print(
+        f"[sentiment] aggregating {len(relevant)} of {len(digest.items)} items "
+        f"for {digest.ticker} ({excluded} excluded by relevance)"
+    )
+    counts = Counter(i.sentiment for i in relevant)
     pos, neg, neu = counts["positive"], counts["negative"], counts["neutral"]
     total = pos + neg + neu
     return {
@@ -115,6 +148,7 @@ async def sentiment_node(state: TradingState) -> dict:
             neutral=neu,
             net_score=(pos - neg) / total if total else 0.0,
             article_count=total,
+            excluded_by_relevance=excluded,
         )
     }
 

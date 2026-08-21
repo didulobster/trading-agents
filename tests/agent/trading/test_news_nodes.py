@@ -18,7 +18,7 @@ from app.agent.trading.domain.news_digest import NewsDigest, NewsItem
 AS_OF = date(2025, 3, 15)
 
 
-def _item(pub: date, sentiment: str = "neutral") -> NewsItem:
+def _item(pub: date, sentiment: str = "neutral", relevance: str = "primary") -> NewsItem:
     return NewsItem(
         headline=f"story on {pub}",
         published_date=pub,
@@ -26,6 +26,7 @@ def _item(pub: date, sentiment: str = "neutral") -> NewsItem:
         url="https://example.com/x",
         summary="one line",
         sentiment=sentiment,
+        relevance=relevance,
     )
 
 
@@ -138,8 +139,82 @@ async def test_sentiment_node_aggregates_counts_and_net_score():
     s = update["sentiment_summary"]
     assert (s.positive, s.negative, s.neutral) == (3, 1, 1)
     assert s.article_count == 5
+    assert s.excluded_by_relevance == 0
     assert s.net_score == pytest.approx((3 - 1) / 5)
     assert s.ticker == "ACN" and s.as_of_date == AS_OF
+
+
+@pytest.mark.anyio
+async def test_sentiment_node_counts_only_primary_relevance():
+    """The fix for the measured failure: a vendor feed tagged with this
+    ticker but dominated by sector coverage must not have that coverage
+    counted as sentiment about this company. Here every excluded article is
+    negative, so including them would flip the sign of net_score."""
+    items = [
+        _item(AS_OF, "positive", "primary"),
+        _item(AS_OF - timedelta(days=1), "positive", "primary"),
+        _item(AS_OF - timedelta(days=2), "negative", "mentioned"),
+        _item(AS_OF - timedelta(days=3), "negative", "mentioned"),
+        _item(AS_OF - timedelta(days=4), "negative", "unrelated"),
+        _item(AS_OF - timedelta(days=5), "negative", "unrelated"),
+    ]
+
+    update = await nodes.sentiment_node({"news_digest": _digest(items)})
+
+    s = update["sentiment_summary"]
+    assert (s.positive, s.negative, s.neutral) == (2, 0, 0)
+    assert s.article_count == 2
+    assert s.excluded_by_relevance == 4
+    assert s.net_score == pytest.approx(1.0)
+    # the aggregate covers only what it counted, and says so
+    assert s.article_count + s.excluded_by_relevance == len(items)
+
+
+@pytest.mark.anyio
+async def test_stale_checkpoint_items_fail_loudly_not_as_attribute_error():
+    """Observed against a real Postgres checkpoint written before `relevance`
+    existed: the outer NewsDigest deserializes fine, but its items come back
+    as plain dicts because pydantic cannot rebuild a child missing a
+    now-required field — and nothing raises at the read. The first symptom
+    was `AttributeError: 'dict' object has no attribute 'relevance'`, several
+    frames from the cause.
+
+    model_construct reproduces that state, since NewsDigest(...) would
+    validate the dicts away.
+    """
+    degraded = NewsDigest.model_construct(
+        ticker="ACN",
+        as_of_date=AS_OF,
+        window_start=AS_OF - timedelta(days=14),
+        items=[{"headline": "old", "sentiment": "positive"}],
+        raw_article_count=1,
+        deduped_count=1,
+        dropped_out_of_window=0,
+        dropped_missing_date=0,
+        truncated_by_cap=False,
+    )
+
+    with pytest.raises(TypeError, match="predates a NewsItem schema change"):
+        await nodes.sentiment_node({"news_digest": degraded})
+
+
+@pytest.mark.anyio
+async def test_all_articles_filtered_out_is_distinguishable_from_no_news():
+    """Both cases give net_score 0.0 with article_count 0. Only
+    excluded_by_relevance separates 'nothing was about this company' from
+    'there was no news', and they justify different confidence."""
+    noisy = await nodes.sentiment_node(
+        {"news_digest": _digest([_item(AS_OF, "positive", "unrelated")] * 5)}
+    )
+    quiet = await nodes.sentiment_node({"news_digest": _digest([])})
+
+    assert noisy["sentiment_summary"].article_count == 0
+    assert noisy["sentiment_summary"].net_score == 0.0
+    assert noisy["sentiment_summary"].excluded_by_relevance == 5
+
+    assert quiet["sentiment_summary"].article_count == 0
+    assert quiet["sentiment_summary"].net_score == 0.0
+    assert quiet["sentiment_summary"].excluded_by_relevance == 0
 
 
 @pytest.mark.anyio
@@ -151,4 +226,5 @@ async def test_sentiment_node_handles_empty_digest_as_valid():
     s = update["sentiment_summary"]
     assert s.article_count == 0
     assert s.net_score == 0.0
+    assert s.excluded_by_relevance == 0
     assert (s.positive, s.negative, s.neutral) == (0, 0, 0)

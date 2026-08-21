@@ -46,11 +46,11 @@ def _articles(n: int) -> list[dict]:
 def test_join_flags_missing_duplicate_and_invalid_enum():
     articles = _articles(5)
     parsed = [
-        {"index": 0, "summary": "s0", "sentiment": "positive"},
-        {"index": 1, "summary": "s1", "sentiment": "negative"},
-        {"index": 1, "summary": "s1 again", "sentiment": "positive"},   # duplicate
-        {"index": 2, "summary": "s2", "sentiment": "bullish"},          # invalid enum
-        {"index": 4, "summary": "s4", "sentiment": "neutral"},
+        {"index": 0, "summary": "s0", "sentiment": "positive", "relevance": "primary"},
+        {"index": 1, "summary": "s1", "sentiment": "negative", "relevance": "primary"},
+        {"index": 1, "summary": "s1 again", "sentiment": "positive", "relevance": "primary"},  # duplicate
+        {"index": 2, "summary": "s2", "sentiment": "bullish", "relevance": "primary"},  # invalid enum
+        {"index": 4, "summary": "s4", "sentiment": "neutral", "relevance": "mentioned"},
         # index 3 missing entirely — data loss, must be visible
     ]
 
@@ -73,6 +73,38 @@ def test_join_flags_missing_duplicate_and_invalid_enum():
     assert all(i.published_date == date(2025, 3, 10) for i in items)
 
 
+def test_join_validates_relevance_and_degrades_to_mentioned():
+    """Relevance gets the same structural treatment as sentiment. It degrades
+    to the middle value, not to either extreme: "unrelated" would drop a real
+    article out of the sentiment aggregate over a formatting slip, and
+    "primary" would admit noise into it."""
+    articles = _articles(3)
+    parsed = [
+        {"index": 0, "summary": "s0", "sentiment": "positive", "relevance": "PRIMARY"},
+        {"index": 1, "summary": "s1", "sentiment": "neutral", "relevance": "sort of"},
+        {"index": 2, "summary": "s2", "sentiment": "neutral"},   # field absent
+    ]
+
+    items, issues = _join(articles, parsed)
+
+    assert len(items) == 3
+    assert items[0].relevance == "primary"          # case-normalized, no issue
+    assert items[1].relevance == "mentioned"
+    assert items[2].relevance == "mentioned"
+    assert any("invalid relevance 'sort of'" in i for i in issues)
+    assert any("invalid relevance ''" in i for i in issues)
+    assert not any("index 0" in i for i in issues)
+
+
+def test_render_batch_names_the_company_under_analysis():
+    """Without this the model scores each article against whichever company
+    the article is about — which is how a Netflix sell-off became a data
+    point in MSFT's aggregate on the first live run."""
+    rendered = _render_batch(_articles(2), "msft")
+    assert "COMPANY UNDER ANALYSIS: MSFT" in rendered
+    assert rendered.index("COMPANY UNDER ANALYSIS") < rendered.index("[0] HEADLINE")
+
+
 def test_bracketed_index_is_accepted_not_dropped():
     """Regression, from the first live run (FIG, 2026-08-21): Haiku returned
     "index": "[0]" for a 3-article batch — echoing the prompt's own [N]
@@ -81,9 +113,9 @@ def test_bracketed_index_is_accepted_not_dropped():
     unambiguous form is real article loss."""
     articles = _articles(3)
     parsed = [
-        {"index": "[0]", "summary": "s0", "sentiment": "neutral"},
-        {"index": "[1]", "summary": "s1", "sentiment": "positive"},
-        {"index": " [2] ", "summary": "s2", "sentiment": "negative"},
+        {"index": "[0]", "summary": "s0", "sentiment": "neutral", "relevance": "primary"},
+        {"index": "[1]", "summary": "s1", "sentiment": "positive", "relevance": "primary"},
+        {"index": " [2] ", "summary": "s2", "sentiment": "negative", "relevance": "primary"},
     ]
 
     items, issues = _join(articles, parsed)
@@ -115,10 +147,10 @@ def test_parse_index_accepts_unambiguous_forms_and_rejects_guesswork():
 def test_join_flags_out_of_range_and_unparseable_indices():
     articles = _articles(2)
     parsed = [
-        {"index": 0, "summary": "ok", "sentiment": "neutral"},
-        {"index": 99, "summary": "phantom", "sentiment": "positive"},
-        {"summary": "no index at all", "sentiment": "positive"},
-        {"index": "one", "summary": "bad index", "sentiment": "positive"},
+        {"index": 0, "summary": "ok", "sentiment": "neutral", "relevance": "primary"},
+        {"index": 99, "summary": "phantom", "sentiment": "positive", "relevance": "primary"},
+        {"summary": "no index at all", "sentiment": "positive", "relevance": "primary"},
+        {"index": "one", "summary": "bad index", "sentiment": "positive", "relevance": "primary"},
     ]
 
     items, issues = _join(articles, parsed)
@@ -132,7 +164,7 @@ def test_join_flags_out_of_range_and_unparseable_indices():
 def test_render_batch_numbers_articles_and_truncates_bodies():
     articles = _articles(2)
     articles[1]["summary"] = "x" * 2000
-    rendered = _render_batch(articles)
+    rendered = _render_batch(articles, "ACN")
     assert "[0] HEADLINE: headline 0" in rendered
     assert "[1] HEADLINE: headline 1" in rendered
     assert "x" * 600 in rendered
@@ -158,10 +190,11 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
     batch_sizes: list[int] = []
     log_calls: list[tuple] = []
 
-    async def fake_summarize(client, batch):
+    async def fake_summarize(client, batch, ticker):
         batch_sizes.append(len(batch))
         return (
-            [{"index": i, "summary": f"s{i}", "sentiment": "neutral"} for i in range(len(batch))],
+            [{"index": i, "summary": f"s{i}", "sentiment": "neutral", "relevance": "primary"}
+             for i in range(len(batch))],
             _fake_usage(),
         )
 
@@ -184,7 +217,7 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
 
 @pytest.mark.anyio
 async def test_build_digest_empty_input_skips_llm_entirely(monkeypatch):
-    async def explode(client, batch):
+    async def explode(client, batch, ticker):
         raise AssertionError("LLM called for an empty article list")
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", explode)

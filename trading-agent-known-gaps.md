@@ -41,6 +41,27 @@ when actually closed, not when they become inconvenient.
    fires. Dedup is cheap and harmless, but it is not the cost lever it was
    assumed to be — the cap is.
 
+   **This is now the binding constraint, and it needs a decision.** Adding
+   relevance scoring (gap 5) made the cost of the cap precise: of MSFT's
+   247 articles in the window, **58 name Microsoft — and the cap keeps only
+   6 of them.** 52 relevant articles are discarded, 31 of them on the
+   2026-08-13 event day. The sentiment signal is now correct but nearly
+   empty (n=6, of which three are near-identical "Microsoft Versus
+   Competitors" template pieces). Two ways out, both real:
+
+   - **Raise `MAX_ARTICLES` to cover the window.** Scoring all 247 costs
+     ~$0.086, still under the $0.20 budget, and needs no new data source.
+     It does deliberately weaken the guard the cap was introduced to be, so
+     an extreme earnings week would lean on the budget assertion instead.
+   - **Prioritize likely-relevant articles before the cap.** Keeps cost
+     flat, but needs the company *name*: matching the ticker alone finds
+     only 8 of MSFT's 58 (headlines say "Microsoft", not "MSFT"), so it
+     requires a name lookup (e.g. Finnhub `/stock/profile2`) plus a cache.
+
+   A per-day quota instead of a flat newest-first cut would fix the
+   dropped-event-day problem specifically, at no cost, without addressing
+   relevance concentration.
+
 4. **News is single-vendor.** Phase 3's price fetch has a yfinance/Finnhub
    router; news has no fallback, so a Finnhub outage kills the node.
    Acceptable for now — but `VendorError` from this node needs a decided
@@ -48,31 +69,27 @@ when actually closed, not when they become inconvenient.
    "news unavailable"? Decide explicitly rather than discovering the
    default.
 
-5. **Finnhub's `company-news` feed is mostly not about the company.**
-   Found on the first live run, not anticipated in the design. For MSFT
-   (2026-08-21, 60 articles reaching the digest):
+5. **[Addressed] Finnhub's `company-news` feed is mostly not about the
+   company.** Found on the first live run, not anticipated in the design.
+   For MSFT (2026-08-21, 60 articles reaching the digest) 75% had no
+   Microsoft signal at all — Ferrari, Alibaba, Walmart, Netflix,
+   McDonald's, 13F trackers, index-movers columns — yet Finnhub tagged
+   **all 60** with `related: "MSFT"`, so that field cannot filter.
 
-   | Article relates to Microsoft how | Count |
-   |---|---|
-   | Named in the headline | 6 (10%) |
-   | Body/adjacent mention only (AI, OpenAI, Azure…) | 9 (15%) |
-   | No Microsoft signal at all | 45 (75%) |
+   Two causes, both now fixed. The prompt never named the company, so the
+   model scored each article against whichever company it was about; the
+   batch now leads with `COMPANY UNDER ANALYSIS`. And there was no way to
+   separate company news from sector news, so `NewsItem.relevance`
+   (primary/mentioned/unrelated) is scored in the same call and
+   `sentiment_node` aggregates only `AGGREGATED_RELEVANCE`.
 
-   Finnhub tags **all 60** with `related: "MSFT"`, so that field is useless
-   as a relevance filter. The dropped-in articles are real news about other
-   companies — Ferrari, Alibaba, Walmart, Netflix, McDonald's — plus 13F
-   trackers and index-movers columns. FIG showed the same pattern more
-   mildly (7 of 15 headlines named Figma).
-
-   The consequence is direct: `SentimentSummary.net_score` for MSFT
-   (+0.183) is largely a measure of **AI-sector sentiment**, not Microsoft
-   sentiment, and Phase 5's debate would consume it as the latter. This
-   needs a decision before the debate nodes rely on it. Options, cheapest
-   first: (a) require the ticker/company name in the headline, (b) score
-   relevance in the same Haiku call already being made and filter on it,
-   (c) weight the aggregate by relevance instead of filtering. Each trades
-   recall for precision — (a) would drop legitimate stories that never name
-   the company, which for a mega-cap may be a large share of what matters.
+   Residual, worth knowing: LLM relevance agreed with a plain
+   "does the headline name the company" check **6/6 on MSFT and 10/10 on
+   FIG**, with no disagreement either way. So for the current primary-only
+   policy the model is not yet earning its keep over a free regex — it is
+   free (same call), but the judgement it uniquely adds lives in the
+   `mentioned` tier, which nothing currently consumes. If Phase 5 wants
+   sector context as a separate signal, that tier is where it is.
 
 6. **[Phase 3 residual] The price fetch is not `as_of_date`-bounded.**
    `technical_node` fetches ~1 year of history with no upper bound and
