@@ -69,11 +69,13 @@ class IngestionService:
         Idempotent: known filings are re-checked but not re-downloaded if
         already in their target state.
         """
-        form_types = form_types or ["10-K"]
-
         security = await self._upsert_security(ticker)
         logger.info("Resolved %s -> security id=%s cik=%s",
                     ticker, security.id, security.cik)
+
+        if form_types is None:
+            form_types = await self.edgar.default_form_types(security.cik)
+            logger.info("No form_types given for %s — detected %s", ticker, form_types)
 
         summaries = await self.edgar.list_filings(
             cik=security.cik, form_types=form_types, since=since

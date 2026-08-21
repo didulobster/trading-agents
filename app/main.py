@@ -116,13 +116,17 @@ class NewsAssessResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     ticker: str
-    form_type: str = "10-K"
+    # None = auto-detect: 10-K for a domestic filer, 20-F for a foreign
+    # private issuer (see EdgarClient.default_form_types). Pass explicitly
+    # to override, e.g. "10-Q" or "6-K".
+    form_type: str | None = None
     limit: int = 3
     since_year: int | None = None
 
 class LatestFilingsRequest(BaseModel):
     ticker: str
-    form_types: list[str] = ["10-K", "10-Q", "8-K"]
+    # None = auto-detect the filer's form-type family (see IngestRequest).
+    form_types: list[str] | None = None
     since_year: int | None = None
 
 # ---- Endpoint ----
@@ -264,7 +268,7 @@ async def ingest_endpoint(req: IngestRequest):
         since = date(req.since_year, 1, 1) if req.since_year else None
         await service.ingest_security(
             ticker=req.ticker,
-            form_types=[req.form_type],
+            form_types=[req.form_type] if req.form_type else None,
             limit=req.limit,
             since=since,
         )
@@ -283,9 +287,13 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
         if not cik:
             raise HTTPException(404, f"Could not resolve ticker {req.ticker}")
 
+        form_types = req.form_types
+        if form_types is None:
+            form_types = await edgar.default_form_types(cik)
+
         since = date(req.since_year, 1, 1) if req.since_year else None
         sec_filings = await edgar.list_filings(
-            cik=cik, form_types=req.form_types, since=since,
+            cik=cik, form_types=form_types, since=since,
         )
 
     accession_numbers = [f.accession_number for f in sec_filings]
@@ -319,6 +327,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
     new_filings = [f for f in filings_list if not f["in_corpus"]]
     return {
         "ticker": req.ticker.upper(),
+        "form_types_searched": form_types,
         "total_on_sec": len(filings_list),
         "already_ingested": len(filings_list) - len(new_filings),
         "new_filings_count": len(new_filings),
