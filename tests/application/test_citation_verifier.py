@@ -219,6 +219,62 @@ def test_figure_matching_rejected_calc_is_not_also_listed_unverified():
     assert report.unverified == []
 
 
+def test_prose_sum_of_verified_components_is_underived_not_unverified():
+    """Reproduces the reported AVGO false positive: the memo states a total
+    ($67,566) as the sum of two components ($1,271, $66,295) in prose,
+    without a calculate() call. The components are real, retrieved figures;
+    only the total's arithmetic is unvalidated. That's a materially
+    different risk from a fabricated figure and must not sit in the same
+    'unverified' bucket a reader learns to skim past."""
+    answer = "Total was $67,566 (comprised of $1,271 and $66,295)."
+    corpus = {0: "Line A was 1,271. Line B was 66,295."}
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=[])
+
+    assert report.unverified == []
+    assert {f.value for f in report.underived} == {"67,566"}
+    assert {f.value for f in report.verified} == {"1,271", "66,295"}
+
+
+def test_underived_figure_is_not_wrongly_verified_or_flagged():
+    """The underived total must not also appear as verified or flagged —
+    exactly one classification per figure."""
+    answer = "Total was $67,566 (comprised of $1,271 and $66,295)."
+    corpus = {0: "Line A was 1,271. Line B was 66,295."}
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=[])
+
+    underived_values = {f.value for f in report.underived}
+    verified_values = {f.value for f in report.verified}
+    assert underived_values.isdisjoint(verified_values)
+    assert "67,566" not in {f.value for f in report.flagged}
+
+
+def test_fabricated_number_near_unrelated_verified_numbers_stays_unverified():
+    """A fabricated figure sitting near two verified-but-unrelated numbers
+    must not be rescued just because *some* nearby numbers verify — the
+    derivation check requires the fabricated number to actually equal a
+    sum/difference of them, not merely share a neighborhood."""
+    answer = "Fabricated total was $999,999. Real figures: 1,271 and 66,295."
+    corpus = {0: "Line A was 1,271. Line B was 66,295."}
+
+    report = verify_answer(answer, corpus, computed_values=[], rejected_calcs=[])
+
+    assert "999,999" in {f.value for f in report.unverified}
+    assert "999,999" not in {f.value for f in report.underived}
+
+
+def test_verify_memo_adds_underived_arithmetic_section():
+    memo = "Total was $67,566 (comprised of $1,271 and $66,295)."
+    corpus = "Line A was 1,271. Line B was 66,295."
+
+    out = verify_memo(memo, corpus, computed_values=[], rejected_calcs=None)
+
+    assert "## Underived Arithmetic" in out
+    assert "67,566" in out.split("## Underived Arithmetic")[1]
+    assert "## Unverified Figures and Quotations" not in out
+
+
 def test_verify_memo_adds_unbacked_derivations_section():
     memo = "Free cash flow grew 26.2% year over year."
     corpus = "Free cash flow grew 26.2% year over year, per the MD&A."

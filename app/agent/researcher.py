@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
+# The 12-item memo with citations and tables routinely runs 8-10k output
+# tokens on its own, before any tool-call turns. The previous 4096 cap was
+# well under that, so the final memo-writing turn was silently cut off
+# mid-sentence — Haiku 4.5's actual ceiling is 64000 (verified via
+# client.models.retrieve), so 16000 leaves ample headroom without risking
+# the non-streaming client's read timeout.
+AGENT_MAX_TOKENS = 16000
 WATCHLIST_PATH = Path("watchlist.yaml")
 MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]
 
@@ -109,8 +116,10 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
  
     return prompt
 
-def _save_output(content: str, ticker: str, mode: str) -> Path:
+def _save_output(content: str, ticker: str, mode: str, cost_usd: float | None = None) -> Path:
     """Save output with timestamp. Returns the path."""
+    if cost_usd is not None:
+        content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({AGENT_MODEL})\n"
     now = datetime.now()
     date = now.strftime("%Y%m%d")
     timestamp = now.strftime("%Y%m%d-%H%M%S")
@@ -181,18 +190,26 @@ def _print_usage_summary(
     _trace(f"{'='*55}")
 
 
-def log_cost(ticker: str, mode: str, usage: UsageSummary) -> None:
-    """Append one JSON line to docs/cost-log.jsonl."""
+def _compute_cost(usage: UsageSummary) -> float | None:
+    """Estimate USD cost from token usage, or None if pricing isn't configured
+    for AGENT_MODEL."""
     pricing = _MODEL_PRICING.get(AGENT_MODEL)
-    cost = None
-    if pricing:
-        cost = round(
-            usage.input_tokens * pricing["input"] / 1_000_000
-            + usage.cache_write_tokens * pricing["cache_write"] / 1_000_000
-            + usage.cache_read_tokens * pricing["cache_read"] / 1_000_000
-            + usage.output_tokens * pricing["output"] / 1_000_000,
-            6,
-        )
+    if not pricing:
+        return None
+    return round(
+        usage.input_tokens * pricing["input"] / 1_000_000
+        + usage.cache_write_tokens * pricing["cache_write"] / 1_000_000
+        + usage.cache_read_tokens * pricing["cache_read"] / 1_000_000
+        + usage.output_tokens * pricing["output"] / 1_000_000,
+        6,
+    )
+
+
+def log_cost(ticker: str, mode: str, usage: UsageSummary) -> float | None:
+    """Append one JSON line to docs/cost-log.jsonl. Returns the estimated
+    cost (or None if pricing isn't configured), so callers can also surface
+    it elsewhere (e.g. in the memo itself)."""
+    cost = _compute_cost(usage)
     entry = {
         "timestamp": datetime.now().isoformat(),
         "ticker": ticker,
@@ -208,6 +225,7 @@ def log_cost(ticker: str, mode: str, usage: UsageSummary) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a") as f:
         f.write(json.dumps(entry) + "\n")
+    return cost
 
 
 def _roll_cache_breakpoint(messages: list) -> None:
@@ -268,7 +286,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         _roll_cache_breakpoint(messages)
         response = await client.messages.create(
             model=AGENT_MODEL,
-            max_tokens=4096,
+            max_tokens=AGENT_MAX_TOKENS,
             system=[
                 {
                     "type": "text",
@@ -298,7 +316,54 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
             final = "".join(
                 b.text for b in response.content if b.type == "text"
             )
-            final = _strip_preamble(final)
+
+            if response.stop_reason == "max_tokens":
+                # The model was hard-cut by the output-length limit while
+                # writing prose (not mid-tool-call) — AGENT_MAX_TOKENS should
+                # make this rare, but a dense enough memo can still exceed
+                # it. Give it one continuation call rather than silently
+                # returning a memo that stops mid-sentence.
+                _trace("  [truncated] hit max_tokens while writing the memo — requesting continuation")
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was cut off by the output "
+                        "length limit before the memo was finished. Continue "
+                        "writing EXACTLY where you left off — do not repeat "
+                        "any text already written, do not restart the memo "
+                        "— and make sure you reach a complete Assessment "
+                        "section."
+                    ),
+                })
+                cont = await client.messages.create(
+                    model=AGENT_MODEL,
+                    max_tokens=AGENT_MAX_TOKENS,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=messages,
+                )
+                cu = cont.usage
+                usage.input_tokens += cu.input_tokens
+                usage.cache_write_tokens += cu.cache_creation_input_tokens
+                usage.cache_read_tokens += cu.cache_read_input_tokens
+                usage.output_tokens += cu.output_tokens
+                final += "".join(b.text for b in cont.content if b.type == "text")
+
+                final = _strip_preamble(final)
+                if cont.stop_reason == "max_tokens" or "## Assessment" not in final:
+                    final = (
+                        "**INCOMPLETE — this memo was cut off before all "
+                        "sections were completed.**\n\n"
+                    ) + final
+            else:
+                final = _strip_preamble(final)
+
             final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
                                get_unretried_rejected_calcs())
             _trace(f"\n[agent finished after {turn + 1} turns]")
@@ -332,7 +397,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
     })
     response = await client.messages.create(
         model=AGENT_MODEL,
-        max_tokens=4096,
+        max_tokens=AGENT_MAX_TOKENS,
         system=system_prompt,
         messages=messages,
     )
@@ -344,6 +409,11 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
 
     final = "".join(b.text for b in response.content if b.type == "text")
     final = _strip_preamble(final)
+    if response.stop_reason == "max_tokens" or "## Assessment" not in final:
+        final = (
+            "**INCOMPLETE — this memo was cut off before all sections were "
+            "completed.**\n\n"
+        ) + final
     final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
                         get_unretried_rejected_calcs())
     return final, usage
@@ -386,17 +456,17 @@ def main() -> None:
     result, usage = asyncio.run(run_agent(task, prompt))
     print(result)
 
+    cost = log_cost(args.ticker.upper(), mode, usage) if args.ticker else None
+
     # Save to file (skip for test mode)
     if mode != "test" and args.ticker:
-        path = _save_output(result, args.ticker.upper(), mode)
+        path = _save_output(result, args.ticker.upper(), mode, cost_usd=cost)
         _trace(f"\nSaved to {path}")
 
     _print_usage_summary(
         usage.input_tokens, usage.cache_write_tokens,
         usage.cache_read_tokens, usage.output_tokens,
     )
-    if args.ticker:
-        log_cost(args.ticker.upper(), mode, usage)
 
 
 if __name__ == "__main__":

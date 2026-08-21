@@ -27,7 +27,7 @@ async def technical_node(state: TradingState) -> dict:
 
     df, source = await get_price_history(ticker)
     indicators = compute_indicators(df)
-    interpretation, flagged = await interpret_indicators(ticker, indicators)
+    interpretation, flagged, cost_usd = await interpret_indicators(ticker, indicators)
 
     report = TechnicalReport(
         ticker=ticker,
@@ -38,7 +38,7 @@ async def technical_node(state: TradingState) -> dict:
         interpretation=interpretation,
         interpretation_flagged_numbers=flagged,
     )
-    vault_path = save_technical_report(report)
+    vault_path = save_technical_report(report, cost_usd=cost_usd)
     print(f"[technical] saved report to {vault_path}")
     return {"technical_report": report}
 

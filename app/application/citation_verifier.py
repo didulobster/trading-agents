@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from itertools import combinations, product
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,14 @@ class VerificationReport:
     # never successfully retried — the number may well be correct, but no
     # passing tool call in this run's trace backs how it was derived.
     flagged: list[Finding] = field(default_factory=list)
+    # Numbers that never matched the corpus or a calculate() result directly,
+    # but that equal a sum/difference of OTHER numbers in the memo that did
+    # verify — a total the model wrote in prose (e.g. "$67,566 (1,271 +
+    # 66,295)") instead of running through calculate(). Every operand is
+    # real; only the arithmetic step is unvalidated. Kept out of `unverified`
+    # so a reader isn't trained to skim past genuine fabrications sitting in
+    # the same list as trivial, correctly-derived sums.
+    underived: list[Finding] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -100,13 +109,17 @@ class VerificationReport:
         lines = [
             f"Citation check: {len(self.verified)} verified, "
             f"{len(self.unverified)} UNVERIFIED, {len(self.skipped)} skipped, "
-            f"{len(self.flagged)} flagged (unbacked derivation)"
+            f"{len(self.flagged)} flagged (unbacked derivation), "
+            f"{len(self.underived)} underived (arithmetic on verified inputs)"
         ]
         for f in self.unverified:
             lines.append(f"  UNVERIFIED {f.kind}: {f.value}")
             lines.append(f"      context: …{f.context}…")
         for f in self.flagged:
             lines.append(f"  UNBACKED {f.kind}: {f.value}")
+            lines.append(f"      context: …{f.context}…")
+        for f in self.underived:
+            lines.append(f"  UNDERIVED {f.kind}: {f.value}")
             lines.append(f"      context: …{f.context}…")
         return "\n".join(lines)
 
@@ -357,6 +370,30 @@ def _matches_with_scale(value: float, raw: str, corpus_values: list[float]) -> b
     return False
 
 
+def _derivation_tolerance(target: float) -> float:
+    """How far a candidate sum/difference may sit from `target` and still
+    count as the same arithmetic — mirrors `_rejected_match_tolerance`: a
+    full step in the last displayed digit, plus a small relative term."""
+    return max(0.1, abs(target) * 0.001)
+
+
+def _try_derive(target: float, candidates: list[float], tol: float) -> bool:
+    """True if some subset of 2-4 `candidates`, each independently added or
+    subtracted, sums to `target` within `tol`. Bounded to small subsets —
+    memo totals are sums of a handful of stated components, not arbitrary
+    combinations, and this keeps the search cheap."""
+    n = len(candidates)
+    if n < 2:
+        return False
+    for size in range(2, min(n, 4) + 1):
+        for combo in combinations(candidates, size):
+            for signs in product((1, -1), repeat=size):
+                total = sum(s * c for s, c in zip(signs, combo))
+                if abs(total - target) <= tol:
+                    return True
+    return False
+
+
 def verify_answer(
     answer: str,
     chunk_texts: dict[int, str],
@@ -393,6 +430,11 @@ def verify_answer(
     _corpus_nums = _corpus_values("\n".join(chunk_texts.values()))
 
     # --- numbers -----------------------------------------------------------
+    # Provisionally-unverified numbers, held back from report.unverified with
+    # their position so a second pass (below) can check whether each is a
+    # sum/difference of other numbers the memo states nearby that DID verify
+    # — a total written in prose instead of run through calculate().
+    provisional_unverified: list[tuple[Finding, int]] = []
     seen_numbers: set[str] = set()
     for m in _NUMBER_RE.finditer(answer):
         raw = m.group().rstrip(".")
@@ -452,7 +494,44 @@ def verify_answer(
                 pass
 
         f = Finding("number", raw, context, hit)
-        (report.verified if hit is not None else report.unverified).append(f)
+        if hit is not None:
+            report.verified.append(f)
+        else:
+            provisional_unverified.append((f, m.start()))
+
+    # Second pass: a provisionally-unverified number may be a sum/difference
+    # of other numbers the memo states nearby that already verified — e.g.
+    # "$67,566 (comprised of $1,271 and $66,295)" where the two components
+    # are real retrieved figures but the total itself was never retrieved or
+    # run through calculate(). Only numbers that (a) sit in a wide window
+    # around the target AND (b) are themselves independently verified count
+    # as candidates — a number merely appearing nearby proves nothing on its
+    # own, which is what keeps this from rescuing genuine fabrications.
+    verified_bare = {
+        f.value.replace(",", "") for f in report.verified if f.kind in ("number", "computed")
+    }
+    for f, pos in provisional_unverified:
+        window = answer[max(0, pos - 200) : pos + 200]
+        candidates = []
+        for cm in _NUMBER_RE.finditer(window):
+            cand_raw = cm.group().rstrip(".")
+            cand_bare = cand_raw.replace(",", "")
+            if cand_bare == f.value.replace(",", ""):
+                continue
+            if cand_bare in verified_bare:
+                try:
+                    candidates.append(float(cand_bare))
+                except ValueError:
+                    continue
+        try:
+            target = float(f.value.replace(",", ""))
+        except ValueError:
+            report.unverified.append(f)
+            continue
+        if _try_derive(target, candidates, _derivation_tolerance(target)):
+            report.underived.append(f)
+        else:
+            report.unverified.append(f)
 
     # --- quotes ------------------------------------------------------------
     for quoted, qstart in _extract_quotes(answer):

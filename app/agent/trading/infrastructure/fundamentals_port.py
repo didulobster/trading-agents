@@ -32,8 +32,8 @@ async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
     task = f"Today's date is {today.isoformat()}. Run the full research checklist for {ticker}."
     result, usage = await run_agent(task, ANALYST_SYSTEM_PROMPT)
 
-    log_cost(ticker, "trading-fundamentals", usage)
-    vault_path = _save_output(result, ticker.upper(), "fundamentals")
+    cost = log_cost(ticker, "trading-fundamentals", usage)
+    vault_path = _save_output(result, ticker.upper(), "fundamentals", cost_usd=cost)
     print(f"[fundamentals] saved memo to {vault_path}")
 
     report = FundamentalsReport(
