@@ -43,6 +43,22 @@ async def run(ticker: str, thread_id: str | None, as_of: date) -> None:
             print(f"[flagged numbers] {technical.interpretation_flagged_numbers}")
         print("--- end Technical Report ---\n")
 
+    digest = result.get("news_digest")
+    if digest is not None:
+        print("\n--- News Digest ---")
+        print(
+            f"window={digest.window_start}..{digest.as_of_date} "
+            f"items={len(digest.items)} raw={digest.raw_article_count} "
+            f"truncated_by_cap={digest.truncated_by_cap}"
+        )
+        for item in digest.items:
+            print(f"[{item.published_date}] ({item.sentiment}) {item.headline}")
+            print(f"    {item.summary}")
+        issues = result.get("news_digest_issues") or []
+        if issues:
+            print(f"[digest issues] {issues}")
+        print("--- end News Digest ---\n")
+
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
 

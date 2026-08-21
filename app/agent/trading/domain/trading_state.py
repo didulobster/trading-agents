@@ -2,6 +2,7 @@ from datetime import date
 from typing import TypedDict
 from app.agent.trading.domain.decision_memo import DecisionMemo
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
+from app.agent.trading.domain.news_digest import NewsDigest
 from app.agent.trading.domain.technical_report import TechnicalReport
 
 
@@ -13,7 +14,10 @@ class TradingState(TypedDict, total=False):
     as_of_date: date
     fundamentals_report: FundamentalsReport
     technical_report: TechnicalReport
-    news_report: str
+    news_digest: NewsDigest
+    # Structural problems the digest join flagged (missing/duplicate index,
+    # invalid enum) — surfaced for review, never silently absorbed.
+    news_digest_issues: list[str]
     sentiment_report: str
     debate_summary: str
     risk_summary: str
