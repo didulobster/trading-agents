@@ -342,13 +342,13 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
         return df, "fixture"
 
     async def fake_interpret(ticker: str, indicators):
-        return "Stub interpretation, no numbers.", []
+        return "Stub interpretation, no numbers.", [], None
 
     monkeypatch.setattr(nodes, "get_fundamentals_report", fake_fundamentals)
     monkeypatch.setattr(nodes, "get_price_history", fake_price_history)
     monkeypatch.setattr(nodes, "interpret_indicators", fake_interpret)
     monkeypatch.setattr(
-        nodes, "save_technical_report", lambda report: tmp_path / "stub.md"
+        nodes, "save_technical_report", lambda report, cost_usd=None: tmp_path / "stub.md"
     )
 
 

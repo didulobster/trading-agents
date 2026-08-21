@@ -30,7 +30,9 @@ Respond in 3-5 sentences of plain-language interpretation. No preamble, no heade
 """
 
 
-async def interpret_indicators(ticker: str, indicators: TechnicalIndicators) -> tuple[str, list[str]]:
+async def interpret_indicators(
+    ticker: str, indicators: TechnicalIndicators
+) -> tuple[str, list[str], float | None]:
     client = AsyncAnthropic()
     prompt = (
         f"Ticker: {ticker}\n"
@@ -51,10 +53,10 @@ async def interpret_indicators(ticker: str, indicators: TechnicalIndicators) -> 
     usage.cache_write_tokens = u.cache_creation_input_tokens
     usage.cache_read_tokens = u.cache_read_input_tokens
     usage.output_tokens = u.output_tokens
-    log_cost(ticker, "trading-technical", usage)
+    cost = log_cost(ticker, "trading-technical", usage)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
-    return interpretation, flagged
+    return interpretation, flagged, cost
 
 
 # A number with an optional sign, where '-' is read as a sign only if the
@@ -180,6 +182,6 @@ def _format_technical_markdown(report: TechnicalReport) -> str:
     return "\n".join(lines)
 
 
-def save_technical_report(report: TechnicalReport) -> Path:
+def save_technical_report(report: TechnicalReport, cost_usd: float | None = None) -> Path:
     content = _format_technical_markdown(report)
-    return _save_output(content, report.ticker.upper(), "technical")
+    return _save_output(content, report.ticker.upper(), "technical", cost_usd=cost_usd)
