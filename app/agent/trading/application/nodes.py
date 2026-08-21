@@ -4,12 +4,16 @@ Goal here is proving the topology runs end-to-end and emits a
 schema-valid DecisionMemo, nothing more.
 """
 import asyncio
+from collections import Counter
 from datetime import date
 
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.news_digest import NewsDigest, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
+from app.agent.trading.infrastructure.news_data_port import fetch_company_news, filter_and_dedup
+from app.agent.trading.infrastructure.news_digest_port import build_digest
 from app.agent.trading.infrastructure.price_data_port import get_price_history
 from app.agent.trading.application.technical_indicators import compute_indicators
 from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators, save_technical_report
@@ -44,13 +48,75 @@ async def technical_node(state: TradingState) -> dict:
 
 
 async def news_node(state: TradingState) -> dict:
-    print(f"[news] STUB running for {state['ticker']}")
-    return {"news_report": "STUB — Phase 4 wires this to Finnhub"}
+    ticker = state["ticker"]
+    as_of = state.get("as_of_date")
+    if as_of is None:
+        # Fail loud rather than defaulting to today: a silent
+        # `or date.today()` fallback is precisely how lookahead
+        # contamination gets into a backtest.
+        raise ValueError(
+            "as_of_date missing from TradingState — refusing to run unbounded. "
+            "A news fetch without an explicit upper bound is a lookahead bug."
+        )
+    print(f"[news] running for {ticker} as of {as_of}")
+
+    raw, window_start = await fetch_company_news(ticker, as_of)
+    clean, dropped_win, dropped_missing, truncated = filter_and_dedup(
+        raw, as_of, window_start
+    )
+
+    items, issues, cost_usd = await build_digest(clean, ticker)
+
+    digest = NewsDigest(
+        ticker=ticker,
+        as_of_date=as_of,
+        window_start=window_start,
+        items=items,
+        raw_article_count=len(raw),
+        deduped_count=len(clean),
+        dropped_out_of_window=dropped_win,
+        dropped_missing_date=dropped_missing,
+        truncated_by_cap=truncated,
+    )
+
+    # Belt-and-braces post-assertion. Cheap, and it turns a silent
+    # correctness bug into a loud one at exactly the right moment.
+    late = [i for i in digest.items if i.published_date > as_of]
+    if late:
+        raise AssertionError(
+            f"Lookahead leak: {len(late)} article(s) dated after {as_of} "
+            f"reached the digest — first: {late[0].published_date}"
+        )
+
+    print(
+        f"[news] {len(items)} items (raw={len(raw)} deduped={len(clean)} "
+        f"truncated={truncated}) cost={cost_usd}"
+    )
+    return {"news_digest": digest, "news_digest_issues": issues}
 
 
 async def sentiment_node(state: TradingState) -> dict:
-    print(f"[sentiment] STUB running for {state['ticker']}")
-    return {"sentiment_report": "STUB — Phase 4"}
+    """Deterministic aggregation over NewsDigest.items — no LLM, no network.
+
+    An empty digest (quiet ticker, nothing in the window) flows through as
+    net_score=0.0 with article_count=0; downstream consumers must not read
+    that as neutrality-with-evidence."""
+    digest: NewsDigest = state["news_digest"]
+    print(f"[sentiment] aggregating {len(digest.items)} items for {digest.ticker}")
+    counts = Counter(i.sentiment for i in digest.items)
+    pos, neg, neu = counts["positive"], counts["negative"], counts["neutral"]
+    total = pos + neg + neu
+    return {
+        "sentiment_summary": SentimentSummary(
+            ticker=digest.ticker,
+            as_of_date=digest.as_of_date,
+            positive=pos,
+            negative=neg,
+            neutral=neu,
+            net_score=(pos - neg) / total if total else 0.0,
+            article_count=total,
+        )
+    }
 
 
 async def debate_node(state: TradingState) -> dict:
@@ -71,14 +137,14 @@ async def synthesizer_node(state: TradingState) -> dict:
         bear_case="STUB",
         risk_debate_summary=state["risk_summary"],
         technical_signal=state["technical_report"].interpretation,
-        reasoning="STUB — synthesis logic not yet implemented. fundamentals_report is real (Phase 2); technical/news/sentiment/debate/risk are still stubs.",
+        reasoning="STUB — synthesis logic not yet implemented. fundamentals (Phase 2), technical (Phase 3), and news/sentiment (Phase 4) are real; debate/risk are still stubs.",
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,
         confidence=0.0,
         data_as_of_date=date.today(),
         data_gaps=[
             "synthesizer does not yet incorporate fundamentals_report into this memo — that's a later phase, not Phase 2's scope",
-            "technical/news/sentiment/debate/risk nodes are still stubs — no real data",
+            "debate/risk nodes are still stubs — no real data",
         ],
         assumptions=[],
         evidence=[],
