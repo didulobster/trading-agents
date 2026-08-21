@@ -1,15 +1,25 @@
 import argparse
 import asyncio
 import json
+from datetime import date
 
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
-from app.agent.trading.infrastructure.graph import build_trading_graph
+from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
 
 
-async def run(ticker: str, thread_id: str | None) -> None:
-    thread_id = thread_id or f"trading-{ticker}"
+async def run(
+    ticker: str, thread_id: str | None, as_of: date, analysts: list[str] | None
+) -> None:
+    # A subset run has a different topology, so it gets its own default thread:
+    # resuming a full run's checkpoint under a narrower graph would report the
+    # cached fundamentals/technical of an earlier run as if this run produced
+    # them. An explicit --thread-id still overrides, deliberately.
+    suffix = "" if analysts is None else "-" + "+".join(sorted(analysts))
+    thread_id = thread_id or f"trading-{ticker}{suffix}"
+    if analysts is not None:
+        print(f"Analysts: {', '.join(sorted(analysts))} (others skipped)")
     async with build_checkpointer() as checkpointer:
-        graph = build_trading_graph(checkpointer)
+        graph = build_trading_graph(checkpointer, analysts=analysts)
         config = {"configurable": {"thread_id": thread_id}}
         state = await graph.aget_state(config)
 
@@ -21,7 +31,9 @@ async def run(ticker: str, thread_id: str | None) -> None:
             result = await graph.ainvoke(None, config=config)
         else:
             print(f"Starting new run for {ticker}")
-            result = await graph.ainvoke({"ticker": ticker}, config=config)
+            result = await graph.ainvoke(
+                {"ticker": ticker, "as_of_date": as_of}, config=config
+            )
 
     fundamentals = result.get("fundamentals_report")
     if fundamentals is not None:
@@ -40,6 +52,45 @@ async def run(ticker: str, thread_id: str | None) -> None:
             print(f"[flagged numbers] {technical.interpretation_flagged_numbers}")
         print("--- end Technical Report ---\n")
 
+    digest = result.get("news_digest")
+    if digest is not None:
+        print("\n--- News Digest ---")
+        print(
+            f"window={digest.window_start}..{digest.as_of_date} "
+            f"items={len(digest.items)} raw={digest.raw_article_count} "
+            f"truncated_by_cap={digest.truncated_by_cap}"
+        )
+        for item in digest.items:
+            print(
+                f"[{item.published_date}] {item.relevance:9} ({item.sentiment}) "
+                f"{item.headline}"
+            )
+            print(f"    {item.summary}")
+        issues = result.get("news_digest_issues") or []
+        if issues:
+            print(f"[digest issues] {issues}")
+        print("--- end News Digest ---\n")
+
+    sentiment = result.get("sentiment_summary")
+    if sentiment is not None:
+        print("\n--- Sentiment Summary ---")
+        print(
+            f"+{sentiment.positive} / -{sentiment.negative} / ={sentiment.neutral} "
+            f"over {sentiment.article_count} articles  "
+            f"net_score={sentiment.net_score:+.2f}"
+        )
+        if sentiment.excluded_by_relevance:
+            print(
+                f"({sentiment.excluded_by_relevance} of "
+                f"{sentiment.article_count + sentiment.excluded_by_relevance} "
+                f"digest articles excluded as not primarily about "
+                f"{sentiment.ticker})"
+            )
+        if sentiment.article_count == 0:
+            print("(no articles primarily about this company — net_score is "
+                  "an absence of evidence, not neutral evidence)")
+        print("--- end Sentiment Summary ---\n")
+
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
 
@@ -48,8 +99,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the trading pipeline for a single ticker")
     parser.add_argument("ticker")
     parser.add_argument("--thread-id", default=None)
+    parser.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=date.today(),  # today() appears exactly once, at the boundary
+        help="Analysis date. All news is bounded at or before this date.",
+    )
+    parser.add_argument(
+        "--only",
+        action="append",
+        choices=ALL_ANALYSTS,
+        metavar="ANALYST",
+        help=(
+            "Run only this analyst; repeat to select several "
+            f"(choices: {', '.join(ALL_ANALYSTS)}). Default: all of them. "
+            "The synthesizer still runs and records the others as data gaps."
+        ),
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.ticker, args.thread_id))
+    asyncio.run(run(args.ticker, args.thread_id, args.as_of, args.only))
 
 
 if __name__ == "__main__":

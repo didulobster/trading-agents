@@ -56,6 +56,7 @@ def fetch(
 @app.command(name="inspect-chunks")
 def inspect_chunks(
     html_path: Path,
+    form_type: str = typer.Option("10-K", "--type"),
     target_tokens: int = 600,
     overlap_tokens: int = 80,
     preview_chars: int = 400,
@@ -63,7 +64,7 @@ def inspect_chunks(
     json_out: bool = False,
 ):
     """Parse and chunk one filing; print sections + sample chunks for review."""
-    sections = parse_filing(html_path)
+    sections = parse_filing(html_path, form_type=form_type)
     chunks = chunk_filing(sections, target_tokens, overlap_tokens)
 
     if json_out:
