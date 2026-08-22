@@ -10,7 +10,24 @@ from app.agent.trading.domain.errors import VendorError
 
 FINNHUB_URL = "https://finnhub.io/api/v1/company-news"
 DEFAULT_LOOKBACK_DAYS = 14
-MAX_ARTICLES = 60          # cost + noise cap — this, not the $ budget, is the real guard
+# Sized to cover a full lookback window rather than to be a cost floor.
+#
+# At 60 this cap, not the budget, was the binding constraint, and it was
+# discarding the evidence: of MSFT's 247 in-window articles on 2026-08-21,
+# 58 were primarily about Microsoft and the cap kept 6 of them — the newest
+# 60 articles spanned only 5 days of a 14-day window, dropping an entire
+# 101-article event day. Relevance filtering made the signal correct but
+# left it too thin to use.
+#
+# 300 is derived from the per-run budget, not chosen for roundness. Worst
+# case per article is ~$0.00042 (a headline plus a 600-char body in, an
+# index, a <=25-word summary and two enums out), plus a 496-token system
+# prompt per batch of BATCH_SIZE. At 300 that is ~$0.136, about 68% of
+# NEWS_BUDGET_USD, so a full-cap run cannot trip the budget assertion —
+# volume degrades to flagged truncation instead of an exception raised
+# after the money is already spent. Measured cost tracks the estimate
+# closely: $0.000403/article on a real 60-article AVGO run.
+MAX_ARTICLES = 300
 REQUEST_TIMEOUT = 20.0
 
 
