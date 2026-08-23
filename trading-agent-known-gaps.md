@@ -161,23 +161,40 @@ when actually closed, not when they become inconvenient.
    was real. The error is in the reasoning, and nothing in this phase
    catches that.
 
-   Two things follow. First, the cheaper model buys a transcript that looks
-   like a debate and is wrong on the facts — read one by hand after any model
-   change, because the exit criteria test termination and resume, not
-   argument quality. Second, the evidence pack renders the technical
-   indicators as raw JSON and **throws away `derive_relations()`** — the very
-   block Phase 3 added because a model asked to compare indicator values
-   itself gets it wrong. Putting the relations block into the pack is the
-   obvious fix and is deliberately not done here.
+   **[Mitigated 2026-08-23]** The pack rendered the indicators as raw JSON
+   and threw `derive_relations()` away — the very block Phase 3 added because
+   a model asked to compare indicator values itself gets it wrong. It is now
+   the first thing in the technical section, marked authoritative, with a
+   matching rule in the system prompt. *Re-verified live on the same
+   indicators, twice:* both sides now write "neither overbought nor
+   oversold", and the RSI claim id changed from `avgo-rsi-oversold` to
+   `avgo-rsi-neutral`.
 
-5. **`evidence_quote` is a single contiguous span, but technical evidence
-   often is not.** A claim like "price is above its 200-day average" rests on
-   two fields that sit apart in the pack, so an honest citation of both is a
-   splice and gets flagged. Both live models did it — Sonnet with an
-   ellipsis, Haiku with a comma. The flag is technically correct (nothing in
-   the report puts those values side by side) but it is not fabrication, and
-   the shape will recur on every trend claim. Either allow a list of quotes
-   per claim, or render the indicators so related values are adjacent.
+   *Residual, and the reason this stays on the list:* only the relations that
+   `derive_relations` computes are protected — price vs the two SMAs, the
+   SMAs against each other, MACD vs signal, the RSI band, the Bollinger
+   position, volume vs its average. Any other comparison a debater makes is
+   still its own unguarded reasoning, and nothing downstream re-verifies it.
+   The general point stands: a cheaper model buys a transcript that can look
+   like a debate and be wrong on the facts, so read one by hand after any
+   model change — the exit criteria test termination and resume, not
+   argument quality.
+
+5. **[Mitigated 2026-08-23] `evidence_quote` is a single contiguous span,
+   but technical evidence often is not.** A claim like "price is above its
+   200-day average" rests on two fields that sit apart in the JSON, so an
+   honest citation of both was a splice and got flagged. Both live models did
+   it — Sonnet with an ellipsis, Haiku with a comma.
+
+   The relations block fixed this as a side effect: one relation line carries
+   both values *and* the comparison between them, so it quotes cleanly.
+   *Measured on the same two Haiku turns:* `unquoted_evidence` went from 4/4
+   and 3/5 claims to **zero on both turns**.
+
+   *Residual:* a claim spanning two DIFFERENT reports — a fundamentals figure
+   against a technical one — still has no single quotable span, and the
+   cross-report claim is exactly the kind a debate is for. Allowing a list of
+   quotes per claim is the real fix.
 
 6. **Containment cannot catch a correctly-quoted figure used wrongly.**
    Right number, wrong period or wrong entity. Same period-consistency gap

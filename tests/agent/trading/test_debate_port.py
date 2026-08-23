@@ -617,6 +617,74 @@ def test_a_missing_analyst_leg_is_stated_not_omitted():
         assert f"Do not infer anything about {name}" in pack
 
 
+def test_the_pack_states_the_computed_relations_authoritatively():
+    """Phase 3 computes these comparisons in Python precisely because a model
+    asked to work them out from raw values gets them wrong. The pack used to
+    hand over the JSON and nothing else, and on the first live Haiku turns
+    BOTH sides called an RSI of 38.7 "oversold" — every number real, so the
+    numeric guard had nothing to catch."""
+    pack = port.build_evidence_pack(_technical_state())
+
+    assert "Computed relations (AUTHORITATIVE" in pack
+    assert "RSI (38.72) is NEITHER overbought nor oversold (between 30 and 70)" in pack
+    assert "last close (368.45) is ABOVE the 200-day average (368.30)" in pack
+    # full precision is still there for a claim that turns on the 4th decimal
+    assert "38.721899422317186" in pack
+
+
+def test_the_system_prompt_forbids_contradicting_the_relations():
+    """Whitespace-normalized, so reflowing the paragraph doesn't fail the
+    suite — the rule has to be there, its line breaks don't."""
+    for prompt in (port.BULL_SYSTEM, port.BEAR_SYSTEM):
+        flat = " ".join(prompt.split())
+        assert "AUTHORITATIVE" in flat
+        assert "never contradict the block" in flat
+        assert "whether RSI is overbought or oversold" in flat
+
+
+def test_a_relation_line_is_quotable_as_a_single_span():
+    """The other half of the fix. `evidence_quote` is one contiguous span, so
+    a trend claim resting on two values that sit far apart in the JSON was a
+    splice and got flagged. One relation line carries both values AND the
+    comparison between them."""
+    assert _quote_flags(
+        "last close (368.45) is ABOVE the 200-day average (368.30)"
+    ) == []
+    assert _quote_flags(
+        "RSI (38.72) is NEITHER overbought nor oversold (between 30 and 70)"
+    ) == []
+
+
+def test_a_fabricated_relation_is_still_flagged():
+    """The relations block must not become a place where anything passes:
+    inverting the comparison is exactly the claim the block exists to
+    prevent, and it has to fail the quote check."""
+    assert _quote_flags(
+        "last close (368.45) is BELOW the 200-day average (368.30)"
+    ) == ["c"]
+
+
+def test_relations_degrade_when_indicators_are_missing():
+    """A short history computes last_close and little else. The block should
+    shrink, not raise — a partial report is a legitimate state."""
+    state = _state(
+        technical_report=TechnicalReport(
+            ticker="ACN",
+            as_of_date=date(2026, 8, 21),
+            data_source="yfinance",
+            bars_used=12,
+            indicators=TechnicalIndicators(last_close=327.55),
+            interpretation="Too little history for most indicators.",
+        )
+    )
+
+    pack = port.build_evidence_pack(state)
+
+    assert "Computed relations" in pack
+    assert "overbought" not in pack
+    assert "Too little history" in pack
+
+
 def test_the_pack_carries_every_analyst_report_that_ran():
     state = _state(
         technical_report=TechnicalReport(
