@@ -405,7 +405,7 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
         )
 
     async def fake_price_history(ticker: str):
-        return df, "fixture"
+        return df, "fixture", 0
 
     async def fake_interpret(ticker: str, indicators):
         return "Stub interpretation, no numbers.", [], None
