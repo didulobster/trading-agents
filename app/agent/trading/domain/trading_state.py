@@ -34,6 +34,14 @@ class TradingState(TypedDict, total=False):
     # len(debate_turns). A counter beside the list is a second source of
     # truth that can desync, and a desync shows up as either an early stop or
     # a runaway — both silent.
+    #
+    # `operator.add` and not a dedup-on-turn_index reducer, and that was an
+    # ASSUMPTION until it was tested: a task re-executing after a crash could
+    # in principle append its pending write a second time, producing a
+    # seven-turn transcript under a six-turn cap. VERIFIED live 2026-08-23 by
+    # killing a run with os._exit(1) after the LLM call for turn 2 and
+    # resuming: 6 turns, contiguous indices, turns 0 and 1 byte-identical to
+    # the pre-crash snapshot. Plain add is correct here.
     debate_turns: Annotated[list[DebateTurn], operator.add]
 
     # Which termination layer stopped the debate: "round_cap" | "unproductive"
