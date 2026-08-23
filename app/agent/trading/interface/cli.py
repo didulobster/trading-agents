@@ -3,6 +3,7 @@ import asyncio
 import json
 from datetime import date
 
+from app.agent.researcher import vault_run
 from app.agent.trading.application.debate_router import MAX_ROUNDS
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.debate_port import save_debate_transcript
@@ -215,14 +216,21 @@ def main() -> None:
     # traces on stderr, interleaved in the order they actually happened.
     # The "saved to" lines below are printed after the log is read, so they
     # are the only run output the file does not contain.
-    with capture_terminal_log() as run_log:
+    # The run folder is opened around the WHOLE run, not around the vault
+    # writes at the end. technical and fundamentals save from inside their
+    # nodes while the graph is still executing; sentiment, decision and the
+    # debate transcript save here afterwards. Only a folder fixed before the
+    # first of those puts them all in one place.
+    with capture_terminal_log() as run_log, vault_run() as folder:
         result = asyncio.run(
             run(args.ticker, args.thread_id, args.as_of, args.only)
         )
         saved = _save_vault_artifacts(result, run_log())
 
+    if saved:
+        print(f"\n[vault] run {folder}: {saved[0].parent}")
     for path in saved:
-        print(f"[vault] saved {path}")
+        print(f"[vault]   {path.name}")
 
 
 if __name__ == "__main__":

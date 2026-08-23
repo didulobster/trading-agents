@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations  
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -135,6 +136,63 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 _NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision", "debate"}
 
 
+# The vault filename stem for each mode, minus the ticker. "fundamentals" is
+# the mode but "fundamental" is the filename, which is a wart old enough to
+# be in people's muscle memory — kept rather than fixed, since renaming it
+# would orphan every existing note's links.
+_MODE_STEMS = {
+    "news": "news",
+    "technical": "technical",
+    "fundamentals": "fundamental",
+    "sentiment": "sentiment",
+    "decision": "decision",
+    "debate": "debate",
+}
+
+# Modes that file under MEMO_DIR/<ticker>/<date>/ rather than flat under the
+# ticker. Everything the trading pipeline writes, which is what makes a
+# per-run folder worth having at all.
+_DATED_MODES = frozenset({"technical", "fundamentals", "sentiment", "decision", "debate"})
+
+# The instant one pipeline run started, set by `vault_run`; None outside one.
+#
+# A module global rather than a parameter threaded through six ports, because
+# the two halves of a run save at different times and through different call
+# stacks — technical and fundamentals from inside their nodes while the graph
+# is still executing, sentiment/decision/debate from the CLI after it
+# finishes. Anything computed per call (including datetime.now()) puts those
+# halves in different folders, which is the problem being fixed.
+#
+# The whole datetime, not the formatted name: the DATE folder has to come
+# from the same instant too. A run that starts at 23:58 and finishes at
+# 00:02 would otherwise file its fundamentals under one date and its debate
+# transcript under the next — the same scattering, harder to spot.
+_RUN_STAMP: datetime | None = None
+
+
+@contextlib.contextmanager
+def vault_run(stamp: datetime | None = None):
+    """Give every artifact saved inside this block ONE run folder.
+
+    Yields the folder name. The directory is not created here — it is created
+    by the first `_save_output` that lands in it, so a run that dies before
+    writing anything leaves no empty folder behind.
+
+    Restores whatever was set before rather than clearing to None, so nesting
+    is safe even though nothing nests today.
+    """
+    global _RUN_STAMP
+    previous = _RUN_STAMP
+    _RUN_STAMP = stamp or datetime.now()
+    try:
+        yield _RUN_STAMP.strftime(_RUN_FOLDER_FORMAT)
+    finally:
+        _RUN_STAMP = previous
+
+
+_RUN_FOLDER_FORMAT = "%Y-%m%d-%H%M%S"
+
+
 def _save_output(
     content: str,
     ticker: str,
@@ -147,27 +205,46 @@ def _save_output(
 
     `provenance`, when given, is written verbatim to the sidecar file instead
     of the research agent's session log.
+
+    Inside a `vault_run` block the artifacts of one run share a folder and
+    drop the per-file timestamp:
+
+        <ticker>/20260822/2026-0822-070153/ACN-fundamental.md
+
+    Outside one — the standalone research CLI, which writes a single report —
+    the old flat layout is kept, timestamp in the filename.
     """
     if cost_usd is not None:
         content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
-    now = datetime.now()
-    date = now.strftime("%Y%m%d")
-    timestamp = now.strftime("%Y%m%d-%H%M%S")
-    if mode == "news":
-        filename = f"{ticker}-news-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / filename
-    elif mode == "technical":
-        filename = f"{ticker}-technical-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / date / filename
-    elif mode == "fundamentals":
-        filename = f"{ticker}-fundamental-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / date / filename
-    elif mode in ("sentiment", "decision", "debate"):
-        filename = f"{ticker}-{mode}-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / date / filename
+    # Inside a run, every path is derived from the instant the RUN started,
+    # not the instant this file happens to be written.
+    now = _RUN_STAMP or datetime.now()
+    stem = _MODE_STEMS.get(mode)
+    parent = MEMO_DIR / ticker
+    if mode in _DATED_MODES:
+        parent = parent / now.strftime("%Y%m%d")
+
+    if _RUN_STAMP is not None:
+        # One folder per run, so the timestamp is on the folder and not
+        # repeated on every file inside it.
+        parent = parent / now.strftime(_RUN_FOLDER_FORMAT)
+        filename = f"{ticker}-{stem}.md" if stem else f"{ticker}.md"
     else:
-        filename = f"{ticker}-{timestamp}.md"
-        out_path = MEMO_DIR / ticker / filename
+        timestamp = now.strftime("%Y%m%d-%H%M%S")
+        filename = (
+            f"{ticker}-{stem}-{timestamp}.md" if stem else f"{ticker}-{timestamp}.md"
+        )
+
+    out_path = parent / filename
+    if _RUN_STAMP is not None and out_path.exists():
+        # Two artifacts of the same kind in one run. Unreachable today —
+        # every mode is saved exactly once per run — so if it happens the
+        # honest answer is to say so rather than overwrite a report that
+        # cost real money to produce.
+        raise FileExistsError(
+            f"{out_path} already exists in this run's folder — a second "
+            f"'{mode}' artifact would overwrite the first. Nothing was written."
+        )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content)
 
