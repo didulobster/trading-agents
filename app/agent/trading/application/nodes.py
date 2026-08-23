@@ -34,7 +34,9 @@ async def technical_node(state: TradingState) -> dict:
     ticker = state["ticker"]
     print(f"[technical] running for {ticker}")
 
-    df, source = await get_price_history(ticker)
+    df, source, dropped_bars = await get_price_history(ticker)
+    if dropped_bars:
+        print(f"[technical] dropped {dropped_bars} incomplete bar(s) from {source}")
     indicators = compute_indicators(df)
     interpretation, flagged, cost_usd = await interpret_indicators(ticker, indicators)
 
@@ -43,6 +45,7 @@ async def technical_node(state: TradingState) -> dict:
         as_of_date=df.index[-1].date(),
         data_source=source,
         bars_used=len(df),
+        bars_dropped_invalid=dropped_bars,
         indicators=indicators,
         interpretation=interpretation,
         interpretation_flagged_numbers=flagged,
