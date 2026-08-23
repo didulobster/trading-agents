@@ -340,6 +340,15 @@ def _msft_indicators() -> TechnicalIndicators:
     )
 
 
+def _msft_indicators_with_macd() -> TechnicalIndicators:
+    """The rerun's indicators, MACD included — the NaN-bar fix restored it."""
+    ind = _msft_indicators()
+    ind.macd = 20.018895122332538
+    ind.macd_signal = 23.248742243076382
+    ind.macd_histogram = -3.2298471207438446
+    return ind
+
+
 def test_flags_the_exact_sentence_the_model_produced():
     """Verbatim from the MSFT run. Every number in it is genuine, which is why
     the numbers guard passed it and it reached the decision memo."""
@@ -513,3 +522,141 @@ def test_two_word_margin_does_not_swallow_a_following_price_claim():
 
     assert len(flags) == 1
     assert "483.24" in flags[0]
+
+
+# ---------------------------------------------------------------------------
+# RSI band edges — recurring false positive from live runs
+# ---------------------------------------------------------------------------
+
+def test_rsi_band_edges_are_not_flagged_near_rsi_context():
+    """Verbatim from the MSFT rerun, which flagged "30, 70" every time. They
+    are constants of the indicator, never values read off it, so they could
+    never match and the guard reported them forever."""
+    text = (
+        "The RSI at around 63 sits comfortably in neutral territory between 30 "
+        "and 70, neither overbought nor oversold, while price holds within the "
+        "Bollinger Bands."
+    )
+
+    assert _flag_unmatched_numbers(text, _msft_indicators()) == []
+
+
+def test_classic_threshold_phrasings_are_not_flagged():
+    ind = _msft_indicators()
+    for phrasing in (
+        "RSI above 70 would signal overbought conditions.",
+        "RSI below 30 would signal oversold conditions.",
+        "The RSI is 62.96, well short of the 70 overbought line.",
+        "Momentum is neutral: RSI sits between 30 and 70.",
+    ):
+        assert _flag_unmatched_numbers(phrasing, ind) == [], phrasing
+
+
+def test_the_same_numbers_are_still_flagged_away_from_rsi():
+    """The exemption is scoped by proximity, not granted outright — 30 and 70
+    remain checkable everywhere else, which is the whole point of not simply
+    adding them to the known-values list."""
+    ind = _msft_indicators()
+
+    assert _flag_unmatched_numbers("The P/E ratio of 30 looks cheap.", ind) == ["30"]
+    assert _flag_unmatched_numbers(
+        "Support sits at 70 and resistance at 30 today.", ind
+    ) == ["70", "30"]
+
+    # A number ending a sentence comes back with the full stop attached —
+    # _SIGNED_NUMBER's trailing `\.?\d*` takes it. Cosmetic only: float("70.")
+    # parses, so both the value check and the band-edge exemption work on it.
+    # Asserted rather than fixed, because that regex carries four rounds of
+    # false-positive tuning and this costs nothing.
+    assert _flag_unmatched_numbers("The MACD line is at 70.", ind) == ["70."]
+
+
+def test_exemption_covers_only_the_two_band_edges():
+    """Every exempted value is one the guard can no longer catch, so the list
+    stays at the two edges actually observed rather than the whole 20/80
+    family."""
+    ind = _msft_indicators()
+
+    assert _flag_unmatched_numbers("RSI is above 80, deeply overbought.", ind) == ["80"]
+    assert _flag_unmatched_numbers("RSI is below 20, deeply oversold.", ind) == ["20"]
+
+
+def test_fabricated_values_still_flag_inside_an_rsi_sentence():
+    """The proximity window must not become a blanket amnesty for its
+    sentence: a number that is not a band edge is checked as usual."""
+    ind = _msft_indicators()
+
+    text = "RSI at 63 is neutral between 30 and 70, but the P/E of 812 is rich."
+
+    assert _flag_unmatched_numbers(text, ind) == ["812"]
+
+
+def test_unicode_minus_sign_parses_as_a_sign():
+    """Live MSFT run: "negative histogram of −3.23" used U+2212 MINUS SIGN
+    rather than an ASCII hyphen, so the sign was invisible to _SIGNED_NUMBER,
+    the value read as positive 3.23, and a faithful -3.2298 was flagged as
+    fabricated. The model emits typographic minus intermittently, which is why
+    this surfaced only on a repeat run."""
+    text = (
+        "The MACD line at 20.02 has crossed below its signal line at 23.25 "
+        "(negative histogram of −3.23), indicating weakening momentum."
+    )
+
+    assert _flag_unmatched_numbers(text, _msft_indicators_with_macd()) == []
+    # and the ASCII spelling of the same sentence is unchanged
+    assert _flag_unmatched_numbers(text.replace("−", "-"),
+                                   _msft_indicators_with_macd()) == []
+
+
+def test_unicode_minus_does_not_make_a_wrong_value_pass():
+    """Normalizing the sign must not soften the check: a negative number that
+    matches nothing is still flagged."""
+    text = "The histogram sits at −99.87, deeply negative."
+
+    assert _flag_unmatched_numbers(text, _msft_indicators_with_macd()) == ["-99.87"]
+
+
+def test_en_dash_ranges_are_not_read_as_negative():
+    """En dash stays a separator. It is the conventional range character, and
+    the lookbehind in _SIGNED_NUMBER exists because reading a separator as a
+    sign once turned a real Bollinger band into a fabricated negative."""
+    ind = _msft_indicators_with_macd()
+    text = "Price holds inside the 399.01–545.57 Bollinger band."
+
+    assert _flag_unmatched_numbers(text, ind) == []
+
+
+def test_suspended_hyphen_period_labels_are_stripped():
+    """Live MSFT run: "trading above both its 50- and 200-day moving averages".
+    The strip regex matched "200-day" but not the dangling "50-", so an
+    orphaned 50 was scanned as data and flagged."""
+    ind = _msft_indicators_with_macd()
+
+    for phrasing in (
+        "MSFT is trading above both its 50- and 200-day moving averages.",
+        "Price sits above the 50- or 200-day average depending on the window.",
+        "The 50- to 200-day averages all point the same way.",
+    ):
+        assert _flag_unmatched_numbers(phrasing, ind) == [], phrasing
+
+
+def test_suspended_strip_does_not_eat_a_spaced_range():
+    """The lookahead is restricted to a conjunction on purpose: matching any
+    digit-hyphen-space would consume the first endpoint of a spaced range and
+    leave a mangled fragment behind."""
+    ind = _msft_indicators_with_macd()
+
+    # both endpoints are real bb values, so a correctly-parsed scan is clean
+    assert _flag_unmatched_numbers(
+        "The Bollinger band spans 399.01 - 545.57 currently.", ind
+    ) == []
+
+
+def test_orphaned_number_that_is_not_a_period_label_still_flags():
+    """The strip must stay narrow: a bare fabricated number next to a
+    conjunction is still data, and still checked."""
+    ind = _msft_indicators_with_macd()
+
+    assert _flag_unmatched_numbers(
+        "Analysts see 812 and 900 as the next targets.", ind
+    ) == ["812", "900"]

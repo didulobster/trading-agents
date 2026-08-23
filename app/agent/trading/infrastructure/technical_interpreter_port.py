@@ -220,6 +220,20 @@ def flag_contradicted_claims(
 # indicator value.
 _SIGNED_NUMBER = r"(?<![\d.%])-?\d+\.?\d*"
 
+# Window labels, stripped before the value-check because they name a period
+# rather than report a measurement. Two spellings, both seen live:
+#
+#   "the 200-day average"            -> the plain compound
+#   "the 50- and 200-day averages"   -> a suspended hyphen, where the noun is
+#                                       carried by the second term only
+#
+# The second cost a false positive: "200-day" was stripped, the dangling "50-"
+# was not, and the orphaned 50 matched no indicator value. The lookahead is
+# restricted to a following conjunction so this only ever fires on a genuine
+# suspended compound — matching any digit-hyphen-space would eat the first
+# endpoint of a spaced range like "318.73 - 352.11".
+_PERIOD_LABEL = re.compile(r"\b\d+-day\b|\b\d+-(?=\s+(?:and|or|to)\s)")
+
 
 def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[str]:
     """Cheap guard, not a full verifier: extract numbers mentioned in the interpretation
@@ -227,9 +241,14 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     Flags (doesn't block) anything that doesn't match — surfaced in TechnicalReport for
     human review, same spirit as the 'Unverified Figures' section in memo_verifier.
 
-    Will produce false positives on narrative numbers that reference thresholds rather
-    than indicator values themselves (e.g. "RSI above 70") — treat this as a review
-    signal, not an auto-reject.
+    Still a review signal rather than an auto-reject: it can produce false positives on
+    narrative numbers that reference thresholds rather than indicator values themselves.
+    The RSI band edges were the recurring instance of that and are now exempted near
+    RSI context (see _is_rsi_band_reference) — they were unmatchable by construction,
+    and the derived-relations block made the model restate them on every run, so the
+    guard was reporting the same two numbers forever. Other threshold vocabulary
+    (Bollinger deviations, MACD zero-line talk) has not shown up in practice and is
+    left alone rather than pre-emptively exempted.
 
     Three known transformations are normalized before flagging, each patched from a
     real false positive rather than designed upfront — coverage is only as good as
@@ -266,7 +285,19 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     genuine indicator value that the scanner mangled before comparing it.
     """
     known_values = [v for v in indicators.model_dump().values() if isinstance(v, (int, float))]
-    text_no_periods = re.sub(r"\b\d+-day\b", "", text)
+
+    # Normalize U+2212 MINUS SIGN to ASCII before anything reads a sign. The
+    # model writes typographic minus roughly one run in four — "negative
+    # histogram of −3.23" — and _SIGNED_NUMBER only knows the ASCII hyphen, so
+    # a faithful -3.2298 parsed as positive 3.23 and matched nothing. Python
+    # agrees on the narrower alphabet: float("−3.23") raises.
+    #
+    # Only U+2212, not the dashes. En dash is the conventional range separator
+    # ("318.73–352.11"), and the whole reason _SIGNED_NUMBER carries a
+    # lookbehind is that reading a separator as a sign turned a real Bollinger
+    # band into a fabricated negative.
+    text = text.replace("−", "-")
+    text_no_periods = _PERIOD_LABEL.sub("", text)
 
     flagged: list[str] = []
 
@@ -287,12 +318,53 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
             flagged.append(f"{m}%")
     text_no_percents = percent_pattern.sub("", text_no_above_below)
 
-    for m in re.findall(_SIGNED_NUMBER, text_no_percents):
+    for match in re.finditer(_SIGNED_NUMBER, text_no_percents):
+        m = match.group()
         val = float(m)
-        if not any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
-            flagged.append(m)
+        if any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
+            continue
+        if _is_rsi_band_reference(val, text_no_percents, match.start(), match.end()):
+            continue
+        flagged.append(m)
 
     return flagged
+
+
+# The conventional RSI band edges. These are constants of the indicator, not
+# values read off it, so they can never appear in `indicators` and were
+# guaranteed to flag — "RSI above 70" was documented as a known false positive
+# from the start, and adding a relations block that says "NEITHER overbought
+# nor oversold (between 30 and 70)" made the model echo them every run.
+#
+# Only 30 and 70. The 20/80 variant exists, but every value added here is a
+# value the guard can no longer catch anywhere it appears, and 20 and 80 are
+# far likelier to collide with a genuine price or indicator reading.
+_RSI_BAND_VALUES = {30.0, 70.0}
+
+# Required nearby for the exemption to apply, so 30 and 70 stay checkable
+# everywhere else — a fabricated "P/E ratio of 30" is still flagged.
+_RSI_CONTEXT = re.compile(r"\brsi\b|overbought|oversold", re.I)
+
+# Asymmetric because the giveaway usually precedes the number ("RSI ...
+# between 30 and 70") and only sometimes follows it ("70, neither overbought
+# nor oversold"). Wide enough to reach back past "sits comfortably in neutral
+# territory between 30 and", narrow enough not to borrow an RSI mention from
+# a neighbouring sentence.
+_RSI_LOOKBEHIND = 90
+_RSI_LOOKAHEAD = 60
+
+
+def _is_rsi_band_reference(value: float, text: str, start: int, end: int) -> bool:
+    """True when a number is one of the RSI band edges, used as a threshold.
+
+    Scoped by proximity rather than exempted outright: this narrows the
+    guard's blind spot to "30 or 70 written within a sentence's reach of the
+    word RSI", instead of blinding it to those two values everywhere.
+    """
+    if value not in _RSI_BAND_VALUES:
+        return False
+    window = text[max(0, start - _RSI_LOOKBEHIND) : end + _RSI_LOOKAHEAD]
+    return _RSI_CONTEXT.search(window) is not None
 
 
 def _format_technical_markdown(report: TechnicalReport) -> str:
