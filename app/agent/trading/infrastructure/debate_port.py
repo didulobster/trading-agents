@@ -28,7 +28,13 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from pydantic import ValidationError
 
-from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.agent.researcher import (
+    AGENT_MODEL,
+    _MODEL_PRICING,
+    UsageSummary,
+    _save_output,
+    log_cost,
+)
 from app.agent.trading.application.nodes import ANALYST_OUTPUTS
 from app.agent.trading.domain.debate import DebateTurn, DebateTurnPayload, Side
 from app.agent.trading.infrastructure.technical_interpreter_port import (
@@ -36,43 +42,84 @@ from app.agent.trading.infrastructure.technical_interpreter_port import (
     _flag_unmatched_numbers_against,
 )
 
-# Sonnet, not Haiku. This is the phase where reasoning quality IS the
-# deliverable: a bull that cannot construct a real counterargument produces a
-# transcript that looks like a debate and isn't, and that failure is
-# invisible to both exit criteria — they test termination and resume, not
-# argument quality. Overridable so a dry run can be made cheap deliberately,
-# never by accident.
-DEBATE_MODEL = os.getenv("TRADING_DEBATE_MODEL", "claude-sonnet-5")
+# The project-wide model from .env (LLM_CLAUDE_MODEL), same as every other
+# node. TRADING_DEBATE_MODEL still overrides it for a one-off run without
+# moving the whole pipeline.
+#
+# Worth knowing what this trades away: the debate is the one phase where
+# reasoning quality IS the deliverable. A bull that cannot construct a real
+# counterargument produces a transcript that looks like a debate and isn't,
+# and that failure is invisible to both exit criteria — they test
+# termination and resume, not argument quality. Read a transcript by hand
+# after changing this, because no assertion here will tell you.
+DEBATE_MODEL = os.getenv("TRADING_DEBATE_MODEL") or AGENT_MODEL
 
 # Room for adaptive thinking plus the tool call. Thinking tokens count
 # against this, so the 1200 that fit a text-only turn does not fit here.
 DEBATE_MAX_TOKENS = 4000
 
-# Whole-debate ceiling, not per turn.
+# Whole-debate ceiling, not per turn. Deliberately model-independent: it is a
+# runaway and prompt-bloat trip wire, not a target, so it stays put when
+# LLM_CLAUDE_MODEL moves.
 #
-# MEASURED (AVGO, 2026-08-23, claude-sonnet-5 at $3/$15, adaptive thinking at
-# effort=low, a small synthetic pack): turn 0 $0.0260 at 1099 output tokens,
-# turn 1 $0.0277 at 1048. Input grows ~1.8k/turn as the transcript does, so
-# six turns land near $0.20 — above the $0.14 the pre-build estimate assumed,
-# because thinking tokens were not in that estimate. Against a logged
-# fundamentals run at $0.181, a debate roughly doubles per-ticker cost.
-#
-# 0.35 is clear of $0.20 and still tight enough to fire on a runaway or on
-# prompt bloat. Re-measure with a real 5k-token pack before trusting it as a
-# margin rather than a ceiling.
+# MEASURED, six turns over the technical report alone (AVGO, 2026-08-23):
+#   claude-sonnet-5   $0.1506 total, ~$0.025/turn, 80s wall clock
+#   claude-haiku-4-5  ~$0.005/turn, so ~$0.03 for the same six turns
+# Input grows ~1.8k/turn as the transcript does. A full four-report pack will
+# be dearer than either figure; re-measure before treating 0.35 as a margin
+# rather than a ceiling.
 DEBATE_BUDGET_USD = 0.35
 
-# Thinking ON, effort LOW. This started as {"type": "disabled"} on the
-# reasoning that one forced tool call with a <=200 word argument has nothing
-# for a thinking budget to buy. Two live turns disproved it: BOTH first
-# attempts came back with `stance` missing and a serialized
-# "...</submit_argument>" string stuffed inside `argument` — the model had
-# half-written the tool call as text. That is the documented
-# thinking-disabled failure mode, and here it cost a retry on 2 of 2 turns,
-# which doubles both latency and spend. Turning thinking on fixes it; low
-# effort keeps the cost of doing so down.
+# Thinking ON, effort LOW — where the model supports it. This started as
+# {"type": "disabled"} on the reasoning that one forced tool call with a
+# <=200 word argument has nothing for a thinking budget to buy. Two live
+# turns disproved it: BOTH first attempts came back with `stance` missing and
+# a serialized "...</submit_argument>" string stuffed inside `argument` — the
+# model had half-written the tool call as text. That is the documented
+# thinking-disabled failure mode, and it cost a retry on 2 of 2 turns.
 DEBATE_THINKING: dict[str, Any] = {"type": "adaptive"}
 DEBATE_EFFORT = "low"
+
+# Adaptive thinking and output_config.effort exist on the 4.6-and-later
+# families and are REJECTED by 4.5-era models — Haiku 4.5 and Sonnet 4.5 take
+# the older {"type": "enabled", "budget_tokens": N} form and error on
+# `effort` outright. Now that DEBATE_MODEL follows LLM_CLAUDE_MODEL, which
+# points at Haiku 4.5 today, sending them unconditionally would 400 every
+# turn.
+#
+# Prefixes rather than a version comparison, because the id format is not a
+# reliable ordering ("claude-sonnet-5" sorts below "claude-sonnet-4-6"), and
+# an UNKNOWN id falls through to sending NEITHER: omitting both is valid on
+# every model while sending them is not, so the safe default is the one that
+# still runs. A model added here without checking gets a 400 on the first
+# turn, which is loud and cheap.
+_ADAPTIVE_THINKING_MODELS = (
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
+def supports_adaptive_thinking(model: str) -> bool:
+    return model.startswith(_ADAPTIVE_THINKING_MODELS)
+
+
+if DEBATE_MODEL not in _MODEL_PRICING:
+    # Not fatal, but the budget assertion is the only thing standing between a
+    # prompt-bloat regression and an unbounded bill, and an unpriced model
+    # makes every turn cost None — which sums to 0.00 and can never trip it.
+    # Say so once at import rather than letting the ceiling be silently
+    # absent for a whole run.
+    print(
+        f"[debate] WARNING: no pricing configured for {DEBATE_MODEL} — per-turn "
+        f"costs will log as null and the ${DEBATE_BUDGET_USD:.2f} budget "
+        f"assertion cannot fire. Add it to _MODEL_PRICING in researcher.py."
+    )
 
 # Forced-failure hooks for the resume tests. Deliberately in the port rather
 # than the node: variant B has to die AFTER the API call and before the node
@@ -475,8 +522,27 @@ def _is_rounding_of(raw: str, known: list[float]) -> bool:
     return any(round(kv, places) == value for kv in known)
 
 
+# Formatting, not content: quote characters and whitespace. Everything with
+# meaning — digits, letters, and the punctuation that changes a value
+# (".", ",", "-", ":") — is preserved, so "38.72" still fails to match
+# "3.872".
+_QUOTE_NOISE = re.compile(r'[\s"\u201c\u201d\u2018\u2019\']+')
+
+
 def _norm(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip().lower()
+    """Project a span onto what a quote actually asserts.
+
+    The technical section of the pack is compact JSON, so the report reads
+    `"rsi_14":38.721899422317186` while a debater naturally writes
+    `rsi_14: 38.721899422317186` — same field, same value, two characters of
+    punctuation apart. Comparing raw, that is a fabricated quote; on the
+    first live Haiku turns it flagged 4 claims out of 4, every one of them
+    faithful.
+
+    Whitespace goes entirely rather than collapsing to a single space,
+    because a quote copied out of a wrapped markdown report carries the wrap.
+    """
+    return _QUOTE_NOISE.sub("", text).lower()
 
 
 def check_quotes(payload: DebateTurnPayload, texts: dict[str, str]) -> list[str]:
@@ -543,11 +609,15 @@ def is_productive(payload: DebateTurnPayload, turns: list[DebateTurn]) -> bool:
 async def _submit(
     client: AsyncAnthropic, system_blocks: list[dict], messages: list[dict]
 ):
+    reasoning: dict[str, Any] = {}
+    if supports_adaptive_thinking(DEBATE_MODEL):
+        reasoning["thinking"] = DEBATE_THINKING
+        reasoning["output_config"] = {"effort": DEBATE_EFFORT}
+
     return await client.messages.create(
         model=DEBATE_MODEL,
         max_tokens=DEBATE_MAX_TOKENS,
-        thinking=DEBATE_THINKING,
-        output_config={"effort": DEBATE_EFFORT},
+        **reasoning,
         system=system_blocks,
         messages=messages,
         tools=[SUBMIT_TOOL],

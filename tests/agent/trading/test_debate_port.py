@@ -419,6 +419,71 @@ def test_quote_matching_tolerates_whitespace_differences():
     assert port.check_quotes(payload, port.report_texts(_state())) == []
 
 
+def _technical_state() -> dict:
+    return _state(
+        technical_report=TechnicalReport(
+            ticker="ACN",
+            as_of_date=date(2026, 8, 21),
+            data_source="yfinance",
+            bars_used=251,
+            indicators=TechnicalIndicators(
+                sma_200=368.2967127990723,
+                rsi_14=38.721899422317186,
+                last_close=368.45001220703125,
+            ),
+            interpretation="ACN is below its 50-day but above its 200-day average.",
+        )
+    )
+
+
+def _quote_flags(quote: str, ref: str = "technical") -> list[str]:
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "c",
+            "text": "t",
+            "evidence_ref": ref,
+            "evidence_quote": quote,
+        }])
+    )
+    return port.check_quotes(payload, port.report_texts(_technical_state()))
+
+
+def test_a_citation_that_differs_only_in_punctuation_spacing_verifies():
+    """The technical section of the pack is compact JSON, so the report reads
+    `"rsi_14":38.72` while a debater naturally writes `rsi_14: 38.72`. On the
+    first live Haiku turns that flagged 4 claims out of 4, every one of them
+    faithful — the guard was reporting its own rendering choice as
+    fabrication."""
+    assert _quote_flags("rsi_14: 38.721899422317186") == []
+    assert _quote_flags('"rsi_14":38.721899422317186') == []
+
+
+def test_a_quote_copied_across_a_line_wrap_verifies():
+    assert _quote_flags(
+        "ACN is below its 50-day but\n    above its 200-day average."
+    ) == []
+
+
+def test_a_span_spliced_from_two_non_adjacent_fields_is_still_flagged():
+    """The normalization must not buy the false positives back by letting a
+    fabricated contiguity through. Both live models did this — Sonnet with an
+    ellipsis, Haiku with a comma — and it is a real finding: nothing in the
+    report puts those two values side by side."""
+    assert _quote_flags(
+        "sma_200: 368.2967127990723, last_close: 368.45001220703125"
+    ) == ["c"]
+    assert _quote_flags(
+        'sma_200":368.2967127990723... last_close":368.45001220703125'
+    ) == ["c"]
+
+
+def test_a_shifted_decimal_is_still_flagged():
+    """Whitespace and quote marks are formatting; a decimal point is not.
+    Stripping punctuation wholesale would let 3.872 pass as 38.72."""
+    assert _quote_flags("rsi_14: 3.8721899422317186") == ["c"]
+    assert _quote_flags("rsi_14: 55.0") == ["c"]
+
+
 def test_a_claim_citing_no_report_is_not_quote_checked():
     payload = DebateTurnPayload.model_validate(
         _payload(claims=[{
@@ -619,21 +684,86 @@ def test_the_pack_layout_does_not_depend_on_which_legs_ran():
 # Cost
 # ---------------------------------------------------------------------------
 
-def test_the_debate_is_logged_under_its_own_model(monkeypatch):
-    """Every prior phase used AGENT_MODEL, so the hardcoded model label in
-    log_cost was correct by coincidence. Phase 5 is the first node that does
-    not — and an entry labelled and priced as Haiku would understate a Sonnet
-    debate by ~3x, which is exactly the wrong number for a budget assertion
-    to wave through."""
-    from app.agent.researcher import _MODEL_PRICING, _compute_cost, UsageSummary
+def test_the_debate_model_follows_the_project_wide_setting():
+    """One knob. TRADING_DEBATE_MODEL still overrides it for a one-off run,
+    but the default is whatever LLM_CLAUDE_MODEL says, like every other
+    node."""
+    import os
+
+    from app.agent.researcher import AGENT_MODEL
+
+    if not os.getenv("TRADING_DEBATE_MODEL"):
+        assert port.DEBATE_MODEL == AGENT_MODEL
+
+
+def test_the_debate_model_is_priced_so_the_budget_assertion_can_fire():
+    """An unpriced model makes every turn cost None, which sums to 0.00 and
+    can never trip the ceiling — the budget assertion would be silently
+    absent rather than merely loose."""
+    from app.agent.researcher import _MODEL_PRICING
+
+    assert port.DEBATE_MODEL in _MODEL_PRICING
+
+
+def test_cost_is_computed_at_the_debate_model_s_rate_not_the_researcher_s():
+    """log_cost hardcoded AGENT_MODEL for both the label and the price, which
+    was correct by coincidence. It still has to take the model, because
+    TRADING_DEBATE_MODEL can point the debate somewhere else — and a Sonnet
+    debate priced as Haiku is understated ~3x, which is exactly the wrong
+    number for a budget assertion to wave through."""
+    from app.agent.researcher import _compute_cost, UsageSummary
 
     usage = UsageSummary()
     usage.input_tokens = 1_000_000
     usage.output_tokens = 0
 
-    assert port.DEBATE_MODEL in _MODEL_PRICING
-    assert _compute_cost(usage, port.DEBATE_MODEL) == 3.0
+    assert _compute_cost(usage, "claude-sonnet-5") == 3.0
     assert _compute_cost(usage, "claude-haiku-4-5-20251001") == 1.0
+
+
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        ("claude-haiku-4-5-20251001", False),
+        ("claude-sonnet-4-5-20250929", False),
+        ("claude-opus-4-5", False),
+        ("claude-sonnet-5", True),
+        ("claude-opus-5", True),
+        ("claude-sonnet-4-6", True),
+        ("some-future-model", False),
+    ],
+)
+def test_reasoning_params_are_only_sent_to_models_that_accept_them(model, expected):
+    """Adaptive thinking and output_config.effort are REJECTED by 4.5-era
+    models. An unknown id falls through to sending neither, because omitting
+    them is valid everywhere and sending them is not — the safe default is
+    the one that still runs."""
+    assert port.supports_adaptive_thinking(model) is expected
+
+
+@pytest.mark.anyio
+async def test_a_45_era_model_is_not_sent_thinking_or_effort(monkeypatch):
+    monkeypatch.setattr(port, "DEBATE_MODEL", "claude-haiku-4-5-20251001")
+    client = _FakeClient([_payload()])
+
+    await port.run_debate_turn(_state(), "bull", 0, client=client)
+
+    call = client.messages.calls[0]
+    assert "thinking" not in call
+    assert "output_config" not in call
+    assert call["tool_choice"]["disable_parallel_tool_use"] is True
+
+
+@pytest.mark.anyio
+async def test_a_46_era_model_is_sent_thinking_and_effort(monkeypatch):
+    monkeypatch.setattr(port, "DEBATE_MODEL", "claude-sonnet-5")
+    client = _FakeClient([_payload()])
+
+    await port.run_debate_turn(_state(), "bull", 0, client=client)
+
+    call = client.messages.calls[0]
+    assert call["thinking"] == {"type": "adaptive"}
+    assert call["output_config"] == {"effort": port.DEBATE_EFFORT}
 
 
 @pytest.mark.anyio
