@@ -264,19 +264,30 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
         )
         return gaps, evidence
 
-    flagged = [f for t in turns for f in t.guard_flags]
+    # Counted across turns but listed once each. A figure the debate leans on
+    # gets restated every round, and on the first live run that filled the
+    # whole display budget with "0.15, 0.15, 0.15" while two other flagged
+    # figures were hidden behind "(+1 more)" — the repetition told the reader
+    # nothing and cost them the part that would have.
+    flagged = Counter(f for t in turns for f in t.guard_flags)
     if flagged:
+        shown = [
+            f"{fig} (x{n})" if n > 1 else fig
+            for fig, n in flagged.most_common(5)
+        ]
         gaps.append(
-            f"{len(flagged)} figure(s) in the debate did not appear in any analyst "
-            f"report and may be fabricated: {', '.join(flagged[:5])}"
+            f"{sum(flagged.values())} mention(s) of {len(flagged)} figure(s) in the "
+            f"debate did not appear in any analyst report and may be fabricated: "
+            f"{', '.join(shown)}"
             + (f" (+{len(flagged) - 5} more)" if len(flagged) > 5 else "")
         )
 
-    unquoted = [c for t in turns for c in t.unquoted_evidence]
+    unquoted = sorted({c for t in turns for c in t.unquoted_evidence})
     if unquoted:
         gaps.append(
             f"{len(unquoted)} claim(s) cite a report but the quoted span is not in "
             f"it: {', '.join(unquoted[:5])}"
+            + (f" (+{len(unquoted) - 5} more)" if len(unquoted) > 5 else "")
         )
 
     if state.get("debate_terminated_by") == "round_cap":

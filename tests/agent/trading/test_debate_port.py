@@ -230,6 +230,41 @@ def test_a_fabricated_percent_is_still_flagged():
     assert port._flag_debate_numbers("Volume sits at 88% of its average.", PACK) == ["88%"]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "downside is unconstrained until the low-30s oversold zone",
+        "negative MACD and sub-50-SMA price action",
+        "the post-2020 build-out",
+    ],
+)
+def test_a_hyphenated_compound_is_not_read_as_a_negative_number(text):
+    """Found on the first live debate (AVGO, 2026-08-23): "low-30s" and
+    "sub-50-SMA" were reported as the fabricated figures -30 and -50 — two of
+    that run's six flags, so it is not a rare shape.
+
+    The lookbehind has to cover the digit as well as the sign. Blocking only
+    "<letter>-<digits>" would let the scanner start one character later and
+    flag a bare "30" out of "low-30s" — the same false positive with the sign
+    filed off.
+    """
+    assert port._flag_debate_numbers(text, PACK) == []
+
+
+def test_a_range_endpoint_is_still_read_as_a_positive_number():
+    """The other half of the same lookbehind, from Phase 3: a hyphen between
+    two digits is a range separator, and both endpoints are real values."""
+    pack = "TECHNICAL: bb_lower 353.79, bb_upper 438.34."
+    assert port._flag_debate_numbers("the band runs 353.79-438.34", pack) == []
+    assert port._flag_debate_numbers("the band runs 353.79-999.99", pack) == ["999.99"]
+
+
+def test_a_genuine_negative_number_still_parses():
+    pack = "TECHNICAL: macd_histogram -5.8513."
+    assert port._flag_debate_numbers("a histogram of -5.85", pack) == []
+    assert port._flag_debate_numbers("a histogram of -9.99", pack) == ["-9.99"]
+
+
 def test_period_labels_are_not_treated_as_data():
     assert port._flag_debate_numbers("Above its 200-day average.", PACK) == []
 
@@ -271,6 +306,28 @@ async def test_flagged_numbers_reach_the_memo_data_gaps():
     gaps, _ = _debate_caveats({"debate_turns": [turn]})
 
     assert any("71.4" in gap for gap in gaps)
+
+
+def test_a_figure_repeated_across_turns_is_listed_once_with_a_count():
+    """A figure the debate leans on gets restated every round. On the first
+    live run that filled the whole display budget with "0.15, 0.15, 0.15"
+    while two other flagged figures were hidden behind "(+1 more)" — the
+    repetition told the reader nothing and cost them the part that would."""
+    from app.agent.trading.application.nodes import _debate_caveats
+
+    turns = []
+    for i in range(4):
+        turn = _turn(i, "bull" if i % 2 == 0 else "bear", [f"c{i}"])
+        turn.guard_flags = ["0.15"] if i < 3 else ["0.15", "88.8"]
+        turns.append(turn)
+
+    gaps, _ = _debate_caveats({"debate_turns": turns})
+    gap = next(g for g in gaps if "may be fabricated" in g)
+
+    assert "0.15 (x4)" in gap
+    assert "88.8" in gap
+    assert gap.count("0.15") == 1
+    assert "5 mention(s) of 2 figure(s)" in gap
 
 
 # ---------------------------------------------------------------------------
