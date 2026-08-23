@@ -62,6 +62,16 @@ _MODEL_PRICING = {
         "cache_write": 3.75,
         "cache_read": 0.30,
     },
+    # Sonnet 5 carries an introductory $2/$10 through 2026-08-31 and reverts
+    # to $3/$15 on Sep 1. Budgeted at the standing rate deliberately: pricing
+    # the intro here would make every debate-cost assertion start failing on
+    # a date nobody was watching, and over-estimating cost fails safe.
+    "claude-sonnet-5": {
+        "input": 3.00,
+        "output": 15.00,
+        "cache_write": 3.75,
+        "cache_read": 0.30,
+    },
 }
 
 def _trace(msg: str) -> None:
@@ -122,7 +132,7 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 # trace the preceding fundamentals run left behind — writing it would pair
 # the wrong evidence with the report. They supply their own provenance or
 # get none.
-_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision"}
+_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision", "debate"}
 
 
 def _save_output(
@@ -131,6 +141,7 @@ def _save_output(
     mode: str,
     cost_usd: float | None = None,
     provenance: str | None = None,
+    model: str = AGENT_MODEL,
 ) -> Path:
     """Save output with timestamp. Returns the path.
 
@@ -138,7 +149,7 @@ def _save_output(
     of the research agent's session log.
     """
     if cost_usd is not None:
-        content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({AGENT_MODEL})\n"
+        content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
     now = datetime.now()
     date = now.strftime("%Y%m%d")
     timestamp = now.strftime("%Y%m%d-%H%M%S")
@@ -151,7 +162,7 @@ def _save_output(
     elif mode == "fundamentals":
         filename = f"{ticker}-fundamental-{timestamp}.md"
         out_path = MEMO_DIR / ticker / date / filename
-    elif mode in ("sentiment", "decision"):
+    elif mode in ("sentiment", "decision", "debate"):
         filename = f"{ticker}-{mode}-{timestamp}.md"
         out_path = MEMO_DIR / ticker / date / filename
     else:
@@ -210,10 +221,17 @@ def _print_usage_summary(
     _trace(f"{'='*55}")
 
 
-def _compute_cost(usage: UsageSummary) -> float | None:
+def _compute_cost(usage: UsageSummary, model: str = AGENT_MODEL) -> float | None:
     """Estimate USD cost from token usage, or None if pricing isn't configured
-    for AGENT_MODEL."""
-    pricing = _MODEL_PRICING.get(AGENT_MODEL)
+    for `model`.
+
+    `model` defaults to AGENT_MODEL, which was correct by coincidence until
+    Phase 5: every earlier caller used the researcher's own model. A node
+    that calls a different model and does not pass it here gets a cost priced
+    at the wrong rate — understated 3x for Sonnet against Haiku — which is
+    exactly the kind of wrong number a per-run budget assertion would then
+    wave through."""
+    pricing = _MODEL_PRICING.get(model)
     if not pricing:
         return None
     return round(
@@ -225,16 +243,23 @@ def _compute_cost(usage: UsageSummary) -> float | None:
     )
 
 
-def log_cost(ticker: str, mode: str, usage: UsageSummary) -> float | None:
+def log_cost(
+    ticker: str, mode: str, usage: UsageSummary, model: str = AGENT_MODEL
+) -> float | None:
     """Append one JSON line to docs/cost-log.jsonl. Returns the estimated
     cost (or None if pricing isn't configured), so callers can also surface
-    it elsewhere (e.g. in the memo itself)."""
-    cost = _compute_cost(usage)
+    it elsewhere (e.g. in the memo itself).
+
+    Pass `model` whenever the call being logged did not use AGENT_MODEL. Both
+    the logged label and the price come from it — a hardcoded label on a
+    differently-priced call produces a log that is wrong twice and looks
+    right."""
+    cost = _compute_cost(usage, model)
     entry = {
         "timestamp": datetime.now().isoformat(),
         "ticker": ticker,
         "mode": mode,
-        "model": AGENT_MODEL,
+        "model": model,
         "input_tokens": usage.input_tokens,
         "cache_write_tokens": usage.cache_write_tokens,
         "cache_read_tokens": usage.cache_read_tokens,

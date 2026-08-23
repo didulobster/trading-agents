@@ -38,6 +38,13 @@ ALLOWED_MSGPACK_MODULES = [
     ("app.agent.trading.domain.news_digest", "NewsItem"),
     ("app.agent.trading.domain.news_digest", "NewsDigest"),
     ("app.agent.trading.domain.news_digest", "SentimentSummary"),
+    # Phase 5. Three entries for one channel because DebateTurn nests
+    # DebateTurnPayload nests DebateClaim, and an unregistered type fails on
+    # DESERIALIZATION ONLY — a live run stays green and the resume goes red,
+    # which is the worst possible place to discover a missing line.
+    ("app.agent.trading.domain.debate", "DebateClaim"),
+    ("app.agent.trading.domain.debate", "DebateTurnPayload"),
+    ("app.agent.trading.domain.debate", "DebateTurn"),
 ]
 
 

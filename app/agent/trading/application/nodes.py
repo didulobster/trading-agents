@@ -1,9 +1,11 @@
-"""Phase 1 stub nodes — placeholder logic only.
-Each returns a hardcoded value; real logic lands in Phases 2-6.
-Goal here is proving the topology runs end-to-end and emits a
-schema-valid DecisionMemo, nothing more.
+"""Application nodes for the trading graph.
+
+fundamentals (Phase 2), technical (Phase 3), news/sentiment (Phase 4) and the
+debate (Phase 5, in debate_nodes.py) are real. `risk_node` and the synthesis
+half of `synthesizer_node` are still stubs; what the synthesizer does do for
+real is report what the run did and did not see, so a stubbed memo never
+reads as a complete one.
 """
-import asyncio
 from collections import Counter
 from datetime import date
 
@@ -161,11 +163,6 @@ async def sentiment_node(state: TradingState) -> dict:
     }
 
 
-async def debate_node(state: TradingState) -> dict:
-    print(f"[debate] STUB running for {state['ticker']}")
-    return {"debate_summary": "STUB — Phase 5"}
-
-
 async def risk_node(state: TradingState) -> dict:
     print(f"[risk] STUB running for {state['ticker']}")
     return {"risk_summary": "STUB — Phase 6"}
@@ -243,6 +240,60 @@ def _news_caveats(state: TradingState) -> tuple[list[str], list[str]]:
     return gaps, evidence
 
 
+def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
+    """What the debate established, and what it could not.
+
+    The turn records carry both; until this runs, neither reaches the memo.
+    Aggregated here rather than in a state channel because the debate nodes
+    are cyclic — a plain list channel would have each turn clobber the last.
+
+    The round_cap gap is the one that earns its keep: a capped debate reads
+    in the memo exactly like a resolved one unless the memo says otherwise,
+    the same failure `truncated_by_cap` exists to prevent for the news digest.
+    """
+    turns = state.get("debate_turns") or []
+    gaps: list[str] = []
+    evidence: list[str] = []
+
+    if not turns:
+        reason = state.get("debate_terminated_by") or "unknown"
+        gaps.append(
+            f"no debate took place ({reason}) — this memo carries no adversarial "
+            f"review of the analyst findings, which is not the same as those "
+            f"findings having survived one"
+        )
+        return gaps, evidence
+
+    flagged = [f for t in turns for f in t.guard_flags]
+    if flagged:
+        gaps.append(
+            f"{len(flagged)} figure(s) in the debate did not appear in any analyst "
+            f"report and may be fabricated: {', '.join(flagged[:5])}"
+            + (f" (+{len(flagged) - 5} more)" if len(flagged) > 5 else "")
+        )
+
+    unquoted = [c for t in turns for c in t.unquoted_evidence]
+    if unquoted:
+        gaps.append(
+            f"{len(unquoted)} claim(s) cite a report but the quoted span is not in "
+            f"it: {', '.join(unquoted[:5])}"
+        )
+
+    if state.get("debate_terminated_by") == "round_cap":
+        gaps.append(
+            f"the debate hit the {len(turns) // 2}-round cap rather than resolving — "
+            f"both sides still had new claims when it stopped, so the transcript is "
+            f"a truncated argument, not a concluded one"
+        )
+
+    concessions = [t for t in turns if t.payload.stance == "concede"]
+    evidence.append(
+        f"{len(turns)}-turn bull/bear debate over the analyst reports; "
+        f"{len(concessions)} structurally-justified concession(s)"
+    )
+    return gaps, evidence
+
+
 async def synthesizer_node(state: TradingState) -> dict:
     print(f"[synthesizer] STUB running for {state['ticker']}")
     as_of = state.get("as_of_date")
@@ -260,6 +311,7 @@ async def synthesizer_node(state: TradingState) -> dict:
         name for name, key in ANALYST_OUTPUTS.items() if state.get(key) is None
     )
     news_gaps, news_evidence = _news_caveats(state)
+    debate_gaps, debate_evidence = _debate_caveats(state)
     technical = state.get("technical_report")
     memo = DecisionMemo(
         ticker=state["ticker"],
@@ -271,22 +323,26 @@ async def synthesizer_node(state: TradingState) -> dict:
             if technical is not None
             else "NOT RUN — technical analyst was excluded from this run"
         ),
-        reasoning="STUB — synthesis logic not yet implemented. fundamentals (Phase 2), technical (Phase 3), and news/sentiment (Phase 4) are real; debate/risk are still stubs.",
+        reasoning="STUB — synthesis logic not yet implemented. fundamentals (Phase 2), technical (Phase 3), news/sentiment (Phase 4) and the bull/bear debate (Phase 5) are real; risk is still a stub, and the memo does not yet render the debate.",
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,
         confidence=0.0,
         data_as_of_date=as_of,
         data_gaps=[
             "synthesizer does not yet incorporate fundamentals_report into this memo — that's a later phase, not Phase 2's scope",
-            "debate/risk nodes are still stubs — no real data",
+            "the debate ran for real, but this memo does not yet render its "
+            "claims into bull_case/bear_case — that is Phase 7; read the vault "
+            "transcript for the argument itself",
+            "risk node is still a stub — no real data",
         ]
         + [
             f"{name} analyst did not run — this memo carries no {name} evidence "
             f"at all, which is not the same as that evidence being neutral"
             for name in missing
         ]
-        + news_gaps,
+        + news_gaps
+        + debate_gaps,
         assumptions=[],
-        evidence=news_evidence,
+        evidence=news_evidence + debate_evidence,
     )
     return {"decision_memo": memo}
