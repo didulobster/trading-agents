@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,9 @@ from app.agent.trading.domain.news_digest import (
 BATCH_SIZE = 15
 DIGEST_MAX_TOKENS = 1500
 NEWS_BUDGET_USD = 0.20
+# Enough parallelism to keep a full-cap run (20 batches) to a few waves,
+# low enough not to arrive as one burst against the account's rate limit.
+MAX_CONCURRENT_BATCHES = 5
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral"}
 VALID_RELEVANCE = {"primary", "mentioned", "unrelated"}
@@ -199,10 +203,14 @@ def _join(
 
 
 def _assert_within_budget(cost: float | None) -> None:
-    """Typo-catcher, not the real constraint: at ~$0.0003/article the cap in
-    news_data_port (MAX_ARTICLES) binds ~10x before this budget does. What
-    this catches is a model-string change that silently routes the digest to
-    an expensive model."""
+    """Typo-catcher, not the real constraint. MAX_ARTICLES is now derived from
+    this budget — a full-cap run costs ~68% of it — so volume alone cannot
+    trip this. What it still catches is a model-string change that silently
+    routes the digest to an expensive model.
+
+    It fires only after the batches have been paid for, which is precisely
+    why the cap has to be the thing that bounds spend: an assertion here
+    cannot refund a run it failed."""
     if cost is not None and cost > NEWS_BUDGET_USD:
         raise AssertionError(
             f"news digest cost ${cost:.4f} exceeds the ${NEWS_BUDGET_USD:.2f} "
@@ -215,6 +223,12 @@ async def build_digest(
 ) -> tuple[list[NewsItem], list[str], float | None]:
     """Batch the cleaned articles through Haiku and join by index.
 
+    Batches run concurrently. At MAX_ARTICLES a run is 20 calls, and issuing
+    them one at a time would put the node into the minutes — the batches are
+    independent, so the only thing serial execution buys is latency.
+    Concurrency is bounded so a large run doesn't arrive as one burst; the
+    SDK's own retries handle any rate limiting that still occurs.
+
     Usage is summed across batches into ONE cost-log line per run, so the
     per-run budget check doesn't have to reassemble per-batch lines.
     """
@@ -226,9 +240,40 @@ async def build_digest(
     items: list[NewsItem] = []
     issues: list[str] = []
 
-    for start in range(0, len(articles), BATCH_SIZE):
-        batch = articles[start : start + BATCH_SIZE]
-        parsed, batch_usage = await _summarize_batch(client, batch, ticker)
+    batches = [
+        articles[start : start + BATCH_SIZE]
+        for start in range(0, len(articles), BATCH_SIZE)
+    ]
+    limit = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
+
+    async def run_batch(batch: list[dict[str, Any]]):
+        async with limit:
+            # A batch whose response won't parse costs that batch's articles,
+            # not the run. Losing 20 batches' spend to one malformed reply is
+            # a bad trade, and the loss is recorded as an issue rather than
+            # passing silently as a shorter digest. Only VendorError is caught
+            # — that is the malformed-output case. API, auth and exhausted-
+            # retry errors are systemic and still fail the run.
+            try:
+                return await _summarize_batch(client, batch, ticker)
+            except VendorError as e:
+                return e
+
+    results = await asyncio.gather(*(run_batch(b) for b in batches))
+
+    # gather preserves input order, so items stay in the newest-first order
+    # filter_and_dedup established, regardless of completion order.
+    succeeded = 0
+    for batch, result in zip(batches, results):
+        if isinstance(result, VendorError):
+            issues.append(
+                f"batch of {len(batch)} article(s) failed and is absent from "
+                f"this digest ({result}); first headline: "
+                f"{batch[0].get('headline', '')[:60]!r}"
+            )
+            continue
+        succeeded += 1
+        parsed, batch_usage = result
         usage.input_tokens += batch_usage.input_tokens
         usage.cache_write_tokens += batch_usage.cache_creation_input_tokens or 0
         usage.cache_read_tokens += batch_usage.cache_read_input_tokens or 0
@@ -237,6 +282,14 @@ async def build_digest(
         batch_items, batch_issues = _join(batch, parsed)
         items.extend(batch_items)
         issues.extend(batch_issues)
+
+    if not succeeded:
+        # Every batch failing is a systemic problem, not a bad reply. Returning
+        # an empty digest here would be indistinguishable from a quiet ticker.
+        raise VendorError(
+            f"all {len(batches)} digest batch(es) failed for {ticker} — "
+            f"refusing to return an empty digest that would read as no news"
+        )
 
     cost = log_cost(ticker, "trading-news", usage)
     _assert_within_budget(cost)

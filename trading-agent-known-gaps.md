@@ -21,10 +21,11 @@ when actually closed, not when they become inconvenient.
    surface with no verifier. Closing it would need a second model call per
    article, which isn't worth it at this node's stakes.
 
-3. **Truncation is a sampling bias, not just a cap.** `MAX_ARTICLES=60`
-   sorted newest-first means a busy week silently drops older-but-possibly-
-   more-important coverage. `truncated_by_cap` makes it visible (and should
-   surface in the Phase 7 memo as a caveat); it doesn't make it correct.
+3. **[Largely resolved] Truncation is a sampling bias, not just a cap.**
+   A newest-first cap means a busy week silently drops older-but-possibly-
+   more-important coverage. `truncated_by_cap` makes it visible (and now
+   surfaces in the vault sentiment report as a caveat); it doesn't make it
+   correct.
 
    *Measured on the first live run (MSFT, 2026-08-21):* Finnhub returned
    **247 articles** for a 14-day window. The cap kept 60 and dropped 187,
@@ -41,26 +42,38 @@ when actually closed, not when they become inconvenient.
    fires. Dedup is cheap and harmless, but it is not the cost lever it was
    assumed to be — the cap is.
 
-   **This is now the binding constraint, and it needs a decision.** Adding
-   relevance scoring (gap 5) made the cost of the cap precise: of MSFT's
-   247 articles in the window, **58 name Microsoft — and the cap keeps only
-   6 of them.** 52 relevant articles are discarded, 31 of them on the
-   2026-08-13 event day. The sentiment signal is now correct but nearly
-   empty (n=6, of which three are near-identical "Microsoft Versus
-   Competitors" template pieces). Two ways out, both real:
+   **[Resolved 2026-08-22] `MAX_ARTICLES` raised 60 → 300.** Relevance
+   scoring (gap 5) had made the cost of the old cap precise: of MSFT's 247
+   in-window articles, 58 named Microsoft and the cap kept **6** of them,
+   leaving a signal that was correct but too thin to use (three of the six
+   were near-identical "Microsoft Versus Competitors" template pieces).
 
-   - **Raise `MAX_ARTICLES` to cover the window.** Scoring all 247 costs
-     ~$0.086, still under the $0.20 budget, and needs no new data source.
-     It does deliberately weaken the guard the cap was introduced to be, so
-     an extreme earnings week would lean on the budget assertion instead.
-   - **Prioritize likely-relevant articles before the cap.** Keeps cost
-     flat, but needs the company *name*: matching the ticker alone finds
-     only 8 of MSFT's 58 (headlines say "Microsoft", not "MSFT"), so it
-     requires a name lookup (e.g. Finnhub `/stock/profile2`) plus a cache.
+   300 is derived from the budget rather than picked for roundness. Worst
+   case is ~$0.00042/article plus a 496-token system prompt per batch, so a
+   full-cap run costs ~$0.136 — about 68% of `NEWS_BUDGET_USD`. That
+   ordering matters: the budget assertion fires only *after* the batches are
+   paid for, so it can never refund a run it fails. Keeping the cap strictly
+   inside the budget means volume degrades to flagged truncation instead of
+   an exception charged at full price.
 
-   A per-day quota instead of a flat newest-first cut would fix the
-   dropped-event-day problem specifically, at no cost, without addressing
-   relevance concentration.
+   *Verified live (MSFT, 2026-08-22):* 248 articles fetched, **248 in the
+   digest**, `truncated_by_cap=False`, 11 distinct days covered instead of
+   5, and **54 primary articles instead of 6**. net_score +0.407 over n=54.
+   Cost $0.0997 (50% of budget); measured $0.000402/article, within 0.3% of
+   the AVGO figure the estimate was built on. Wall clock 24.7s for 17
+   batches at concurrency 5 — the batches were made concurrent in the same
+   change, since 20 sequential calls would otherwise have put the node into
+   the minutes.
+
+   *Residual:* a ticker with more than 300 in-window articles still
+   truncates, still newest-first, and still flags it. The rejected
+   alternative was prioritizing likely-relevant articles before the cap,
+   which keeps cost flat but needs the company *name* — matching the ticker
+   alone found only 8 of MSFT's 58, because headlines say "Microsoft", not
+   "MSFT" — so it requires a name lookup (e.g. Finnhub `/stock/profile2`)
+   plus a cache. A per-day quota instead of a flat newest-first cut remains
+   the cheapest way to stop an event day being dropped wholesale if the cap
+   ever binds again.
 
 4. **News is single-vendor.** Phase 3's price fetch has a yfinance/Finnhub
    router; news has no fallback, so a Finnhub outage kills the node.
