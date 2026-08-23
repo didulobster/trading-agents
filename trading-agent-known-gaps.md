@@ -148,30 +148,61 @@ when actually closed, not when they become inconvenient.
    materialize), so the early-stop lever is live; the stance field is not
    yet doing any work. Watch across more runs before changing the prompt.
 
-4. **Containment cannot catch a correctly-quoted figure used wrongly.**
+4. **Debate quality is now tied to `LLM_CLAUDE_MODEL`, and Haiku 4.5 makes
+   analytical errors Sonnet 5 did not.** `DEBATE_MODEL` follows the
+   project-wide setting as of 2026-08-23. Mechanically Haiku is fine — no
+   retries, valid payloads, `claim_id` reuse, `rebuts` populated, ~$0.005 a
+   turn against Sonnet's ~$0.025.
+
+   *But on the first two live Haiku turns, BOTH sides called an RSI of 38.7
+   "oversold".* It is not — oversold is below 30, and Phase 3's
+   `derive_relations` says so in as many words ("NEITHER overbought nor
+   oversold"). `guard_flags` was empty for both turns, because every number
+   was real. The error is in the reasoning, and nothing in this phase
+   catches that.
+
+   Two things follow. First, the cheaper model buys a transcript that looks
+   like a debate and is wrong on the facts — read one by hand after any model
+   change, because the exit criteria test termination and resume, not
+   argument quality. Second, the evidence pack renders the technical
+   indicators as raw JSON and **throws away `derive_relations()`** — the very
+   block Phase 3 added because a model asked to compare indicator values
+   itself gets it wrong. Putting the relations block into the pack is the
+   obvious fix and is deliberately not done here.
+
+5. **`evidence_quote` is a single contiguous span, but technical evidence
+   often is not.** A claim like "price is above its 200-day average" rests on
+   two fields that sit apart in the pack, so an honest citation of both is a
+   splice and gets flagged. Both live models did it — Sonnet with an
+   ellipsis, Haiku with a comma. The flag is technically correct (nothing in
+   the report puts those values side by side) but it is not fabrication, and
+   the shape will recur on every trend claim. Either allow a list of quotes
+   per claim, or render the indicators so related values are adjacent.
+
+6. **Containment cannot catch a correctly-quoted figure used wrongly.**
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
 
-5. **`claim_id` reuse is prompt-dependent.** A model inventing a fresh slug
+7. **`claim_id` reuse is prompt-dependent.** A model inventing a fresh slug
    for a restated claim inflates `productive` and defeats the early stop. It
    fails toward *more* rounds, capped at `MAX_TURNS` — a safe direction, but
    the early-stop lever is weaker than it reads.
 
-6. **Order bias is unquantified.** Bull speaks first and bear gets the last
+8. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
    here before building any machinery.
 
-7. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
+9. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
    inside `run_agent`; the debate never calls it. The number guard is the
    only check between a fabricated debate figure and the memo.
 
-8. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
+10. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
    still "STUB" — Phase 7's job. Phase 5 delivers the transcript to the
    vault and the *caveats* to the memo, so a capped or skipped debate is
    visible; the argument itself is not.
 
-9. **The model cannot emit an empty string into a tool call.** Asked for one
+11. **The model cannot emit an empty string into a tool call.** Asked for one
    it writes a stray `</antml parameter>` marker instead, which landed in
    `concession_trigger` on 4 of 4 live turns and tripped the concession
    guard on turns that conceded nothing. Worked around with a `'none'`
@@ -179,14 +210,14 @@ when actually closed, not when they become inconvenient.
    behaviour, found live — if a future model stops doing it the workaround
    is harmless, but the sentinel is load-bearing today.
 
-10. **Strict tool schemas cost the count bounds.** `strict: true` was needed
+12. **Strict tool schemas cost the count bounds.** `strict: true` was needed
    to stop the model flattening the payload (DebateClaim fields hoisted to
    the top level, `stance` missing, on 3 of 3 turns), and it rejects
    `minItems`/`maxItems`. The 1..5 claim bound now reaches the model only as
    prose in the field description; pydantic still enforces it on the way in,
    so a violation costs the one retry rather than passing.
 
-11. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
+13. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
     from `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6).
     The debate is the first node to read all four reports side by side, so it
     is the first place a mixed-vintage evidence pack can produce a
