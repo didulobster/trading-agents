@@ -181,11 +181,85 @@ ANALYST_OUTPUTS = {
 }
 
 
+def _news_caveats(state: TradingState) -> tuple[list[str], list[str]]:
+    """What the news leg found, and what it could not see, as (gaps, evidence).
+
+    The digest already records both; until this ran, neither reached the memo.
+    A truncated digest saw a sample of the window and a reader acting on the
+    memo alone had no way to know that — which is the whole reason
+    `truncated_by_cap` exists rather than the cap being silent.
+    """
+    digest: NewsDigest | None = state.get("news_digest")
+    if digest is None:
+        return [], []
+
+    gaps: list[str] = []
+    evidence: list[str] = []
+
+    if digest.truncated_by_cap:
+        gaps.append(
+            f"news digest is a SAMPLE, not the full window: the vendor returned "
+            f"{digest.raw_article_count} articles for "
+            f"{digest.window_start}..{digest.as_of_date} and the cap kept "
+            f"{len(digest.items)}, newest first — coverage skews to the most "
+            f"recent days and an older event may be absent entirely"
+        )
+
+    issues = state.get("news_digest_issues") or []
+    if issues:
+        gaps.append(
+            f"{len(issues)} digest integrity issue(s) — article(s) may be missing "
+            f"from the news evidence below: {'; '.join(issues[:3])}"
+            + (f" (+{len(issues) - 3} more)" if len(issues) > 3 else "")
+        )
+
+    summary: SentimentSummary | None = state.get("sentiment_summary")
+    if summary is None:
+        return gaps, evidence
+
+    if summary.article_count == 0:
+        # Distinct from "news did not run", and distinct from neutral news.
+        gaps.append(
+            f"no articles in the window were primarily about {summary.ticker} "
+            f"({summary.excluded_by_relevance} were excluded as not about it) — "
+            f"the net sentiment score of 0.00 is an ABSENCE of evidence, not "
+            f"evidence of neutrality, and must not be read as the latter"
+        )
+    else:
+        evidence.append(
+            f"news sentiment {summary.net_score:+.2f} over {summary.article_count} "
+            f"article(s) primarily about {summary.ticker} "
+            f"(+{summary.positive}/-{summary.negative}/={summary.neutral}) for "
+            f"{digest.window_start}..{digest.as_of_date}; "
+            f"{summary.excluded_by_relevance} further article(s) in the vendor "
+            f"feed were excluded as not primarily about the company"
+        )
+        if summary.article_count < 5:
+            gaps.append(
+                f"news sentiment rests on only {summary.article_count} article(s); "
+                f"a single item moves the score materially"
+            )
+
+    return gaps, evidence
+
+
 async def synthesizer_node(state: TradingState) -> dict:
     print(f"[synthesizer] STUB running for {state['ticker']}")
+    as_of = state.get("as_of_date")
+    if as_of is None:
+        # Same rule as news_node, for the same reason: date.today() belongs at
+        # the CLI boundary and nowhere else. Defaulting here would silently
+        # misdate every historical probe — the memo would claim to be current
+        # as of today while describing a window from months earlier.
+        raise ValueError(
+            "as_of_date missing from TradingState — refusing to date a memo by "
+            "wall-clock time. The memo's data_as_of_date must be the run's "
+            "analysis date, not whenever the synthesizer happened to execute."
+        )
     missing = sorted(
         name for name, key in ANALYST_OUTPUTS.items() if state.get(key) is None
     )
+    news_gaps, news_evidence = _news_caveats(state)
     technical = state.get("technical_report")
     memo = DecisionMemo(
         ticker=state["ticker"],
@@ -201,7 +275,7 @@ async def synthesizer_node(state: TradingState) -> dict:
         suggested_strategy="STUB",
         verdict=Verdict.HOLD,
         confidence=0.0,
-        data_as_of_date=date.today(),
+        data_as_of_date=as_of,
         data_gaps=[
             "synthesizer does not yet incorporate fundamentals_report into this memo — that's a later phase, not Phase 2's scope",
             "debate/risk nodes are still stubs — no real data",
@@ -210,8 +284,9 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"{name} analyst did not run — this memo carries no {name} evidence "
             f"at all, which is not the same as that evidence being neutral"
             for name in missing
-        ],
+        ]
+        + news_gaps,
         assumptions=[],
-        evidence=[],
+        evidence=news_evidence,
     )
     return {"decision_memo": memo}
