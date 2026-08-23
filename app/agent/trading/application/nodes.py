@@ -34,18 +34,26 @@ async def technical_node(state: TradingState) -> dict:
     ticker = state["ticker"]
     print(f"[technical] running for {ticker}")
 
-    df, source = await get_price_history(ticker)
+    df, source, dropped_bars = await get_price_history(ticker)
+    if dropped_bars:
+        print(f"[technical] dropped {dropped_bars} incomplete bar(s) from {source}")
     indicators = compute_indicators(df)
-    interpretation, flagged, cost_usd = await interpret_indicators(ticker, indicators)
+    interpretation, flagged, flagged_claims, cost_usd = await interpret_indicators(
+        ticker, indicators
+    )
+    if flagged_claims:
+        print(f"[technical] {len(flagged_claims)} contradicted claim(s): {flagged_claims}")
 
     report = TechnicalReport(
         ticker=ticker,
         as_of_date=df.index[-1].date(),
         data_source=source,
         bars_used=len(df),
+        bars_dropped_invalid=dropped_bars,
         indicators=indicators,
         interpretation=interpretation,
         interpretation_flagged_numbers=flagged,
+        interpretation_flagged_claims=flagged_claims,
     )
     vault_path = save_technical_report(report, cost_usd=cost_usd)
     print(f"[technical] saved report to {vault_path}")

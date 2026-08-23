@@ -9,6 +9,7 @@ documented open gap, not a missed assertion here.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pytest
@@ -207,12 +208,112 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
 
     items, issues, cost = await build_digest(articles, "ACN")
 
-    assert batch_sizes == [BATCH_SIZE, 3]
+    # a multiset, not a sequence: batches run concurrently, so the order they
+    # start in is not a property worth pinning
+    assert sorted(batch_sizes) == sorted([BATCH_SIZE, 3])
     assert len(items) == BATCH_SIZE + 3
     assert issues == []
     # one summed log line per run, not one per batch
     assert log_calls == [("ACN", "trading-news", 200, 100)]
     assert cost == 0.0123
+
+
+@pytest.mark.anyio
+async def test_item_order_follows_input_not_completion_order(monkeypatch):
+    """filter_and_dedup hands over articles newest-first and the digest must
+    keep that order, so truncation and the report both stay meaningful. With
+    concurrent batches, completion order no longer matches input order — here
+    the later batch finishes first, deliberately."""
+    articles = _articles(BATCH_SIZE + 3)
+
+    async def fake_summarize(client, batch, ticker):
+        # the small trailing batch returns immediately; the first batch yields
+        # to the event loop first, so it completes last
+        if len(batch) == BATCH_SIZE:
+            await asyncio.sleep(0.02)
+        return (
+            [{"index": i, "summary": batch[i]["headline"], "sentiment": "neutral",
+              "relevance": "primary"} for i in range(len(batch))],
+            _fake_usage(),
+        )
+
+    monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+
+    items, issues, _ = await build_digest(articles, "ACN")
+
+    assert issues == []
+    assert [i.headline for i in items] == [a["headline"] for a in articles]
+
+
+@pytest.mark.anyio
+async def test_one_unparseable_batch_costs_its_articles_not_the_run(monkeypatch):
+    """A malformed reply to one batch must not discard the other batches'
+    articles — or their spend. The loss is recorded as an issue rather than
+    passing silently as a shorter digest."""
+    articles = _articles(BATCH_SIZE + 3)
+
+    async def fake_summarize(client, batch, ticker):
+        if len(batch) == 3:
+            raise VendorError("Haiku returned non-JSON digest")
+        return (
+            [{"index": i, "summary": f"s{i}", "sentiment": "neutral", "relevance": "primary"}
+             for i in range(len(batch))],
+            _fake_usage(),
+        )
+
+    monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+
+    items, issues, cost = await build_digest(articles, "ACN")
+
+    assert len(items) == BATCH_SIZE          # the surviving batch is intact
+    assert cost == 0.01
+    assert len(issues) == 1
+    assert "batch of 3 article(s) failed" in issues[0]
+    assert "absent from this digest" in issues[0]
+    assert "headline 15" in issues[0]        # names where the hole is
+
+
+@pytest.mark.anyio
+async def test_every_batch_failing_raises_instead_of_looking_like_no_news(monkeypatch):
+    """An empty digest is a legitimate result for a quiet ticker, so it must
+    not also be what a total failure produces."""
+    async def always_fail(client, batch, ticker):
+        raise VendorError("Haiku returned non-JSON digest")
+
+    monkeypatch.setattr(news_digest_port, "_summarize_batch", always_fail)
+
+    with pytest.raises(VendorError, match="refusing to return an empty digest"):
+        await build_digest(_articles(BATCH_SIZE + 3), "ACN")
+
+
+@pytest.mark.anyio
+async def test_concurrency_is_bounded(monkeypatch):
+    """A full-cap run is 20 batches; they must not all be issued at once."""
+    articles = _articles(BATCH_SIZE * 8)
+    in_flight = 0
+    peak = 0
+
+    async def fake_summarize(client, batch, ticker):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return (
+            [{"index": i, "summary": f"s{i}", "sentiment": "neutral", "relevance": "primary"}
+             for i in range(len(batch))],
+            _fake_usage(),
+        )
+
+    monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+
+    await build_digest(articles, "ACN")
+
+    assert peak <= news_digest_port.MAX_CONCURRENT_BATCHES
+    assert peak > 1, "batches ran serially — the concurrency is not doing anything"
 
 
 @pytest.mark.anyio

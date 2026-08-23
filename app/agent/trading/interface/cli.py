@@ -4,7 +4,10 @@ import json
 from datetime import date
 
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
+from app.agent.trading.infrastructure.decision_memo_port import save_decision_memo
 from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
+from app.agent.trading.infrastructure.news_digest_port import save_sentiment_report
+from app.agent.trading.infrastructure.run_log import capture_terminal_log
 
 
 async def run(
@@ -93,6 +96,42 @@ async def run(
 
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
+    return result
+
+
+def _save_vault_artifacts(result: dict, run_log: str) -> list:
+    """Write the run's artifacts once the terminal log is complete.
+
+    Saved here rather than inside the nodes for two reasons: the log is only
+    whole at the end of the run, and a resumed or already-completed run
+    replays state without executing any node, which would otherwise write no
+    artifact at all for a run the user just asked for.
+    """
+    saved = []
+    digest = result.get("news_digest")
+    sentiment = result.get("sentiment_summary")
+    has_sentiment = digest is not None and sentiment is not None
+
+    if has_sentiment:
+        saved.append(
+            save_sentiment_report(
+                digest,
+                sentiment,
+                issues=result.get("news_digest_issues") or [],
+                provenance=run_log,
+            )
+        )
+
+    memo = result.get("decision_memo")
+    if memo is not None:
+        # The log is written exactly once per run. It rides with the
+        # sentiment report when there is one, and falls back to the memo
+        # otherwise (e.g. `--only technical`) so a run never loses its trace.
+        # Both land in the same dated folder, so the log is beside either.
+        saved.append(
+            save_decision_memo(memo, provenance=None if has_sentiment else run_log)
+        )
+    return saved
 
 
 def main() -> None:
@@ -117,7 +156,20 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
-    asyncio.run(run(args.ticker, args.thread_id, args.as_of, args.only))
+
+    # The capture wraps the whole run so the provenance file holds the real
+    # terminal session — node progress on stdout and the research agent's
+    # traces on stderr, interleaved in the order they actually happened.
+    # The "saved to" lines below are printed after the log is read, so they
+    # are the only run output the file does not contain.
+    with capture_terminal_log() as run_log:
+        result = asyncio.run(
+            run(args.ticker, args.thread_id, args.as_of, args.only)
+        )
+        saved = _save_vault_artifacts(result, run_log())
+
+    for path in saved:
+        print(f"[vault] saved {path}")
 
 
 if __name__ == "__main__":

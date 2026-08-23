@@ -25,7 +25,7 @@ def test_falls_back_to_finnhub_when_yfinance_hard_fails(monkeypatch):
         pdp, "_try_finnhub", lambda ticker: (_fake_df(SUFFICIENT_ROWS), "finnhub")
     )
 
-    df, source = asyncio.run(pdp.get_price_history("TICK"))
+    df, source, dropped = asyncio.run(pdp.get_price_history("TICK"))
 
     assert source == "finnhub"
     assert len(df) == SUFFICIENT_ROWS
@@ -42,7 +42,7 @@ def test_falls_back_to_finnhub_when_yfinance_returns_insufficient_bars(monkeypat
         pdp, "_try_finnhub", lambda ticker: (_fake_df(SUFFICIENT_ROWS), "finnhub")
     )
 
-    df, source = asyncio.run(pdp.get_price_history("TICK"))
+    df, source, dropped = asyncio.run(pdp.get_price_history("TICK"))
 
     assert source == "finnhub"
     assert len(df) == SUFFICIENT_ROWS
@@ -63,7 +63,7 @@ def test_yfinance_success_does_not_call_finnhub(monkeypatch):
     )
     monkeypatch.setattr(pdp, "_try_finnhub", _finnhub_spy)
 
-    df, source = asyncio.run(pdp.get_price_history("TICK"))
+    df, source, dropped = asyncio.run(pdp.get_price_history("TICK"))
 
     assert source == "yfinance"
     assert finnhub_called is False
@@ -87,5 +87,90 @@ def test_raises_vendor_error_when_both_vendors_return_insufficient_bars(monkeypa
         pdp, "_try_finnhub", lambda ticker: (_fake_df(INSUFFICIENT_ROWS), "finnhub")
     )
 
-    with pytest.raises(VendorError, match="only 40 bars available"):
+    with pytest.raises(VendorError, match="only 40 usable bars"):
         asyncio.run(pdp.get_price_history("TICK"))
+
+
+# ---------------------------------------------------------------------------
+# Incomplete bars — regression from a live MSFT run (2026-08-23)
+# ---------------------------------------------------------------------------
+
+def _df_with_nan_close_at(rows: int, pos: int) -> pd.DataFrame:
+    df = _fake_df(rows)
+    df.iloc[pos, df.columns.get_loc("Close")] = float("nan")
+    return df
+
+
+def test_bar_with_missing_close_is_dropped_and_counted(monkeypatch):
+    """yfinance returned MSFT with a NaN Close on bar 0. MACD seeds its EWMs
+    from the first observation and propagates NaN forward, so that one bar
+    voided all 251 later rows while SMA and RSI were untouched — the memo
+    said "MACD data is unavailable" with nothing to explain why."""
+    monkeypatch.setattr(
+        pdp,
+        "_try_yfinance",
+        lambda ticker: (_df_with_nan_close_at(SUFFICIENT_ROWS, 0), "yfinance"),
+    )
+
+    df, source, dropped = asyncio.run(pdp.get_price_history("TICK"))
+
+    assert dropped == 1
+    assert len(df) == SUFFICIENT_ROWS - 1
+    assert df["Close"].isna().sum() == 0
+    assert source == "yfinance"
+
+
+def test_bar_with_missing_volume_is_dropped_too(monkeypatch):
+    """volume_vs_20d_avg divides by a 20-bar mean; a NaN there produces NaN,
+    which pydantic accepts as a float and JSON cannot represent."""
+    df_in = _fake_df(SUFFICIENT_ROWS)
+    df_in.iloc[-1, df_in.columns.get_loc("Volume")] = float("nan")
+    monkeypatch.setattr(pdp, "_try_yfinance", lambda ticker: (df_in, "yfinance"))
+
+    df, _, dropped = asyncio.run(pdp.get_price_history("TICK"))
+
+    assert dropped == 1
+    assert df["Volume"].isna().sum() == 0
+
+
+def test_clean_history_reports_zero_dropped(monkeypatch):
+    monkeypatch.setattr(
+        pdp, "_try_yfinance", lambda ticker: (_fake_df(SUFFICIENT_ROWS), "yfinance")
+    )
+
+    df, _, dropped = asyncio.run(pdp.get_price_history("TICK"))
+
+    assert dropped == 0
+    assert len(df) == SUFFICIENT_ROWS
+
+
+def test_sufficiency_is_judged_on_usable_bars_not_returned_rows(monkeypatch):
+    """A frame padded to the minimum with unusable rows does not have the
+    history a 200-day SMA needs; accepting it would move the failure
+    downstream instead of reporting it here."""
+    padded = _fake_df(pdp.MIN_BARS_REQUIRED)
+    for pos in range(5):
+        padded.iloc[pos, padded.columns.get_loc("Close")] = float("nan")
+    monkeypatch.setattr(pdp, "_try_yfinance", lambda ticker: (padded, "yfinance"))
+    monkeypatch.setattr(pdp, "_try_finnhub", lambda ticker: (padded, "finnhub"))
+
+    with pytest.raises(VendorError, match="5 dropped as incomplete"):
+        asyncio.run(pdp.get_price_history("TICK"))
+
+
+def test_macd_survives_once_the_bad_bar_is_gone():
+    """The point of the drop: the indicator that the NaN destroyed comes back.
+    Runs the real computation, so it fails if EWM propagation returns."""
+    from app.agent.trading.application.technical_indicators import compute_indicators
+
+    rows = SUFFICIENT_ROWS
+    dirty = _df_with_nan_close_at(rows, 0)
+    # a trending series, so MACD is a real number rather than a flat zero
+    dirty["Close"] = [float("nan")] + [100.0 + i * 0.5 for i in range(rows - 1)]
+
+    assert compute_indicators(dirty).macd is None, "fixture no longer reproduces the bug"
+
+    cleaned, dropped = pdp._drop_invalid_bars(dirty)
+
+    assert dropped == 1
+    assert compute_indicators(cleaned).macd is not None

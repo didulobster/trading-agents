@@ -405,10 +405,10 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
         )
 
     async def fake_price_history(ticker: str):
-        return df, "fixture"
+        return df, "fixture", 0
 
     async def fake_interpret(ticker: str, indicators):
-        return "Stub interpretation, no numbers.", [], None
+        return "Stub interpretation, no numbers.", [], [], None
 
     # The news ports are stubbed at the same seam the real node calls, so
     # news_node's own body — the as_of guard, filter_and_dedup, the digest

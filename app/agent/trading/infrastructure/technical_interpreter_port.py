@@ -20,6 +20,15 @@ you, used exactly as given (you may round for readability, e.g. 62.37 -> "around
 If you are not given a value (None), do not guess or fabricate one — say the signal
 is unavailable.
 
+USE THE GIVEN RELATIONS: you will be shown a "Computed relations" block stating how
+the values compare to each other — whether price is above or below each moving
+average, how the moving averages sit relative to one another, and so on. Those
+comparisons are computed in code and are authoritative. State them as given. Do not
+work out any comparison yourself from the raw numbers, and never contradict the
+block. In particular, where price sits relative to a moving average and where the
+moving averages sit relative to each other are two different facts — do not
+substitute one for the other.
+
 MACD PRECISION: `macd`, `macd_signal`, and `macd_histogram` are three distinct values —
 never refer to any of them as just "the MACD". A negative `macd_histogram` means the
 MACD line is below its signal line (a bearish crossover), NOT that the MACD line
@@ -30,13 +39,79 @@ Respond in 3-5 sentences of plain-language interpretation. No preamble, no heade
 """
 
 
+_MA_LABELS = {"sma_50": "50-day average", "sma_200": "200-day average"}
+
+
+def derive_relations(ind: TechnicalIndicators) -> list[str]:
+    """State the comparisons in code rather than leaving them to the model.
+
+    A live MSFT run produced "trading above its 50-day moving average (around
+    419) but below its 200-day average (around 429)" while the last close was
+    483.24 — above both. The model had collapsed two different facts, where
+    price sits relative to each average and where the averages sit relative to
+    each other, into one wrong claim. Every number in that sentence was
+    genuine, so the flagged-numbers guard had nothing to catch.
+
+    This is the same move as joining news items by index instead of letting
+    the model retype them: whatever Python can decide, Python decides.
+    """
+    close = ind.last_close
+    rel: list[str] = []
+
+    for field, label in _MA_LABELS.items():
+        value = getattr(ind, field)
+        if value is not None:
+            side = "ABOVE" if close > value else "BELOW"
+            rel.append(f"last close ({close:.2f}) is {side} the {label} ({value:.2f})")
+
+    if ind.sma_50 is not None and ind.sma_200 is not None:
+        side = "ABOVE" if ind.sma_50 > ind.sma_200 else "BELOW"
+        rel.append(
+            f"the 50-day average ({ind.sma_50:.2f}) is {side} the 200-day average "
+            f"({ind.sma_200:.2f}) — this is a statement about the two averages, "
+            f"NOT about where price sits"
+        )
+
+    if ind.macd is not None and ind.macd_signal is not None:
+        side = "ABOVE" if ind.macd > ind.macd_signal else "BELOW"
+        rel.append(f"the MACD line ({ind.macd:.4f}) is {side} its signal line "
+                   f"({ind.macd_signal:.4f})")
+
+    if ind.rsi_14 is not None:
+        band = (
+            "OVERBOUGHT (>70)" if ind.rsi_14 > 70
+            else "OVERSOLD (<30)" if ind.rsi_14 < 30
+            else "NEITHER overbought nor oversold (between 30 and 70)"
+        )
+        rel.append(f"RSI ({ind.rsi_14:.2f}) is {band}")
+
+    if ind.bb_upper is not None and ind.bb_lower is not None:
+        where = (
+            "ABOVE the upper band" if close > ind.bb_upper
+            else "BELOW the lower band" if close < ind.bb_lower
+            else "WITHIN the bands"
+        )
+        rel.append(f"last close ({close:.2f}) is {where} "
+                   f"({ind.bb_lower:.2f} to {ind.bb_upper:.2f})")
+
+    if ind.volume_vs_20d_avg is not None:
+        side = "ABOVE" if ind.volume_vs_20d_avg > 1 else "BELOW"
+        rel.append(f"latest volume is {side} its 20-day average "
+                   f"({ind.volume_vs_20d_avg:.4f}x)")
+
+    return rel
+
+
 async def interpret_indicators(
     ticker: str, indicators: TechnicalIndicators
-) -> tuple[str, list[str], float | None]:
+) -> tuple[str, list[str], list[str], float | None]:
     client = AsyncAnthropic()
+    relations = "\n".join(f"- {r}" for r in derive_relations(indicators))
     prompt = (
         f"Ticker: {ticker}\n"
         f"Indicators:\n{indicators.model_dump_json(indent=2)}\n\n"
+        f"Computed relations (authoritative — state these as given, do not\n"
+        f"re-derive them from the numbers above):\n{relations}\n\n"
         "Provide the interpretation now."
     )
     response = await client.messages.create(
@@ -56,7 +131,85 @@ async def interpret_indicators(
     cost = log_cost(ticker, "trading-technical", usage)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
-    return interpretation, flagged, cost
+    flagged_claims = flag_contradicted_claims(interpretation, indicators)
+    return interpretation, flagged, flagged_claims, cost
+
+
+# A claim that something is above/below an N-day average. Non-greedy up to the
+# period so "above its 50-day moving average" and "below the 200-day" both
+# match, but the search never runs past a sentence boundary.
+_PRICE_VS_MA = re.compile(r"\b(above|below)\b[^.;]{0,40}?\b(\d+)-day", re.I)
+
+# The same words describe a different claim when an average is the subject:
+# "the 50-day moving average is below the 200-day" compares two averages, and
+# checking it against price would flag correct prose. The exclusion has to be
+# tight — requiring the average-plus-verb to sit immediately against the
+# comparator — because the real failure read "...moving average (around 419)
+# but below its 200-day average", where an average appears shortly before
+# `below` and yet price is still the subject. A looser rule would have
+# skipped exactly the sentence this guard exists to catch.
+# Both halves of this pattern were forced by live output, not designed up
+# front, and each round of tightening is worth keeping in view:
+#
+#   1. Enumerating verbs failed. The model wrote "the 50-day average SITTING
+#      below the 200-day average" — a participle, not the finite "sits" — and
+#      correct prose was reported as a contradiction. Hence up to two bare
+#      words instead of a verb list.
+#   2. Requiring the noun failed. The next run wrote "the 50-day SITTING below
+#      the 200-day", eliding "average" entirely. Hence the noun is optional.
+#
+# What still separates the two claims is what sits between the average and
+# the comparator. In the real error it was "(around 419) but " — parentheses
+# and a digit, not bare words — so the exclusion does not fire and the false
+# claim is caught. Two words is the whole margin; widening it would start
+# swallowing "...50-day average but the price is below its 200-day".
+#
+# A guard that cries wolf is worse than no guard: it teaches the reader to
+# skip it, and then it is not there for the one that matters.
+_MA_IS_SUBJECT = re.compile(
+    r"\d+-day(?:\s+(?:simple|moving|exponential))*(?:\s+(?:average|ma|sma)s?)?\s+"
+    r"(?:\w+\s+){0,2}$",
+    re.I,
+)
+
+
+def flag_contradicted_claims(
+    text: str, indicators: TechnicalIndicators
+) -> list[str]:
+    """Flag prose that contradicts a relation computed from the indicators.
+
+    Deliberately narrower than the numbers guard, and a different kind of
+    check: it does not ask whether a number is real, it asks whether a claim
+    is true. That only works where the ground truth is unambiguous, so it
+    covers one family of statement — price versus a moving average — which is
+    where the observed error occurred and where "above" and "below" have no
+    room for interpretation.
+
+    Flags rather than blocks, like the numbers guard: a false positive should
+    cost a reviewer a glance, not a run.
+    """
+    close = indicators.last_close
+    flags: list[str] = []
+
+    for match in _PRICE_VS_MA.finditer(text):
+        direction, period = match.group(1).lower(), match.group(2)
+        value = getattr(indicators, f"sma_{period}", None)
+        if value is None:
+            continue  # no such indicator (or not computed) — nothing to check
+        if _MA_IS_SUBJECT.search(text[: match.start()]):
+            continue  # comparing two averages, not price against one
+
+        actually_above = close > value
+        if actually_above == (direction == "above"):
+            continue
+
+        flags.append(
+            f"claims price is {direction} the {period}-day average, but last "
+            f"close {close:.2f} is {'above' if actually_above else 'below'} "
+            f"sma_{period} {value:.2f}"
+        )
+
+    return flags
 
 
 # A number with an optional sign, where '-' is read as a sign only if the
@@ -169,6 +322,16 @@ def _format_technical_markdown(report: TechnicalReport) -> str:
         "",
         report.interpretation,
     ]
+    if report.interpretation_flagged_claims:
+        lines += [
+            "",
+            "## Contradicted Claims",
+            "",
+            "Statements above that contradict a relation computed from the "
+            "indicators. Unlike a flagged number, these use real values to say "
+            "something false — treat the interpretation as unreliable here.",
+            "",
+        ] + [f"- {c}" for c in report.interpretation_flagged_claims]
     if report.interpretation_flagged_numbers:
         lines += [
             "",

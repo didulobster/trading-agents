@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from app.agent.researcher import AGENT_MODEL, UsageSummary, log_cost
+from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
 from app.agent.trading.domain.errors import VendorError
-from app.agent.trading.domain.news_digest import NewsItem
+from app.agent.trading.domain.news_digest import (
+    AGGREGATED_RELEVANCE,
+    NewsDigest,
+    NewsItem,
+    SentimentSummary,
+)
 
 BATCH_SIZE = 15
 DIGEST_MAX_TOKENS = 1500
 NEWS_BUDGET_USD = 0.20
+# Enough parallelism to keep a full-cap run (20 batches) to a few waves,
+# low enough not to arrive as one burst against the account's rate limit.
+MAX_CONCURRENT_BATCHES = 5
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral"}
 VALID_RELEVANCE = {"primary", "mentioned", "unrelated"}
@@ -193,10 +203,14 @@ def _join(
 
 
 def _assert_within_budget(cost: float | None) -> None:
-    """Typo-catcher, not the real constraint: at ~$0.0003/article the cap in
-    news_data_port (MAX_ARTICLES) binds ~10x before this budget does. What
-    this catches is a model-string change that silently routes the digest to
-    an expensive model."""
+    """Typo-catcher, not the real constraint. MAX_ARTICLES is now derived from
+    this budget — a full-cap run costs ~68% of it — so volume alone cannot
+    trip this. What it still catches is a model-string change that silently
+    routes the digest to an expensive model.
+
+    It fires only after the batches have been paid for, which is precisely
+    why the cap has to be the thing that bounds spend: an assertion here
+    cannot refund a run it failed."""
     if cost is not None and cost > NEWS_BUDGET_USD:
         raise AssertionError(
             f"news digest cost ${cost:.4f} exceeds the ${NEWS_BUDGET_USD:.2f} "
@@ -209,6 +223,12 @@ async def build_digest(
 ) -> tuple[list[NewsItem], list[str], float | None]:
     """Batch the cleaned articles through Haiku and join by index.
 
+    Batches run concurrently. At MAX_ARTICLES a run is 20 calls, and issuing
+    them one at a time would put the node into the minutes — the batches are
+    independent, so the only thing serial execution buys is latency.
+    Concurrency is bounded so a large run doesn't arrive as one burst; the
+    SDK's own retries handle any rate limiting that still occurs.
+
     Usage is summed across batches into ONE cost-log line per run, so the
     per-run budget check doesn't have to reassemble per-batch lines.
     """
@@ -220,9 +240,40 @@ async def build_digest(
     items: list[NewsItem] = []
     issues: list[str] = []
 
-    for start in range(0, len(articles), BATCH_SIZE):
-        batch = articles[start : start + BATCH_SIZE]
-        parsed, batch_usage = await _summarize_batch(client, batch, ticker)
+    batches = [
+        articles[start : start + BATCH_SIZE]
+        for start in range(0, len(articles), BATCH_SIZE)
+    ]
+    limit = asyncio.Semaphore(MAX_CONCURRENT_BATCHES)
+
+    async def run_batch(batch: list[dict[str, Any]]):
+        async with limit:
+            # A batch whose response won't parse costs that batch's articles,
+            # not the run. Losing 20 batches' spend to one malformed reply is
+            # a bad trade, and the loss is recorded as an issue rather than
+            # passing silently as a shorter digest. Only VendorError is caught
+            # — that is the malformed-output case. API, auth and exhausted-
+            # retry errors are systemic and still fail the run.
+            try:
+                return await _summarize_batch(client, batch, ticker)
+            except VendorError as e:
+                return e
+
+    results = await asyncio.gather(*(run_batch(b) for b in batches))
+
+    # gather preserves input order, so items stay in the newest-first order
+    # filter_and_dedup established, regardless of completion order.
+    succeeded = 0
+    for batch, result in zip(batches, results):
+        if isinstance(result, VendorError):
+            issues.append(
+                f"batch of {len(batch)} article(s) failed and is absent from "
+                f"this digest ({result}); first headline: "
+                f"{batch[0].get('headline', '')[:60]!r}"
+            )
+            continue
+        succeeded += 1
+        parsed, batch_usage = result
         usage.input_tokens += batch_usage.input_tokens
         usage.cache_write_tokens += batch_usage.cache_creation_input_tokens or 0
         usage.cache_read_tokens += batch_usage.cache_read_input_tokens or 0
@@ -232,6 +283,148 @@ async def build_digest(
         items.extend(batch_items)
         issues.extend(batch_issues)
 
+    if not succeeded:
+        # Every batch failing is a systemic problem, not a bad reply. Returning
+        # an empty digest here would be indistinguishable from a quiet ticker.
+        raise VendorError(
+            f"all {len(batches)} digest batch(es) failed for {ticker} — "
+            f"refusing to return an empty digest that would read as no news"
+        )
+
     cost = log_cost(ticker, "trading-news", usage)
     _assert_within_budget(cost)
     return items, issues, cost
+
+
+def _format_sentiment_markdown(
+    digest: NewsDigest,
+    summary: SentimentSummary,
+    issues: list[str] | None = None,
+) -> str:
+    """Render the digest and its aggregate for the vault.
+
+    Every number that qualifies the signal is on the page, not just the
+    signal: a +0.60 over four articles and a +0.60 over forty are different
+    claims, and the reader cannot tell them apart from the score.
+    """
+    counted = [i for i in digest.items if i.relevance in AGGREGATED_RELEVANCE]
+    other = [i for i in digest.items if i.relevance not in AGGREGATED_RELEVANCE]
+    window_days = (digest.as_of_date - digest.window_start).days
+
+    lines = [
+        f"# {digest.ticker} — News Sentiment",
+        f"**Analysis date (as-of):** {digest.as_of_date}",
+        f"**Window:** {digest.window_start} → {digest.as_of_date} ({window_days} days)",
+        f"**Source:** {digest.data_source}",
+        "",
+        "## Signal",
+        "",
+        "| Measure | Value |",
+        "|---|---|",
+        f"| Net score | {summary.net_score:+.3f} |",
+        f"| Positive | {summary.positive} |",
+        f"| Negative | {summary.negative} |",
+        f"| Neutral | {summary.neutral} |",
+        f"| Articles counted | {summary.article_count} |",
+        f"| Excluded as not primarily about {digest.ticker} | "
+        f"{summary.excluded_by_relevance} |",
+        "",
+    ]
+
+    caveats = []
+    if summary.article_count == 0:
+        caveats.append(
+            "**No articles were primarily about this company.** A net score of "
+            "0.000 here is an absence of evidence, not neutral evidence — do not "
+            "read it as the market being indifferent."
+        )
+    elif summary.article_count < 5:
+        caveats.append(
+            f"**Thin sample.** The score rests on {summary.article_count} "
+            f"article(s); a single item moves it materially."
+        )
+    if digest.truncated_by_cap:
+        caveats.append(
+            f"**Truncated.** The vendor returned {digest.raw_article_count} "
+            f"articles and the cap kept the newest {len(digest.items)}, so this "
+            f"digest is a sample of the window rather than all of it. Coverage "
+            f"is skewed toward the most recent days."
+        )
+    if issues:
+        caveats.append(
+            f"**{len(issues)} digest integrity issue(s)** — see the section below; "
+            f"articles may be missing from this digest."
+        )
+    if caveats:
+        lines += ["## Caveats", ""] + [f"- {c}" for c in caveats] + [""]
+
+    lines += [
+        "## Coverage",
+        "",
+        "| Stage | Count |",
+        "|---|---|",
+        f"| Returned by vendor | {digest.raw_article_count} |",
+        f"| Dropped: outside the window | {digest.dropped_out_of_window} |",
+        f"| Dropped: missing/zero timestamp | {digest.dropped_missing_date} |",
+        f"| Kept after filter, dedup and cap | {digest.deduped_count} |",
+        f"| In this digest | {len(digest.items)} |",
+        "",
+    ]
+
+    lines += [f"## Articles about {digest.ticker} ({len(counted)})", ""]
+    if counted:
+        for i in counted:
+            lines += [
+                f"### [{i.published_date}] {i.headline}",
+                f"*{i.sentiment}* · {i.source} · [link]({i.url})",
+                "",
+                i.summary,
+                "",
+            ]
+    else:
+        lines += ["_None. Nothing in the window was primarily about this company._", ""]
+
+    if other:
+        lines += [
+            f"## Other coverage in the feed ({len(other)})",
+            "",
+            "Tagged with this ticker by the vendor but not primarily about the "
+            "company, so excluded from the score. Kept for context.",
+            "",
+            "| Date | Relevance | Sentiment | Headline |",
+            "|---|---|---|---|",
+        ]
+        for i in other:
+            headline = i.headline.replace("|", "\\|")
+            lines.append(
+                f"| {i.published_date} | {i.relevance} | {i.sentiment} | {headline} |"
+            )
+        lines.append("")
+
+    if issues:
+        lines += [
+            "## Digest integrity issues",
+            "",
+            "Structural problems in the model's response, surfaced rather than "
+            "absorbed. A missing index means an article was dropped from the digest.",
+            "",
+        ] + [f"- {i}" for i in issues] + [""]
+
+    return "\n".join(lines)
+
+
+def save_sentiment_report(
+    digest: NewsDigest,
+    summary: SentimentSummary,
+    issues: list[str] | None = None,
+    cost_usd: float | None = None,
+    provenance: str | None = None,
+) -> Path:
+    content = _format_sentiment_markdown(digest, summary, issues)
+    return _save_output(
+        content,
+        digest.ticker.upper(),
+        "sentiment",
+        cost_usd=cost_usd,
+        provenance=provenance,
+    )

@@ -24,8 +24,24 @@ class TechnicalReport(BaseModel):
     as_of_date: date
     data_source: str = Field(description="'yfinance' or 'finnhub'")
     bars_used: int = Field(description="count of daily bars the calc was run on")
+    bars_dropped_invalid: int = Field(
+        default=0,
+        description="bars the vendor returned with a missing Close or Volume, "
+                    "dropped before computing. Non-zero means the vendor's "
+                    "history had holes — worth knowing, because a single bad "
+                    "bar can silently void an EWM-based indicator like MACD.",
+    )
     indicators: TechnicalIndicators
     interpretation: str
+    interpretation_flagged_claims: list[str] = Field(
+        default_factory=list,
+        description="statements in `interpretation` that contradict a relation "
+                    "computed from `indicators` (e.g. calling price below a "
+                    "moving average it is above). Distinct from "
+                    "`interpretation_flagged_numbers`: those are numbers with "
+                    "no source, these are claims that are false about numbers "
+                    "that are real.",
+    )
     interpretation_flagged_numbers: list[str] = Field(
         default_factory=list,
         description="numbers in `interpretation` that could not be matched "
