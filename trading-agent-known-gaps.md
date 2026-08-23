@@ -114,7 +114,33 @@ when actually closed, not when they become inconvenient.
 
 ## Phase 5 — Bull/Bear Debate (logged 2026-08-23)
 
-1. **Convergence is mitigated, not eliminated.** The §5 guardrails raise the
+1. **A crash in the first moments of a super-step loses the previous turn's
+   completed work.** Found by running the two forced-crash resume tests
+   (AVGO, 2026-08-23), and it contradicts what the Phase 5 design note
+   predicted.
+
+   | crash point | turns committed | on resume |
+   |---|---|---|
+   | at node entry for turn 2 (variant A) | **1** | turn 1 re-run |
+   | after the LLM call for turn 2 (variant B) | **2** | turn 2 re-run |
+
+   In variant A the log shows turn 1 completing and printing, yet the
+   checkpoint holds only turn 0 and `snap.next` is `('bear_turn',)`. The
+   previous super-step's write was still pending when the process died. In
+   variant B the ~2-second LLM call gave that commit time to land, so turn 1
+   survived. **The last checkpoint can therefore lag one turn behind the last
+   COMPLETED turn** — "resumes from the last per-round checkpoint" holds, but
+   the last checkpoint is not always the last thing you saw on screen.
+
+   Consequences, none of them corruption: the resumed transcript is
+   contiguous and correct every time, and the cost is exactly one wasted LLM
+   call per crash ($0.0074 measured, logged as a normal `trading-debate-*`
+   entry, so the spend is visible but indistinguishable from a kept turn).
+   The design note's variant-A assertions (`len(debate_turns) == 2`,
+   `snap.next == ("bull_turn",)`) are wrong for this setup and should not be
+   written as a regression test.
+
+2. **Convergence is mitigated, not eliminated.** The §5 guardrails raise the
    cost of unjustified agreement — a concession must name a real opposing
    `claim_id`, a claim must quote the report it cites, a figure must appear
    in the evidence pack — but they cannot make two instances of one base
@@ -122,7 +148,7 @@ when actually closed, not when they become inconvenient.
    converge on a correct conclusion and one where they converge from shared
    bias are indistinguishable from inside the transcript.
 
-2. **The number guard has an unmeasured false-positive rate.** Containment
+3. **The number guard has an unmeasured false-positive rate.** Containment
    plus a precision-scoped rounding clearance plus the Phase 3 percent
    transforms. Three classes found and closed so far, each from live output:
    rounding ("RSI of 41.2" for 41.2033), percent-against-percent, and
@@ -139,7 +165,7 @@ when actually closed, not when they become inconvenient.
    trains readers to skip the flags; if it does, the answer is a separate
    "derived from pack values" category rather than dropping the rule.
 
-3. **Both sides held for all six turns; nothing conceded, nothing
+4. **Both sides held for all six turns; nothing conceded, nothing
    sharpened.** The first live debate produced `stance="hold"` 6/6 and zero
    concessions. The §5(a) guard makes an *unjustified* concession
    impossible, but nothing makes a justified one attractive, and total
@@ -148,7 +174,7 @@ when actually closed, not when they become inconvenient.
    materialize), so the early-stop lever is live; the stance field is not
    yet doing any work. Watch across more runs before changing the prompt.
 
-4. **Debate quality is now tied to `LLM_CLAUDE_MODEL`, and Haiku 4.5 makes
+5. **Debate quality is now tied to `LLM_CLAUDE_MODEL`, and Haiku 4.5 makes
    analytical errors Sonnet 5 did not.** `DEBATE_MODEL` follows the
    project-wide setting as of 2026-08-23. Mechanically Haiku is fine — no
    retries, valid payloads, `claim_id` reuse, `rebuts` populated, ~$0.005 a
@@ -161,48 +187,104 @@ when actually closed, not when they become inconvenient.
    was real. The error is in the reasoning, and nothing in this phase
    catches that.
 
-   Two things follow. First, the cheaper model buys a transcript that looks
-   like a debate and is wrong on the facts — read one by hand after any model
-   change, because the exit criteria test termination and resume, not
-   argument quality. Second, the evidence pack renders the technical
-   indicators as raw JSON and **throws away `derive_relations()`** — the very
-   block Phase 3 added because a model asked to compare indicator values
-   itself gets it wrong. Putting the relations block into the pack is the
-   obvious fix and is deliberately not done here.
+   **[Mitigated 2026-08-23]** The pack rendered the indicators as raw JSON
+   and threw `derive_relations()` away — the very block Phase 3 added because
+   a model asked to compare indicator values itself gets it wrong. It is now
+   the first thing in the technical section, marked authoritative, with a
+   matching rule in the system prompt. *Re-verified live on the same
+   indicators, twice:* both sides now write "neither overbought nor
+   oversold", and the RSI claim id changed from `avgo-rsi-oversold` to
+   `avgo-rsi-neutral`.
 
-5. **`evidence_quote` is a single contiguous span, but technical evidence
-   often is not.** A claim like "price is above its 200-day average" rests on
-   two fields that sit apart in the pack, so an honest citation of both is a
-   splice and gets flagged. Both live models did it — Sonnet with an
-   ellipsis, Haiku with a comma. The flag is technically correct (nothing in
-   the report puts those values side by side) but it is not fabrication, and
-   the shape will recur on every trend claim. Either allow a list of quotes
-   per claim, or render the indicators so related values are adjacent.
+   *Residual, and the reason this stays on the list:* only the relations that
+   `derive_relations` computes are protected — price vs the two SMAs, the
+   SMAs against each other, MACD vs signal, the RSI band, the Bollinger
+   position, volume vs its average. Any other comparison a debater makes is
+   still its own unguarded reasoning, and nothing downstream re-verifies it.
+   The general point stands: a cheaper model buys a transcript that can look
+   like a debate and be wrong on the facts, so read one by hand after any
+   model change — the exit criteria test termination and resume, not
+   argument quality.
 
-6. **Containment cannot catch a correctly-quoted figure used wrongly.**
+6. **[Mitigated 2026-08-23] `evidence_quote` is a single contiguous span,
+   but technical evidence often is not.** A claim like "price is above its
+   200-day average" rests on two fields that sit apart in the JSON, so an
+   honest citation of both was a splice and got flagged. Both live models did
+   it — Sonnet with an ellipsis, Haiku with a comma.
+
+   The relations block fixed this as a side effect: one relation line carries
+   both values *and* the comparison between them, so it quotes cleanly.
+   *Measured on the same two Haiku turns:* `unquoted_evidence` went from 4/4
+   and 3/5 claims to **zero on both turns**.
+
+   *Residual, and bigger than expected. Measured on the first FULL-pack run
+   (AVGO, 2026-08-23, all four reports, 61k-char pack, 25 claims):*
+
+   | source | claims | unverified | rate |
+   |---|---|---|---|
+   | fundamentals | 17 | 7 | **41%** |
+   | news | 1 | 0 | 0% |
+   | none | 7 | 0 | — |
+   | technical | **0** | 0 | — |
+
+   Every one of the 7 is a true positive on inspection: three are explicit
+   `...` ellipses, one joins a section header to a table row, and three are
+   verbatim for 88 of 112 characters and then append a clause ("which
+   exceeds the 20pp threshold") that is nowhere in the memo. The guard is
+   working; the model cannot reliably quote long prose.
+
+   Note the technical row: **zero technical claims**, so this run did not
+   exercise the relations block at all. The 4/4 → 0 improvement measured on a
+   technical-only pack says nothing about a full one. A fundamentals memo is
+   23k characters of prose and it crowds everything else out.
+
+   Allowing a list of quotes per claim remains the real fix, and it now looks
+   necessary rather than nice: at 41% the caveat "7 claim(s) cite a report but
+   the quoted span is not in it" is the memo's loudest debate signal.
+
+7. **Containment cannot catch a correctly-quoted figure used wrongly.**
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
 
-7. **`claim_id` reuse is prompt-dependent.** A model inventing a fresh slug
-   for a restated claim inflates `productive` and defeats the early stop. It
-   fails toward *more* rounds, capped at `MAX_TURNS` — a safe direction, but
-   the early-stop lever is weaker than it reads.
+8. **`claim_id` reuse is prompt-dependent, and on a full pack it collapsed
+   entirely.** A model inventing a fresh slug for a restated claim inflates
+   `productive` and defeats the early stop. It fails toward *more* rounds,
+   capped at `MAX_TURNS` — a safe direction, but the lever is weaker than it
+   reads.
 
-8. **Order bias is unquantified.** Bull speaks first and bear gets the last
+   *Measured:* on a technical-only pack, ids were reused across turns
+   (`above-200sma` appeared in turns 0, 2 and 4). On the full-pack run,
+   **25 claims produced 25 distinct ids — zero reuse** — so all six turns
+   scored `productive=True` and the unproductive early stop could not fire
+   under any circumstances. The debate was still engaging rather than talking
+   past itself (`rebuts` grew 0, 2, 2, 3, 3, 4), so the turns were not
+   wasted; the cost lever simply is not there. Treat `MAX_ROUNDS` as the only
+   real bound on debate spend.
+
+9. **The debate barely used the news evidence.** On the full-pack run, of 25
+   claims: 17 cited fundamentals, 7 cited nothing, **1 cited news**, and 0
+   cited technical — against a news leg that had just scored 61 primary
+   articles at +0.48 sentiment and cost $0.075. Whatever the pack costs to
+   assemble, the debaters read the longest section and largely ignore the
+   rest. Ordering, length-balancing, or per-source claim quotas are all
+   plausible fixes and none is obviously right; measure another ticker before
+   choosing.
+
+10. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
    here before building any machinery.
 
-9. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
+11. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
    inside `run_agent`; the debate never calls it. The number guard is the
    only check between a fabricated debate figure and the memo.
 
-10. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
+12. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
    still "STUB" — Phase 7's job. Phase 5 delivers the transcript to the
    vault and the *caveats* to the memo, so a capped or skipped debate is
    visible; the argument itself is not.
 
-11. **The model cannot emit an empty string into a tool call.** Asked for one
+13. **The model cannot emit an empty string into a tool call.** Asked for one
    it writes a stray `</antml parameter>` marker instead, which landed in
    `concession_trigger` on 4 of 4 live turns and tripped the concession
    guard on turns that conceded nothing. Worked around with a `'none'`
@@ -210,14 +292,14 @@ when actually closed, not when they become inconvenient.
    behaviour, found live — if a future model stops doing it the workaround
    is harmless, but the sentinel is load-bearing today.
 
-12. **Strict tool schemas cost the count bounds.** `strict: true` was needed
+14. **Strict tool schemas cost the count bounds.** `strict: true` was needed
    to stop the model flattening the payload (DebateClaim fields hoisted to
    the top level, `stance` missing, on 3 of 3 turns), and it rejects
    `minItems`/`maxItems`. The 1..5 claim bound now reaches the model only as
    prose in the field description; pydantic still enforces it on the way in,
    so a violation costs the one retry rather than passing.
 
-13. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
+15. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
     from `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6).
     The debate is the first node to read all four reports side by side, so it
     is the first place a mixed-vintage evidence pack can produce a

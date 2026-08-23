@@ -40,6 +40,7 @@ from app.agent.trading.domain.debate import DebateTurn, DebateTurnPayload, Side
 from app.agent.trading.infrastructure.technical_interpreter_port import (
     _PERIOD_LABEL,
     _flag_unmatched_numbers_against,
+    derive_relations,
 )
 
 # The project-wide model from .env (LLM_CLAUDE_MODEL), same as every other
@@ -177,6 +178,12 @@ HARD RULES — these are checked in code after you answer:
    compute, re-derive, annualize, or restate a number in a different unit.
    Your job is to cite the analysts' numbers, not to produce new ones. A
    figure you derived is, by construction, unbacked.
+1a. Where the pack gives a "Computed relations" block, those comparisons are
+   worked out in code and are AUTHORITATIVE. State them as given. Do not
+   work out a comparison yourself from the raw indicator values, and never
+   contradict the block — including the bands it names, such as whether RSI
+   is overbought or oversold. A relation line is also the cleanest thing to
+   quote for a claim about two values, because it carries both.
 2. Every claim carries an `evidence_ref`. If the claim rests on a report,
    name that report and quote it: `evidence_quote` must be a VERBATIM,
    CONTIGUOUS span of at most 25 words copied out of that report — never two
@@ -234,10 +241,35 @@ def _not_run(name: str) -> str:
 
 
 def _render_technical(report) -> str:
+    """Relations FIRST, then the raw values, then the prose.
+
+    The relations block is Phase 3's `derive_relations` — the comparisons
+    computed in Python precisely because a model asked to work them out from
+    raw numbers gets them wrong. The pack used to hand the debaters the JSON
+    and nothing else, throwing that away, and on the first live Haiku turns
+    BOTH sides called an RSI of 38.7 "oversold". It is not, and the relations
+    block says so in as many words. Every number in those turns was real, so
+    the numeric guard had nothing to catch — the same shape as the MSFT
+    moving-average error that made `derive_relations` exist.
+
+    It also gives the debaters something QUOTABLE. `evidence_quote` is a
+    single contiguous span, and a trend claim rests on two values that sit
+    far apart in the JSON, so an honest citation of both was a splice and got
+    flagged. One relation line carries both values and the comparison
+    between them.
+
+    The JSON stays. It is the only source of full precision, and a claim that
+    turns on the fourth decimal has nowhere else to cite.
+    """
+    relations = "\n".join(f"- {r}" for r in derive_relations(report.indicators))
     return (
         f"TECHNICAL (as of {report.as_of_date}, {report.data_source}, "
         f"{report.bars_used} bars):\n"
-        f"Indicators: {report.indicators.model_dump_json()}\n"
+        f"Computed relations (AUTHORITATIVE — worked out in code, not by a "
+        f"model. State them as given; never contradict them, and never "
+        f"re-derive a comparison yourself from the raw values below):\n"
+        f"{relations}\n"
+        f"Indicators (full precision): {report.indicators.model_dump_json()}\n"
         f"Interpretation: {report.interpretation}"
     )
 

@@ -63,6 +63,11 @@ async def _debate_turn(state: TradingState, side: Side) -> dict:
     # that indices are exactly range(len(turns)); anything else means the
     # add-reducer double-applied and debate_turns needs a
     # dedup-on-turn_index reducer rather than plain operator.add.
+    #
+    # Two live crash-and-resume runs (2026-08-23) never tripped this, which
+    # is the outcome that lets plain `add` stay. Keep it anyway: it costs a
+    # list comparison per turn and it is the only thing that would catch the
+    # double-apply loudly rather than as a transcript one turn too long.
     indices = [t.turn_index for t in turns]
     if indices != list(range(turn_index)):
         raise RuntimeError(
