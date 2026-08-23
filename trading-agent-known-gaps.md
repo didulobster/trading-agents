@@ -191,35 +191,74 @@ when actually closed, not when they become inconvenient.
    *Measured on the same two Haiku turns:* `unquoted_evidence` went from 4/4
    and 3/5 claims to **zero on both turns**.
 
-   *Residual:* a claim spanning two DIFFERENT reports — a fundamentals figure
-   against a technical one — still has no single quotable span, and the
-   cross-report claim is exactly the kind a debate is for. Allowing a list of
-   quotes per claim is the real fix.
+   *Residual, and bigger than expected. Measured on the first FULL-pack run
+   (AVGO, 2026-08-23, all four reports, 61k-char pack, 25 claims):*
+
+   | source | claims | unverified | rate |
+   |---|---|---|---|
+   | fundamentals | 17 | 7 | **41%** |
+   | news | 1 | 0 | 0% |
+   | none | 7 | 0 | — |
+   | technical | **0** | 0 | — |
+
+   Every one of the 7 is a true positive on inspection: three are explicit
+   `...` ellipses, one joins a section header to a table row, and three are
+   verbatim for 88 of 112 characters and then append a clause ("which
+   exceeds the 20pp threshold") that is nowhere in the memo. The guard is
+   working; the model cannot reliably quote long prose.
+
+   Note the technical row: **zero technical claims**, so this run did not
+   exercise the relations block at all. The 4/4 → 0 improvement measured on a
+   technical-only pack says nothing about a full one. A fundamentals memo is
+   23k characters of prose and it crowds everything else out.
+
+   Allowing a list of quotes per claim remains the real fix, and it now looks
+   necessary rather than nice: at 41% the caveat "7 claim(s) cite a report but
+   the quoted span is not in it" is the memo's loudest debate signal.
 
 6. **Containment cannot catch a correctly-quoted figure used wrongly.**
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
 
-7. **`claim_id` reuse is prompt-dependent.** A model inventing a fresh slug
-   for a restated claim inflates `productive` and defeats the early stop. It
-   fails toward *more* rounds, capped at `MAX_TURNS` — a safe direction, but
-   the early-stop lever is weaker than it reads.
+7. **`claim_id` reuse is prompt-dependent, and on a full pack it collapsed
+   entirely.** A model inventing a fresh slug for a restated claim inflates
+   `productive` and defeats the early stop. It fails toward *more* rounds,
+   capped at `MAX_TURNS` — a safe direction, but the lever is weaker than it
+   reads.
 
-8. **Order bias is unquantified.** Bull speaks first and bear gets the last
+   *Measured:* on a technical-only pack, ids were reused across turns
+   (`above-200sma` appeared in turns 0, 2 and 4). On the full-pack run,
+   **25 claims produced 25 distinct ids — zero reuse** — so all six turns
+   scored `productive=True` and the unproductive early stop could not fire
+   under any circumstances. The debate was still engaging rather than talking
+   past itself (`rebuts` grew 0, 2, 2, 3, 3, 4), so the turns were not
+   wasted; the cost lever simply is not there. Treat `MAX_ROUNDS` as the only
+   real bound on debate spend.
+
+8. **The debate barely used the news evidence.** On the full-pack run, of 25
+   claims: 17 cited fundamentals, 7 cited nothing, **1 cited news**, and 0
+   cited technical — against a news leg that had just scored 61 primary
+   articles at +0.48 sentiment and cost $0.075. Whatever the pack costs to
+   assemble, the debaters read the longest section and largely ignore the
+   rest. Ordering, length-balancing, or per-source claim quotas are all
+   plausible fixes and none is obviously right; measure another ticker before
+   choosing.
+
+9. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
    here before building any machinery.
 
-9. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
+10. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
    inside `run_agent`; the debate never calls it. The number guard is the
    only check between a fabricated debate figure and the memo.
 
-10. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
+11. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
    still "STUB" — Phase 7's job. Phase 5 delivers the transcript to the
    vault and the *caveats* to the memo, so a capped or skipped debate is
    visible; the argument itself is not.
 
-11. **The model cannot emit an empty string into a tool call.** Asked for one
+12. **The model cannot emit an empty string into a tool call.** Asked for one
    it writes a stray `</antml parameter>` marker instead, which landed in
    `concession_trigger` on 4 of 4 live turns and tripped the concession
    guard on turns that conceded nothing. Worked around with a `'none'`
@@ -227,14 +266,14 @@ when actually closed, not when they become inconvenient.
    behaviour, found live — if a future model stops doing it the workaround
    is harmless, but the sentinel is load-bearing today.
 
-12. **Strict tool schemas cost the count bounds.** `strict: true` was needed
+13. **Strict tool schemas cost the count bounds.** `strict: true` was needed
    to stop the model flattening the payload (DebateClaim fields hoisted to
    the top level, `stance` missing, on 3 of 3 turns), and it rejects
    `minItems`/`maxItems`. The 1..5 claim bound now reaches the model only as
    prose in the field description; pydantic still enforces it on the way in,
    so a violation costs the one retry rather than passing.
 
-13. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
+14. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
     from `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6).
     The debate is the first node to read all four reports side by side, so it
     is the first place a mixed-vintage evidence pack can produce a
