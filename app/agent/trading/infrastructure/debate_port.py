@@ -367,11 +367,24 @@ SUBMIT_TOOL = {
 # Guardrails
 # ---------------------------------------------------------------------------
 
-# Comma-aware, and a '-' counts as a sign only where it cannot be a range
-# separator — the same parsing lesson as Phase 3, where reading every hyphen
-# as a minus turned a faithful "318.73-352.11" band into a fabricated
-# "-352.11".
-_DEBATE_NUMBER = re.compile(r"(?<![\d.%,])(-?\d[\d,]*\.?\d*)(%?)")
+# Comma-aware, and a '-' counts as a sign only where it cannot be something
+# else. Two lookbehinds, each patched from a real false positive rather than
+# designed up front:
+#
+#   1. A RANGE separator, the Phase 3 lesson: reading every hyphen as a minus
+#      turned a faithful "318.73-352.11" band into a fabricated "-352.11".
+#   2. A HYPHENATED COMPOUND, found on the first live debate (AVGO,
+#      2026-08-23): "the low-30s oversold zone" and "sub-50-SMA price" were
+#      read as -30 and -50 and reported as fabricated figures. Two of the six
+#      flags that run, so it is not a rare shape.
+#
+# The second lookbehind has to cover the digit as well as the sign. Blocking
+# only "<letter>-<digits>" would leave the scanner free to start one
+# character later and flag a bare "30" out of "low-30s" — the same false
+# positive with the sign filed off.
+_DEBATE_NUMBER = re.compile(
+    r"(?<![\w.%,])(?<![A-Za-z]-)(-?\d[\d,]*\.?\d*)(%?)"
+)
 
 
 def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
