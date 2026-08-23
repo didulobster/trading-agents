@@ -37,6 +37,7 @@ from app.agent.researcher import (
 )
 from app.agent.trading.application.nodes import ANALYST_OUTPUTS
 from app.agent.trading.domain.debate import DebateTurn, DebateTurnPayload, Side
+from app.agent.trading.domain.news_digest import AGGREGATED_RELEVANCE
 from app.agent.trading.infrastructure.technical_interpreter_port import (
     _PERIOD_LABEL,
     _flag_unmatched_numbers_against,
@@ -275,11 +276,46 @@ def _render_technical(report) -> str:
 
 
 def _render_news(digest) -> str:
-    lines = [
+    """Only the articles the sentiment aggregate counts, and a line saying so.
+
+    The pack used to carry every item the vendor returned. On AVGO that was
+    188 articles of which 127 were `mentioned` or `unrelated` — coverage the
+    sentiment node had ALREADY judged not primarily about the company — and
+    they consumed 39% of the whole evidence pack. The debate cited news once
+    in 25 claims, so that was context nobody read, paid for on every turn.
+
+    Filtered on AGGREGATED_RELEVANCE rather than a literal, so the pack and
+    the sentiment aggregate cannot disagree about what counts as evidence
+    about this company. One constant, one policy.
+
+    The omission is STATED, not silent. A debater shown 61 articles with no
+    further comment reads that as the whole feed, and the pack's own rule —
+    the same one behind the NOT RUN blocks — is that absence must be visible.
+    """
+    shown = [i for i in digest.items if i.relevance in AGGREGATED_RELEVANCE]
+    hidden = len(digest.items) - len(shown)
+
+    header = (
         f"NEWS ({digest.window_start} to {digest.as_of_date}, "
-        f"{len(digest.items)} items, truncated_by_cap={digest.truncated_by_cap}):"
-    ]
-    for item in digest.items:
+        f"{len(shown)} of {digest.raw_article_count} vendor article(s) shown, "
+        f"truncated_by_cap={digest.truncated_by_cap}):"
+    )
+    notes = []
+    if hidden:
+        notes.append(
+            f"{hidden} further article(s) in the feed mentioned the company or "
+            f"were unrelated to it and are NOT listed. Their absence is a "
+            f"filtering decision, not evidence of quiet news flow."
+        )
+    if not shown:
+        notes.append(
+            "NO article in the window was primarily about this company. That is "
+            "an ABSENCE of news evidence, not neutral news — do not argue from "
+            "it in either direction."
+        )
+
+    lines = [header, *notes]
+    for item in shown:
         lines.append(
             f"- [{item.published_date}] ({item.relevance}/{item.sentiment}) "
             f"{item.headline}: {item.summary}"

@@ -685,6 +685,98 @@ def test_relations_degrade_when_indicators_are_missing():
     assert "Too little history" in pack
 
 
+def _digest_with_mix() -> NewsDigest:
+    def item(headline, relevance):
+        return NewsItem(
+            headline=headline,
+            published_date=AS_OF_NEWS,
+            source="wire",
+            url="https://example.com/x",
+            summary=f"summary of {headline}",
+            sentiment="positive" if relevance == "primary" else "neutral",
+            relevance=relevance,
+        )
+
+    return NewsDigest(
+        ticker="ACN",
+        as_of_date=AS_OF_NEWS,
+        window_start=date(2026, 8, 6),
+        items=[
+            item("Acme beats estimates", "primary"),
+            item("Sector roundup names Acme", "mentioned"),
+            item("Unrelated company files", "unrelated"),
+            item("Acme raises guidance", "primary"),
+        ],
+        raw_article_count=9,
+        deduped_count=4,
+        dropped_out_of_window=5,
+        dropped_missing_date=0,
+        truncated_by_cap=False,
+    )
+
+
+AS_OF_NEWS = date(2026, 8, 20)
+
+
+def test_the_pack_lists_only_articles_primarily_about_the_company():
+    """On AVGO the pack carried 188 articles of which 127 were `mentioned` or
+    `unrelated` — coverage the sentiment node had already judged not about
+    the company — consuming 39% of the whole pack, while the debate cited
+    news once in 25 claims."""
+    pack = port.build_evidence_pack(_state(news_digest=_digest_with_mix()))
+
+    assert "Acme beats estimates" in pack
+    assert "Acme raises guidance" in pack
+    assert "Sector roundup" not in pack
+    assert "Unrelated company" not in pack
+
+
+def test_the_pack_says_how_many_articles_it_withheld():
+    """Silent omission is the failure the NOT RUN blocks exist to prevent: a
+    debater shown two articles with no further comment reads that as the
+    whole feed."""
+    pack = port.build_evidence_pack(_state(news_digest=_digest_with_mix()))
+
+    assert "2 further article(s)" in pack
+    assert "not evidence of quiet news flow" in pack
+    assert "2 of 9 vendor article(s) shown" in pack
+
+
+def test_a_feed_with_nothing_about_the_company_says_so_loudly():
+    """Distinct from 'news did not run' and from neutral news. Two articles
+    about other companies must not read as two articles about this one."""
+    digest = _digest_with_mix()
+    digest.items = [i for i in digest.items if i.relevance != "primary"]
+
+    pack = port.build_evidence_pack(_state(news_digest=digest))
+
+    assert "NO article in the window was primarily about this company" in pack
+    assert "ABSENCE of news evidence" in pack
+
+
+def test_the_pack_filter_is_the_same_policy_the_sentiment_node_uses():
+    """Keyed on AGGREGATED_RELEVANCE, not a literal, so the pack and the
+    aggregate can never disagree about what counts as evidence about this
+    company. Widening the policy must widen both at once."""
+    from app.agent.trading.domain import news_digest as nd
+
+    digest = _digest_with_mix()
+    before = port.build_evidence_pack(_state(news_digest=digest))
+    assert "Sector roundup" not in before
+
+    port_mod = port
+    original = port_mod.AGGREGATED_RELEVANCE
+    try:
+        port_mod.AGGREGATED_RELEVANCE = frozenset({"primary", "mentioned"})
+        after = port.build_evidence_pack(_state(news_digest=digest))
+    finally:
+        port_mod.AGGREGATED_RELEVANCE = original
+
+    assert "Sector roundup" in after
+    assert "Unrelated company" not in after
+    assert original is nd.AGGREGATED_RELEVANCE
+
+
 def test_the_pack_carries_every_analyst_report_that_ran():
     state = _state(
         technical_report=TechnicalReport(

@@ -261,15 +261,26 @@ when actually closed, not when they become inconvenient.
    wasted; the cost lever simply is not there. Treat `MAX_ROUNDS` as the only
    real bound on debate spend.
 
-9. **The debate barely used the news evidence.** On the full-pack run, of 25
-   claims: 17 cited fundamentals, 7 cited nothing, **1 cited news**, and 0
-   cited technical — against a news leg that had just scored 61 primary
-   articles at +0.48 sentiment and cost $0.075. Whatever the pack costs to
-   assemble, the debaters read the longest section and largely ignore the
-   rest. Ordering, length-balancing, or per-source claim quotas are all
-   plausible fixes and none is obviously right; measure another ticker before
-   choosing.
+9. **[Partly addressed 2026-08-23] The debate barely used the news
+   evidence.** On the full-pack AVGO run, of 25 claims: 17 cited
+   fundamentals, 7 cited nothing, **1 cited news**, and 0 cited technical —
+   against a news leg that had just scored 61 primary articles at +0.48
+   sentiment and cost $0.075.
 
+   The pack was also carrying every article the vendor returned, including
+   the 127 the sentiment node had already judged `mentioned` or `unrelated`.
+   The pack now lists only what `AGGREGATED_RELEVANCE` counts, and states how
+   many it withheld. Measured: AVGO's pack 61,346 -> 37,716 chars (-39%),
+   ACN's 34,702 -> 31,657 (-9%) — the saving scales with how noisy the
+   ticker's feed is, so it is largest exactly where it was needed.
+
+   *Residual:* trimming the pack does not make the debaters cite news. The
+   1-in-25 ratio was measured before the trim and has not been re-measured
+   after it. Ordering, length-balancing, or per-source claim quotas remain
+   plausible and none is obviously right; measure another ticker before
+   choosing. The primary-article count is also still unbounded — a genuine
+   event week could put a hundred primary articles in the pack, and the only
+   cap upstream is `MAX_ARTICLES=300` on the digest.
 10. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
