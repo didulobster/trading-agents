@@ -33,6 +33,15 @@ class TechnicalReport(BaseModel):
     )
     indicators: TechnicalIndicators
     interpretation: str
+    interpretation_flagged_claims: list[str] = Field(
+        default_factory=list,
+        description="statements in `interpretation` that contradict a relation "
+                    "computed from `indicators` (e.g. calling price below a "
+                    "moving average it is above). Distinct from "
+                    "`interpretation_flagged_numbers`: those are numbers with "
+                    "no source, these are claims that are false about numbers "
+                    "that are real.",
+    )
     interpretation_flagged_numbers: list[str] = Field(
         default_factory=list,
         description="numbers in `interpretation` that could not be matched "
