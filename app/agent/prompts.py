@@ -421,10 +421,21 @@ threshold is not met, however concerning the finding reads.
 
 A disclosed explanation NEVER cancels a flag. The threshold decides whether a
 flag exists; the explanation decides only how it is tagged. A capex-driven
-fall in free cash flow is still a flag under item 1 — tagged cyclical/
-temporary, not omitted. Judging a tripped threshold to be benign, expected
-for the sector, or already understood by the market is not a reason to drop
-it, and "the company explained it" is not either.
+fall in free cash flow is still a flag under item 1 — tagged, not omitted.
+Judging a tripped threshold to be benign, expected for the sector, or already
+understood by the market is not a reason to drop it, and "the company
+explained it" is not either.
+
+Tagging, which is also decided by a test and not by impression:
+- cyclical/temporary — ONLY when the filer itself states that the driver is
+  non-recurring, or expects it to moderate, end, or normalize. Quote or cite
+  that statement when you use this tag.
+- structural — everything else, including a driver described as ongoing, a
+  multi-year program with no stated end, and a threshold tripped with no
+  disclosed driver at all.
+Silence defaults to structural. "This looks like a normal investment cycle"
+is an impression, not a disclosure; a build-out the filer never says will
+moderate is structural however ordinary it seems.
 
 ## Assessment
 This section forces a verdict, but only when the review has enough

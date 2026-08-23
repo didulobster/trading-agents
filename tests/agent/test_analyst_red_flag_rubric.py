@@ -66,6 +66,18 @@ def test_an_explanation_cannot_cancel_a_flag():
     assert "cyclical" in RUBRIC and "not omitted" in RUBRIC
 
 
+def test_the_structural_cyclical_tag_has_a_test_and_a_default():
+    """Measured after the rubric landed: all three runs raised the item 1 FCF
+    flag, but one tagged the same capex driver structural and two tagged it
+    cyclical. Keeping the flag was the fix; the tag was still an impression.
+    It now turns on whether the filer itself says the driver abates, with a
+    stated default so silence cannot break the tie two ways."""
+    assert "ONLY when the filer itself states" in RUBRIC
+    assert "Silence defaults to structural" in RUBRIC
+    # the tag must be evidenced, not asserted
+    assert "Quote or cite" in RUBRIC
+
+
 def test_tier_is_derived_from_the_flag_list():
     """The tier used to be a second, independent judgement, which is how
     'CLEAN with 1 cyclical red flag' — self-contradictory under the tier
