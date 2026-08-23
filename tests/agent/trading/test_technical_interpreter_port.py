@@ -5,6 +5,8 @@ import app.agent.trading.infrastructure.technical_interpreter_port as port
 from app.agent.trading.domain.technical_report import TechnicalIndicators
 from app.agent.trading.infrastructure.technical_interpreter_port import (
     _flag_unmatched_numbers,
+    derive_relations,
+    flag_contradicted_claims,
     interpret_indicators,
 )
 
@@ -261,7 +263,7 @@ def test_normal_interpretation_produces_no_flags(monkeypatch):
         "supporting the move."
     ))
 
-    interpretation, flagged, _ = asyncio.run(
+    interpretation, flagged, _claims, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
@@ -278,7 +280,7 @@ def test_injected_fabricated_number_is_flagged_through_interpret(monkeypatch):
         "of 812 suggests rich valuation."
     ))
 
-    _, flagged, _ = asyncio.run(
+    _, flagged, _claims, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
@@ -296,7 +298,7 @@ def test_bearish_interpretation_produces_no_flags(monkeypatch):
         "in the lower half of the 318.73-352.11 Bollinger band."
     ))
 
-    _, flagged, _ = asyncio.run(interpret_indicators("V", BEARISH_INDICATORS))
+    _, flagged, _claims, _ = asyncio.run(interpret_indicators("V", BEARISH_INDICATORS))
 
     assert flagged == []
 
@@ -312,8 +314,202 @@ def test_injected_fabricated_period_slips_through_mocked_response(monkeypatch):
         "The 55-day moving average confirms the trend, with RSI around 62."
     ))
 
-    _, flagged, _ = asyncio.run(
+    _, flagged, _claims, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
     assert flagged == []
+
+
+# ---------------------------------------------------------------------------
+# Contradicted claims — regression from a live MSFT run (2026-08-23)
+# ---------------------------------------------------------------------------
+
+def _msft_indicators() -> TechnicalIndicators:
+    """The real values behind the failure: price above BOTH averages, while
+    the 50-day sits below the 200-day."""
+    return TechnicalIndicators(
+        sma_50=419.09196105957034,
+        sma_200=429.4326626586914,
+        rsi_14=62.95966955766375,
+        bb_upper=545.57376730238,
+        bb_mid=472.2936721801758,
+        bb_lower=399.0135770579716,
+        last_close=483.239990234375,
+        volume_vs_20d_avg=0.6135848256630001,
+    )
+
+
+def test_flags_the_exact_sentence_the_model_produced():
+    """Verbatim from the MSFT run. Every number in it is genuine, which is why
+    the numbers guard passed it and it reached the decision memo."""
+    text = (
+        "MSFT is trading above its 50-day moving average (around 419) but below "
+        "its 200-day average (around 429), indicating a mixed intermediate trend."
+    )
+
+    flags = flag_contradicted_claims(text, _msft_indicators())
+
+    assert len(flags) == 1
+    assert "below the 200-day average" in flags[0]
+    assert "483.24" in flags[0]
+    # the 'above the 50-day' half of the same sentence is true and must not flag
+    assert "50-day" not in flags[0]
+
+
+def test_does_not_flag_a_true_comparison_between_two_averages():
+    """The tightest false-positive risk: identical words, different subject.
+    'the 50-day is below the 200-day' is true here and must pass."""
+    text = (
+        "The 50-day moving average is below the 200-day moving average, "
+        "a bearish structure."
+    )
+
+    assert flag_contradicted_claims(text, _msft_indicators()) == []
+
+
+def test_does_not_flag_correct_price_claims():
+    text = (
+        "MSFT is trading above its 50-day moving average and above its 200-day "
+        "average, confirming strength."
+    )
+
+    assert flag_contradicted_claims(text, _msft_indicators()) == []
+
+
+def test_flags_a_below_claim_when_price_is_genuinely_above_only():
+    ind = _msft_indicators()
+    ind.last_close = 400.0     # now genuinely below both averages
+
+    correct = "Price is below its 50-day average and below its 200-day average."
+    wrong = "Price is above its 50-day average."
+
+    assert flag_contradicted_claims(correct, ind) == []
+    assert len(flag_contradicted_claims(wrong, ind)) == 1
+
+
+def test_unavailable_indicator_is_not_a_contradiction():
+    """A None sma_200 means nothing to compare against; silence beats a
+    fabricated verdict either way."""
+    ind = _msft_indicators()
+    ind.sma_200 = None
+
+    text = "MSFT is trading below its 200-day average."
+
+    assert flag_contradicted_claims(text, ind) == []
+
+
+def test_claim_check_does_not_run_across_sentences():
+    """'below' in one sentence and a 200-day mention in the next are unrelated;
+    matching across the boundary would invent a claim nobody made."""
+    text = (
+        "Volume is below its recent norm. The 200-day average sits at 429."
+    )
+
+    assert flag_contradicted_claims(text, _msft_indicators()) == []
+
+
+# ---------------------------------------------------------------------------
+# Derived relations handed to the model
+# ---------------------------------------------------------------------------
+
+def test_relations_state_price_and_average_comparisons_separately():
+    rel = "\n".join(derive_relations(_msft_indicators()))
+
+    assert "last close (483.24) is ABOVE the 50-day average" in rel
+    assert "last close (483.24) is ABOVE the 200-day average" in rel
+    # the fact the model confused it with, explicitly labelled as different
+    assert "the 50-day average (419.09) is BELOW the 200-day average" in rel
+    assert "NOT about where price sits" in rel
+
+
+def test_relations_skip_indicators_that_were_not_computed():
+    ind = _msft_indicators()
+    ind.sma_200 = None
+    ind.macd = None
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "200-day" not in rel
+    assert "MACD" not in rel
+    assert "50-day average" in rel
+
+
+def test_relations_report_rsi_band_and_volume_side():
+    ind = _msft_indicators()
+    rel = "\n".join(derive_relations(ind))
+    assert "NEITHER overbought nor oversold" in rel
+    assert "volume is BELOW its 20-day average" in rel
+
+    ind.rsi_14 = 82.0
+    assert "OVERBOUGHT" in "\n".join(derive_relations(ind))
+
+
+def test_does_not_flag_the_corrected_model_output(monkeypatch):
+    """Verbatim from the live re-run after the relations block was added. The
+    model gets it right here, and an earlier version of this guard flagged it
+    anyway: the exclusion only recognised finite verbs, so the participle in
+    "the 50-day average sitting below the 200-day average" slipped past and
+    correct prose was reported as a contradiction."""
+    text = (
+        "MSFT is trading above both its 50-day and 200-day moving averages, "
+        "showing an uptrend, though the 50-day average sitting below the "
+        "200-day average indicates the intermediate-term momentum is weaker "
+        "than the longer-term trend. The RSI at 62.96 shows moderate bullish "
+        "momentum without reaching overbought territory."
+    )
+
+    assert flag_contradicted_claims(text, _msft_indicators()) == []
+
+
+def test_exclusion_covers_varied_verb_forms_but_not_the_real_error():
+    """The boundary the exclusion has to hold: bare words between the average
+    and the comparator mean the average is the subject; anything else (a
+    parenthetical, a conjunction) means it is not."""
+    ind = _msft_indicators()
+
+    for phrasing in (
+        "The 50-day average is below the 200-day average.",
+        "The 50-day average sitting below the 200-day average is bearish.",
+        "The 50-day moving average has slipped below the 200-day average.",
+        "The 50-day averages remain below the 200-day average.",
+    ):
+        assert flag_contradicted_claims(phrasing, ind) == [], phrasing
+
+    # the real failure: an average appears shortly before the comparator, but
+    # price is still the subject
+    real = (
+        "MSFT is trading above its 50-day moving average (around 419) but "
+        "below its 200-day average (around 429)."
+    )
+    assert len(flag_contradicted_claims(real, ind)) == 1
+
+
+def test_does_not_flag_the_elided_average_phrasing():
+    """Second live false positive: the model dropped the noun altogether —
+    "the 50-day sitting below the 200-day" — so a pattern anchored on the word
+    "average" had nothing to match and flagged correct prose. Verbatim from
+    the run after the participle fix."""
+    text = (
+        "MSFT is in an uptrend with price at 483.24 trading above both its "
+        "50-day average (419.09) and 200-day average (429.43), though the "
+        "50-day sitting below the 200-day suggests some intermediate weakness "
+        "in the trend structure."
+    )
+
+    assert flag_contradicted_claims(text, _msft_indicators()) == []
+
+
+def test_two_word_margin_does_not_swallow_a_following_price_claim():
+    """The exclusion allows two bare words, and that limit is load-bearing: a
+    genuine price claim further along the same sentence must still be checked
+    rather than absorbed by the preceding average reference."""
+    text = (
+        "The 50-day average is below the 200-day average, but the price is "
+        "below its 200-day average."
+    )
+
+    flags = flag_contradicted_claims(text, _msft_indicators())
+
+    assert len(flags) == 1
+    assert "483.24" in flags[0]

@@ -38,7 +38,11 @@ async def technical_node(state: TradingState) -> dict:
     if dropped_bars:
         print(f"[technical] dropped {dropped_bars} incomplete bar(s) from {source}")
     indicators = compute_indicators(df)
-    interpretation, flagged, cost_usd = await interpret_indicators(ticker, indicators)
+    interpretation, flagged, flagged_claims, cost_usd = await interpret_indicators(
+        ticker, indicators
+    )
+    if flagged_claims:
+        print(f"[technical] {len(flagged_claims)} contradicted claim(s): {flagged_claims}")
 
     report = TechnicalReport(
         ticker=ticker,
@@ -49,6 +53,7 @@ async def technical_node(state: TradingState) -> dict:
         indicators=indicators,
         interpretation=interpretation,
         interpretation_flagged_numbers=flagged,
+        interpretation_flagged_claims=flagged_claims,
     )
     vault_path = save_technical_report(report, cost_usd=cost_usd)
     print(f"[technical] saved report to {vault_path}")
