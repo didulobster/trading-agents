@@ -111,3 +111,65 @@ when actually closed, not when they become inconvenient.
    bounded at March 2025 alongside price data through today — a real
    lookahead hole in any historical probe. Fix when historical backtesting
    is actually needed, not before.
+
+## Phase 5 — Bull/Bear Debate (logged 2026-08-23)
+
+1. **Convergence is mitigated, not eliminated.** The §5 guardrails raise the
+   cost of unjustified agreement — a concession must name a real opposing
+   `claim_id`, a claim must quote the report it cites, a figure must appear
+   in the evidence pack — but they cannot make two instances of one base
+   model independent. They share priors. A transcript where both sides
+   converge on a correct conclusion and one where they converge from shared
+   bias are indistinguishable from inside the transcript.
+
+2. **The number guard has an unmeasured false-positive rate.** Containment
+   plus a precision-scoped rounding clearance plus the Phase 3 percent
+   transforms. Two false positives showed up in the first two live turns
+   ("RSI of 41.2" for 41.2033, "the 50-day at 330.12" for 330.1245) and both
+   are now cleared by the rounding rule. Expect more classes — "roughly
+   $12B" for 12.2, unit changes, ranges. Until measured, a non-empty
+   `guard_flags` means *review*, not *fabricated*.
+
+3. **Containment cannot catch a correctly-quoted figure used wrongly.**
+   Right number, wrong period or wrong entity. Same period-consistency gap
+   `ask_edgar` has, now one layer further downstream.
+
+4. **`claim_id` reuse is prompt-dependent.** A model inventing a fresh slug
+   for a restated claim inflates `productive` and defeats the early stop. It
+   fails toward *more* rounds, capped at `MAX_TURNS` — a safe direction, but
+   the early-stop lever is weaker than it reads.
+
+5. **Order bias is unquantified.** Bull speaks first and bear gets the last
+   rebuttal in each round. Full mitigation doubles cost. Run one ticker
+   bear-first by hand, compare the surviving claim sets, and put the number
+   here before building any machinery.
+
+6. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
+   inside `run_agent`; the debate never calls it. The number guard is the
+   only check between a fabricated debate figure and the memo.
+
+7. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
+   still "STUB" — Phase 7's job. Phase 5 delivers the transcript to the
+   vault and the *caveats* to the memo, so a capped or skipped debate is
+   visible; the argument itself is not.
+
+8. **The model cannot emit an empty string into a tool call.** Asked for one
+   it writes a stray `</antml parameter>` marker instead, which landed in
+   `concession_trigger` on 4 of 4 live turns and tripped the concession
+   guard on turns that conceded nothing. Worked around with a `'none'`
+   sentinel normalized back to `""` in `domain/debate.py`. Undocumented
+   behaviour, found live — if a future model stops doing it the workaround
+   is harmless, but the sentinel is load-bearing today.
+
+9. **Strict tool schemas cost the count bounds.** `strict: true` was needed
+   to stop the model flattening the payload (DebateClaim fields hoisted to
+   the top level, `stance` missing, on 3 of 3 turns), and it rejects
+   `minItems`/`maxItems`. The 1..5 claim bound now reaches the model only as
+   prose in the field description; pydantic still enforces it on the way in,
+   so a violation costs the one retry rather than passing.
+
+10. **[Cross-phase, now visible] `technical_node` derives `as_of_date` from
+    `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6). The
+    debate is the first node to read all four reports side by side, so it is
+    the first place a mixed-vintage evidence pack can produce a confidently
+    wrong argument. Not a Phase 5 bug; Phase 5 is where it starts to matter.

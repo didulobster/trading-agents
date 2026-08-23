@@ -3,7 +3,9 @@ import asyncio
 import json
 from datetime import date
 
+from app.agent.trading.application.debate_router import MAX_ROUNDS
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
+from app.agent.trading.infrastructure.debate_port import save_debate_transcript
 from app.agent.trading.infrastructure.decision_memo_port import save_decision_memo
 from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
 from app.agent.trading.infrastructure.news_digest_port import save_sentiment_report
@@ -23,7 +25,14 @@ async def run(
         print(f"Analysts: {', '.join(sorted(analysts))} (others skipped)")
     async with build_checkpointer() as checkpointer:
         graph = build_trading_graph(checkpointer, analysts=analysts)
-        config = {"configurable": {"thread_id": thread_id}}
+        # Layer 2 of the debate's termination guarantee, behind the
+        # router's own cap. DERIVED, not a literal: a hardcoded 25 silently
+        # becomes a bug the day MAX_ROUNDS is raised, and it surfaces as a
+        # GraphRecursionError in what looks like the risk node.
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 2 * MAX_ROUNDS + 12,   # turns + other nodes + slack
+        }
         state = await graph.aget_state(config)
 
         if state.values and not state.next:
@@ -94,6 +103,40 @@ async def run(
                   "an absence of evidence, not neutral evidence)")
         print("--- end Sentiment Summary ---\n")
 
+    turns = result.get("debate_turns") or []
+    if turns:
+        print("\n--- Bull/Bear Debate ---")
+        print(
+            f"{len(turns)} turn(s) over {len(turns) // 2} round(s); "
+            f"terminated by {result.get('debate_terminated_by') or 'not recorded'}"
+        )
+        for turn in turns:
+            print(
+                f"\n[turn {turn.turn_index} · round {turn.round_num}] "
+                f"{turn.side.upper()} stance={turn.payload.stance}"
+                + (
+                    f" concedes->{turn.payload.concession_trigger}"
+                    if turn.payload.concession_trigger
+                    else ""
+                )
+                + ("" if turn.productive else " (unproductive)")
+            )
+            print(f"    {turn.payload.argument}")
+            for claim in turn.payload.claims:
+                print(f"    · {claim.claim_id} [{claim.evidence_ref}] {claim.text}")
+            if turn.guard_flags:
+                print(f"    [flagged numbers] {turn.guard_flags}")
+            if turn.unquoted_evidence:
+                print(f"    [unverified quotes] {turn.unquoted_evidence}")
+        total = sum(t.estimated_cost_usd or 0.0 for t in turns)
+        print(f"\ndebate cost: ${total:.4f}")
+        print("--- end Bull/Bear Debate ---\n")
+    elif result.get("debate_terminated_by"):
+        print(
+            f"\n[debate] skipped: {result['debate_terminated_by']} — this run "
+            f"carries no adversarial review of its analyst findings\n"
+        )
+
     memo = result["decision_memo"]
     print(json.dumps(memo.model_dump(mode="json"), indent=2))
     return result
@@ -119,6 +162,16 @@ def _save_vault_artifacts(result: dict, run_log: str) -> list:
                 sentiment,
                 issues=result.get("news_digest_issues") or [],
                 provenance=run_log,
+            )
+        )
+
+    turns = result.get("debate_turns") or []
+    if turns:
+        saved.append(
+            save_debate_transcript(
+                result["ticker"],
+                turns,
+                result.get("debate_terminated_by") or "",
             )
         )
 

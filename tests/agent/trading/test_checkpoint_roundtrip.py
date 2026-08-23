@@ -46,7 +46,9 @@ import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from pydantic import BaseModel
 
+import app.agent.trading.application.debate_nodes as debate_nodes
 import app.agent.trading.application.nodes as nodes
+from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
@@ -196,6 +198,77 @@ def test_news_digest_survives_msgpack_roundtrip():
     assert restored_digest.truncated_by_cap is True
     assert restored_summary == summary
     assert isinstance(restored_summary, SentimentSummary)
+
+
+def _sample_debate_turn() -> DebateTurn:
+    """Two levels of nesting, both populated: DebateTurn -> DebateTurnPayload
+    -> DebateClaim. Two levels means two places the allowlist can be
+    incomplete, and an unregistered type fails on DESERIALIZATION ONLY — so
+    without this the first symptom would be a red resume in a live crash
+    test, an hour after the green run that wrote the checkpoint."""
+    return DebateTurn(
+        turn_index=3,
+        round_num=2,
+        side="bear",
+        payload=DebateTurnPayload(
+            stance="concede",
+            concession_trigger="margin-hold",
+            argument="The amortization roll-off is real.",
+            claims=[
+                DebateClaim(
+                    claim_id="vmware-amort-rolloff",
+                    text="Amortization steps down next year.",
+                    evidence_ref="fundamentals",
+                    evidence_quote="amortization of acquired intangibles falls",
+                ),
+                DebateClaim(
+                    claim_id="derived-pressure",
+                    text="Taken together those imply margin pressure.",
+                    evidence_ref="none",
+                ),
+            ],
+            rebuts=["margin-hold", "growth-durable"],
+        ),
+        productive=False,
+        guard_flags=["71.4"],
+        unquoted_evidence=["derived-pressure"],
+        input_tokens=6100,
+        output_tokens=690,
+        estimated_cost_usd=0.0287,
+    )
+
+
+def test_debate_turn_survives_msgpack_roundtrip():
+    """Phase 5's types through the production serializer."""
+    serde = build_serde()
+    turn = _sample_debate_turn()
+
+    restored = serde.loads_typed(serde.dumps_typed(turn))
+
+    assert restored == turn
+    assert isinstance(restored, DebateTurn)
+    assert isinstance(restored.payload, DebateTurnPayload)
+    assert all(isinstance(c, DebateClaim) for c in restored.payload.claims)
+    assert restored.payload.claims[0].evidence_ref == "fundamentals"
+    assert restored.payload.stance == "concede"
+    assert restored.payload.rebuts == ["margin-hold", "growth-durable"]
+    assert restored.guard_flags == ["71.4"]
+    assert restored.productive is False
+    assert restored.estimated_cost_usd == 0.0287
+
+
+def test_the_accumulated_debate_transcript_survives_msgpack_roundtrip():
+    """The channel as the checkpointer actually stores it: a list of turns
+    under the add-reducer, not one turn on its own."""
+    serde = build_serde()
+    turns = [_sample_debate_turn() for _ in range(3)]
+    for i, turn in enumerate(turns):
+        turn.turn_index = i
+
+    restored = serde.loads_typed(serde.dumps_typed({"debate_turns": turns}))
+
+    assert [t.turn_index for t in restored["debate_turns"]] == [0, 1, 2]
+    assert all(isinstance(t, DebateTurn) for t in restored["debate_turns"])
 
 
 class _UnregisteredModel(BaseModel):
@@ -470,6 +543,32 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(nodes, "fetch_company_news", fake_fetch_news)
     monkeypatch.setattr(nodes, "build_digest", fake_build_digest)
 
+    # The debate is stubbed at the port seam, so the whole cycle — the
+    # router, the alternation and cap asserts, the add-reducer, and the
+    # checkpoint written after every turn — still runs for real. Only the
+    # network call is replaced.
+    async def fake_debate_turn(state, side, turn_index):
+        return DebateTurn(
+            turn_index=turn_index,
+            round_num=(turn_index // 2) + 1,
+            side=side,
+            payload=DebateTurnPayload(
+                stance="hold",
+                argument=f"stub argument from {side}",
+                claims=[
+                    DebateClaim(
+                        claim_id=f"{side}-{turn_index}",
+                        text="stub claim",
+                        evidence_ref="none",
+                    )
+                ],
+                rebuts=[] if turn_index == 0 else [f"stub-{turn_index - 1}"],
+            ),
+            estimated_cost_usd=0.01,
+        )
+
+    monkeypatch.setattr(debate_nodes, "run_debate_turn", fake_debate_turn)
+
 
 @requires_postgres
 def test_technical_report_survives_interrupt_and_a_fresh_checkpointer(
@@ -586,5 +685,74 @@ def test_news_digest_survives_interrupt_and_a_fresh_checkpointer(
         assert summary.article_count == 2
         assert (summary.positive, summary.neutral) == (1, 1)
         assert summary.net_score == 0.5
+    finally:
+        asyncio.run(cleanup())
+
+
+@requires_postgres
+def test_debate_transcript_survives_interrupt_and_a_fresh_checkpointer(
+    monkeypatch, tmp_path
+):
+    """Phase 5's exit-criterion round-trip, and the reason a debate turn is a
+    NODE rather than a loop iteration.
+
+    Phase 1 stops after `bull_turn` — which on a cyclic node means after
+    turn 0 — and closes the checkpointer. Phase 2 opens a NEW connection and
+    a NEW compiled graph, forcing an actual deserialize of the nested
+    DebateTurn -> DebateTurnPayload -> DebateClaim out of Postgres. Under the
+    loop design there would be nothing to read here: a single checkpoint at
+    node exit, and a kill mid-debate would resume at turn 0.
+    """
+    _stub_expensive_nodes(monkeypatch, tmp_path)
+    thread_id = f"test-debate-checkpoint-roundtrip-{uuid.uuid4()}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    async def phase_1():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer, interrupt_after=["bull_turn"])
+            await graph.ainvoke(
+                {"ticker": "ACN", "as_of_date": date(2026, 8, 19)}, config=config
+            )
+            snapshot = await graph.aget_state(config)
+            return snapshot.values.get("debate_turns"), snapshot.next
+
+    async def phase_2():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer)
+            snapshot = await graph.aget_state(config)
+            resumed = snapshot.values["debate_turns"]
+            final = await graph.ainvoke(None, config=config)
+            return resumed, final
+
+    async def cleanup():
+        async with build_checkpointer() as checkpointer:
+            await checkpointer.adelete_thread(thread_id)
+
+    try:
+        # values before next: `next` alone cannot tell a never-run thread
+        # from a completed one
+        before, next_nodes = asyncio.run(phase_1())
+        assert before is not None and len(before) == 1
+        assert next_nodes == ("bear_turn",)
+
+        after, final = asyncio.run(phase_2())
+
+        # the checkpointed turn comes back as the real type, two levels deep,
+        # rather than the plain dict an unregistered type degrades to
+        assert isinstance(after[0], DebateTurn)
+        assert isinstance(after[0].payload, DebateTurnPayload)
+        assert all(isinstance(c, DebateClaim) for c in after[0].payload.claims)
+        assert after[0] == before[0]
+
+        # and the resumed run finishes the debate from where it stopped:
+        # contiguous indices, strict alternation from bull, no re-run of
+        # turn 0, and the termination reason recorded
+        turns = final["debate_turns"]
+        assert [t.turn_index for t in turns] == list(range(len(turns)))
+        assert [t.side for t in turns] == [
+            "bull" if i % 2 == 0 else "bear" for i in range(len(turns))
+        ]
+        assert turns[0] == before[0]
+        assert final["debate_terminated_by"] in {"round_cap", "unproductive"}
     finally:
         asyncio.run(cleanup())
