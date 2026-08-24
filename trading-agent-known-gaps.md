@@ -277,6 +277,40 @@ of the debate*, which the exit criteria do not test.
    necessary rather than nice: at 41% the caveat "7 claim(s) cite a report but
    the quoted span is not in it" is the memo's loudest debate signal.
 
+   *Second full-pack run, and a different failure SHAPE, not just a bigger
+   rate (FIG, 2026-08-24, `MOCK_FUNDAMENTALS=1`, 30 claims):*
+
+   | source | claims | unverified | rate |
+   |---|---|---|---|
+   | fundamentals | 23 | 14 | **61%** |
+   | news | 1 | 0 | 0% |
+   | none | 6 | 0 | — |
+   | technical | **0** | — | — |
+
+   AVGO's failures were ellipsis-splices and header-to-table joins — two
+   adjacent-but-not-contiguous prose spans stitched together. FIG's cached
+   fundamentals report is unusually table-dense, and the failures there are a
+   different shape: the debater assembles a summary SENTENCE out of several
+   separate table fields and presents it as one verbatim quote —
+
+   > "Free Cash Flow \$242.7M FY2025 FCF Margin 23.0% Figma Q2 2026 revenue
+   > reached \$370.1M, up 48%"
+
+   — three unrelated facts from three places in the memo, formatted as prose
+   and cited as a single `evidence_quote`. Spot-checked with the same
+   longest-verbatim-prefix method as the AVGO run; none of the 14 clear that
+   bar past a few dozen characters, so these are true positives, not
+   normalization gaps.
+
+   Two full-pack runs now, two different source documents, two different
+   failure shapes, both driven by the same root cause: **the model is not
+   trying to quote, it is trying to summarize, and `evidence_quote` gives it
+   nowhere honest to put a summary.** That strengthens the case for a
+   structured citation (a list of short verbatim spans plus a separate
+   `synthesis` field the guard does not check) over patching this guard
+   further — the current one-contiguous-span field is fighting what the
+   model naturally wants to produce, on prose AND on tables.
+
 7. **Containment cannot catch a correctly-quoted figure used wrongly.**
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
