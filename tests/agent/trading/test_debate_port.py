@@ -177,6 +177,90 @@ async def test_concession_trigger_on_a_non_concede_stance_raises():
 
 
 # ---------------------------------------------------------------------------
+# (a2) rebuts must point at real opposing claims — validation gap closed
+# 2026-08-24. check_concession existed from day one; check_rebuts did not,
+# so a turn could name a hallucinated or own-side id in `rebuts` and every
+# guard would still pass. Measured across all five termination-run
+# transcripts before this check existed: 95 of 95 rebutted ids resolved to a
+# claim made in the immediately preceding turn — so on that evidence the gap
+# was never exploited. It is closed as a completeness fix, not because a live
+# run showed a hallucination.
+# ---------------------------------------------------------------------------
+
+def test_rebutting_a_real_opposing_claim_is_accepted():
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    port.check_rebuts(
+        DebateTurnPayload.model_validate(_payload(rebuts=["margin-hold"])),
+        turns,
+        "bear",
+    )   # does not raise
+
+
+def test_rebutting_a_claim_nobody_made_raises():
+    with pytest.raises(ValueError, match="hallucinated id or the debater's own side"):
+        port.check_rebuts(
+            DebateTurnPayload.model_validate(_payload(rebuts=["invented-id"])),
+            [],
+            "bear",
+        )
+
+
+def test_rebutting_your_own_earlier_claim_raises():
+    """A rebuttal names an OPPONENT's claim. Naming your own is not a
+    rebuttal, and check_concession draws the same side/opposing-side line for
+    the same reason."""
+    turns = [_turn(0, "bull", ["own-claim"])]
+    with pytest.raises(ValueError, match="own side"):
+        port.check_rebuts(
+            DebateTurnPayload.model_validate(_payload(rebuts=["own-claim"])),
+            turns,
+            "bull",
+        )
+
+
+def test_rebutting_an_older_opposing_claim_is_still_accepted():
+    """Scoped like check_concession, not to the immediately preceding turn
+    only: a later round legitimately returns to an earlier claim, and that
+    must not be an error even though every rebuttal observed so far pointed
+    at the previous turn specifically."""
+    turns = [
+        _turn(0, "bull", ["early-claim"]),
+        _turn(1, "bear", ["bear-claim"]),
+    ]
+    port.check_rebuts(
+        DebateTurnPayload.model_validate(_payload(rebuts=["early-claim"])),
+        turns,
+        "bear",
+    )   # does not raise
+
+
+def test_one_hallucinated_id_among_real_ones_still_raises():
+    turns = [_turn(0, "bull", ["real-id"])]
+    with pytest.raises(ValueError, match=r"\['fake-id'\]"):
+        port.check_rebuts(
+            DebateTurnPayload.model_validate(
+                _payload(rebuts=["real-id", "fake-id"])
+            ),
+            turns,
+            "bear",
+        )
+
+
+@pytest.mark.anyio
+async def test_run_debate_turn_raises_on_a_hallucinated_rebuttal():
+    """The end-to-end path, not just the unit function: a turn whose payload
+    names a rebuttal id that does not exist must fail the node, the same way
+    an unjustified concession does."""
+    turns = [_turn(0, "bull", ["real-id"])]
+    client = _FakeClient([_payload(rebuts=["invented-id"])])
+
+    with pytest.raises(ValueError, match="hallucinated id"):
+        await port.run_debate_turn(
+            _state(debate_turns=turns), "bear", 1, client=client
+        )
+
+
+# ---------------------------------------------------------------------------
 # (b) Numeric fabrication guard
 # ---------------------------------------------------------------------------
 

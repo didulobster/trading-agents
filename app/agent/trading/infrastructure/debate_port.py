@@ -658,6 +658,41 @@ def check_concession(
         )
 
 
+def check_rebuts(payload: DebateTurnPayload, turns: list[DebateTurn], side: Side) -> None:
+    """Every rebutted claim_id must belong to a real opposing claim.
+
+    The completeness gap `check_concession` closed for `stance='concede'`:
+    nothing stopped `rebuts` from naming an id that was never made, or one
+    belonging to the debater's own side. A turn passing that off would look
+    adversarial in the transcript while addressing nothing — the exact
+    "theatre" outcome the guardrails in this module exist to rule out.
+
+    Measured 2026-08-23 across all five termination-run transcripts before
+    this check existed: 95 of 95 rebutted ids resolved to a claim made in the
+    IMMEDIATELY PRECEDING turn — the strongest form of engagement, not just
+    "some opposing claim somewhere." This check is deliberately looser than
+    that measurement: it accepts any opposing claim so far, matching
+    `check_concession`'s scope, because a later round legitimately returns to
+    an earlier claim and that should not be an error. What was actually
+    observed is stricter than what is enforced; recorded here so the gap
+    between them is visible rather than assumed away.
+    """
+    opposing_ids = {
+        claim.claim_id
+        for turn in turns
+        if turn.side != side
+        for claim in turn.payload.claims
+    }
+    bad = [rid for rid in payload.rebuts if rid not in opposing_ids]
+    if bad:
+        raise ValueError(
+            f"rebuts names {bad!r}, which {'is' if len(bad) == 1 else 'are'} "
+            f"not opposing claim_id(s) in this transcript (opposing ids: "
+            f"{sorted(opposing_ids) or 'none'}) — either a hallucinated id or "
+            f"the debater's own side"
+        )
+
+
 def is_productive(payload: DebateTurnPayload, turns: list[DebateTurn]) -> bool:
     """Did this turn introduce a claim_id nobody had used yet?
 
@@ -837,6 +872,7 @@ async def run_debate_turn(
     # super-step survives, so a loud failure costs a fix-and-resume while
     # silent corruption costs a debate you cannot trust.
     check_concession(payload, turns, side)
+    check_rebuts(payload, turns, side)
 
     cost = log_cost(
         ticker,
