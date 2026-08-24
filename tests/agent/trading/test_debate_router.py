@@ -19,7 +19,6 @@ import pytest
 from app.agent.trading.application.debate_router import (
     MAX_ROUNDS,
     MAX_TURNS,
-    UNPRODUCTIVE_STOP,
     next_debate_step,
     termination_reason,
 )
@@ -68,13 +67,11 @@ def test_router_alternates_below_the_cap_and_stops_at_or_above_it(n):
         assert step == ("bull" if n % 2 == 0 else "bear")
 
 
-def test_router_cap_beats_productivity():
-    """The cap wins even when every turn introduced a new claim.
-
-    Ordering inside the router is load-bearing: the cap check is first and
-    cannot raise, so a malformed turn record cannot make control fall through
-    to the alternation branch and loop forever.
-    """
+def test_router_reaches_the_cap_even_when_every_turn_introduced_a_new_claim():
+    """The cap wins because it's the only lever left, not because it's
+    racing a productivity clause — that clause was removed 2026-08-24 (see
+    the module docstring): it never fired across any measured debate, so
+    MAX_TURNS is the sole termination bound now."""
     assert next_debate_step(_state(MAX_TURNS, productive=True)) == "done"
 
 
@@ -84,31 +81,26 @@ def test_max_turns_is_derived_from_max_rounds():
 
 
 # ---------------------------------------------------------------------------
-# The other two exits
+# Regression: the router must not resurrect a productivity-based early stop.
+# `productive` is still computed and still recorded on DebateTurn (§ known
+# gaps), but it must have ZERO effect on routing — these turns are all
+# `productive=False` and the router must still alternate through them to the
+# cap rather than stopping early, or the dead branch is back.
 # ---------------------------------------------------------------------------
 
-def test_router_stops_on_two_consecutive_unproductive_turns():
-    state = _state(UNPRODUCTIVE_STOP, productive=False)
-    assert next_debate_step(state) == "done"
-
-
-def test_router_continues_when_only_the_last_turn_was_unproductive():
-    """One side repeating itself is a bad turn; both sides repeating
-    themselves is the end of the argument."""
-    turns = [_stub_turn(0, productive=True), _stub_turn(1, productive=False)]
+def test_the_router_alternates_through_unproductive_turns_to_the_cap():
+    turns = [_stub_turn(i, productive=False) for i in range(MAX_TURNS - 1)]
     state = {"debate_turns": turns, "fundamentals_report": object()}
-    assert next_debate_step(state) == "bull"
+    assert next_debate_step(state) == (
+        "bull" if len(turns) % 2 == 0 else "bear"
+    )
 
 
-def test_router_ignores_unproductive_turns_earlier_in_the_transcript():
-    turns = [
-        _stub_turn(0, productive=False),
-        _stub_turn(1, productive=False),
-        _stub_turn(2, productive=True),
-        _stub_turn(3, productive=True),
-    ]
-    state = {"debate_turns": turns, "fundamentals_report": object()}
-    assert next_debate_step(state) == "bull"
+def test_an_all_unproductive_transcript_still_needs_the_cap_to_stop():
+    for n in range(MAX_TURNS):
+        state = _state(n, productive=False)
+        assert next_debate_step(state) != "done"
+    assert next_debate_step(_state(MAX_TURNS, productive=False)) == "done"
 
 
 def test_router_skips_the_debate_when_no_analyst_ran():
@@ -146,18 +138,18 @@ def test_termination_reason_reports_no_evidence():
     assert termination_reason({}) == "no_evidence"
 
 
-def test_termination_reason_reports_unproductive():
-    assert termination_reason(_state(UNPRODUCTIVE_STOP, productive=False)) == "unproductive"
+def test_termination_reason_has_no_third_outcome():
+    """"unproductive" was a reachable termination_reason before 2026-08-24.
+    It no longer is, because the router clause that produced it is gone —
+    the only inputs where next_debate_step returns "done" are the cap and
+    the empty-evidence case, so those are the only two reasons left."""
+    assert termination_reason(_state(MAX_TURNS, productive=False)) == "round_cap"
 
 
 def test_every_done_state_has_a_reason():
     """No exit path leaves debate_terminated_by empty — an unrecorded reason
     would read in the memo as a debate that simply ended."""
-    states = [{}, _state(MAX_TURNS), _state(UNPRODUCTIVE_STOP, productive=False)]
+    states = [{}, _state(MAX_TURNS), _state(MAX_TURNS, productive=False)]
     for state in states:
         assert next_debate_step(state) == "done"
-        assert termination_reason(state) in {
-            "round_cap",
-            "unproductive",
-            "no_evidence",
-        }
+        assert termination_reason(state) in {"round_cap", "no_evidence"}

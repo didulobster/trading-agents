@@ -112,7 +112,7 @@ async def debate_close_node(state: TradingState) -> dict:
     nothing would persist the termination reason — and a capped debate reads
     in the memo exactly like a resolved one unless the memo says otherwise.
     It sits at the head of the post-debate chain, which is the single place
-    every exit path (cap, unproductive, no-evidence) passes through.
+    every exit path (cap, no-evidence) passes through.
 
     Asserted rather than assumed: reaching this node while the router still
     wants another turn means the routing table is wrong.

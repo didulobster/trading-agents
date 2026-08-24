@@ -36,7 +36,12 @@ from app.agent.researcher import (
     log_cost,
 )
 from app.agent.trading.application.nodes import ANALYST_OUTPUTS
-from app.agent.trading.domain.debate import DebateTurn, DebateTurnPayload, Side
+from app.agent.trading.domain.debate import (
+    DebateTurn,
+    DebateTurnPayload,
+    Side,
+    canonical_claims,
+)
 from app.agent.trading.domain.news_digest import AGGREGATED_RELEVANCE
 from app.agent.trading.infrastructure.technical_interpreter_port import (
     _PERIOD_LABEL,
@@ -241,7 +246,7 @@ def _not_run(name: str) -> str:
     )
 
 
-def _render_technical(report) -> str:
+def _render_technical(report, *, quotable: bool = False) -> str:
     """Relations FIRST, then the raw values, then the prose.
 
     The relations block is Phase 3's `derive_relations` — the comparisons
@@ -259,20 +264,33 @@ def _render_technical(report) -> str:
     flagged. One relation line carries both values and the comparison
     between them.
 
-    The JSON stays. It is the only source of full precision, and a claim that
-    turns on the fourth decimal has nowhere else to cite.
+    The JSON stays — in the pack the number-fabrication guard scans. It is
+    the only source of full precision, and a claim in prose that turns on the
+    fourth decimal has nowhere else to cite.
+
+    `quotable=True` drops the JSON line. Containment on a serialized dict
+    lets `evidence_quote` cite `macd_histogram":0.3556307403914323` verbatim
+    — the check passes, because it IS in the pack, but the debater is
+    grepping the raw blob rather than citing anything the analyst actually
+    said. Found live (ACN, technical-only pack, 2026-08-24): 2 of 4 claims in
+    one turn quoted a raw JSON key:value fragment this way. Used only for the
+    quote-check corpus (`quotable_texts`) — `build_evidence_pack` still gets
+    the full render, so the number-fabrication guard keeps the precision
+    backstop and a faithfully-copied figure in argument prose is not falsely
+    flagged as fabricated.
     """
     relations = "\n".join(f"- {r}" for r in derive_relations(report.indicators))
-    return (
+    header = (
         f"TECHNICAL (as of {report.as_of_date}, {report.data_source}, "
         f"{report.bars_used} bars):\n"
         f"Computed relations (AUTHORITATIVE — worked out in code, not by a "
         f"model. State them as given; never contradict them, and never "
         f"re-derive a comparison yourself from the raw values below):\n"
         f"{relations}\n"
-        f"Indicators (full precision): {report.indicators.model_dump_json()}\n"
-        f"Interpretation: {report.interpretation}"
     )
+    if not quotable:
+        header += f"Indicators (full precision): {report.indicators.model_dump_json()}\n"
+    return header + f"Interpretation: {report.interpretation}"
 
 
 def _render_news(digest) -> str:
@@ -361,6 +379,22 @@ def report_texts(state) -> dict[str, str]:
             else _not_run("sentiment")
         ),
     }
+
+
+def quotable_texts(state) -> dict[str, str]:
+    """`report_texts`, but for the corpus `check_quotes` validates against.
+
+    Identical for every source except technical, where the raw indicators
+    JSON is dropped — see `_render_technical`'s `quotable` docstring for why.
+    `build_evidence_pack` keeps calling `report_texts` (unchanged), so the
+    number-fabrication guard still has the JSON as ground truth; only the
+    quote check loses it.
+    """
+    texts = report_texts(state)
+    technical = state.get("technical_report")
+    if technical is not None:
+        texts["technical"] = _render_technical(technical, quotable=True)
+    return texts
 
 
 def build_evidence_pack(state) -> str:
@@ -696,13 +730,37 @@ def check_rebuts(payload: DebateTurnPayload, turns: list[DebateTurn], side: Side
 def is_productive(payload: DebateTurnPayload, turns: list[DebateTurn]) -> bool:
     """Did this turn introduce a claim_id nobody had used yet?
 
-    Cost lever and honest reading in one: if neither side has a new claim,
-    the remaining rounds are restatement.
+    OBSERVATIONAL as of 2026-08-24 — see DebateTurn.productive. Still
+    computed and still recorded, because it costs nothing and it is still an
+    honest reading of a turn; it just no longer feeds the router.
     """
     prior_ids = {
         claim.claim_id for turn in turns for claim in turn.payload.claims
     }
     return bool({claim.claim_id for claim in payload.claims} - prior_ids)
+
+
+def check_claim_stability(payload: DebateTurnPayload, turns: list[DebateTurn]) -> list[str]:
+    """claim_ids in this turn whose text disagrees with their first occurrence.
+
+    Flags, does not raise — a model paraphrasing the same point in different
+    words across turns is expected, and rejecting every wording change would
+    make claim_id reuse impractical. What this catches is the case that
+    matters: two turns using one id for what reads as two different
+    assertions, silently, with nothing recording that it happened.
+
+    Compares against the FIRST occurrence specifically (via `canonical_claims`
+    on the transcript so far), matching the meaning `canonical_claims` fixes
+    for any downstream aggregation — this check and that function agree on
+    what a claim_id means, which is the whole point of having both.
+    """
+    first_by_id = canonical_claims(turns)
+    return [
+        claim.claim_id
+        for claim in payload.claims
+        if claim.claim_id in first_by_id
+        and first_by_id[claim.claim_id].text != claim.text
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -828,7 +886,7 @@ async def run_debate_turn(
 
     ticker = state["ticker"]
     turns: list[DebateTurn] = list(state.get("debate_turns") or [])
-    texts = report_texts(state)
+    texts = quotable_texts(state)
     pack = build_evidence_pack(state)
     client = client or AsyncAnthropic()
 
@@ -888,6 +946,7 @@ async def run_debate_turn(
         side=side,
         payload=payload,
         productive=is_productive(payload, turns),
+        claim_text_drift=check_claim_stability(payload, turns),
         guard_flags=_flag_debate_numbers(
             payload.argument + "\n" + "\n".join(c.text for c in payload.claims),
             pack,
@@ -912,6 +971,7 @@ def _format_debate_markdown(
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
     flagged = [f for t in turns for f in t.guard_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
+    drifted = sorted({cid for t in turns for cid in t.claim_text_drift})
     concessions = [t for t in turns if t.payload.stance == "concede"]
 
     lines = [
@@ -945,6 +1005,13 @@ def _format_debate_markdown(
             f"**{len(unquoted)} claim(s) cite a report but the quoted span is not "
             f"in it:** {', '.join(unquoted[:10])}."
         )
+    if drifted:
+        caveats.append(
+            f"**{len(drifted)} claim_id(s) were reused with different wording:** "
+            f"{', '.join(drifted[:10])}. A claim_id is meant to name one stable "
+            f"assertion — read `canonical_claims` (the first occurrence) as the "
+            f"authoritative wording, not whichever turn is read last."
+        )
     if caveats:
         lines += ["## Caveats", ""] + [f"- {c}" for c in caveats] + [""]
 
@@ -955,9 +1022,11 @@ def _format_debate_markdown(
         "|---|---|",
         f"| Turns | {len(turns)} |",
         f"| Structurally-justified concessions | {len(concessions)} |",
-        f"| Unproductive turns (no new claim) | {sum(1 for t in turns if not t.productive)} |",
+        f"| Unproductive turns (no new claim, observational only) | "
+        f"{sum(1 for t in turns if not t.productive)} |",
         f"| Flagged figures | {len(flagged)} |",
         f"| Unverified quotes | {len(unquoted)} |",
+        f"| Reused claim_ids with drifted text | {len(drifted)} |",
         f"| Estimated cost | ${total:.4f} |",
         "",
         "## Transcript",
@@ -984,14 +1053,20 @@ def _format_debate_markdown(
         for claim in turn.payload.claims:
             text = claim.text.replace("|", "\\|")
             quote = claim.evidence_quote.replace("|", "\\|")
+            marker = " ⚠︎" if claim.claim_id in turn.claim_text_drift else ""
             lines.append(
-                f"| `{claim.claim_id}` | {claim.evidence_ref} | {text} | {quote} |"
+                f"| `{claim.claim_id}`{marker} | {claim.evidence_ref} | {text} | {quote} |"
             )
         if turn.guard_flags:
             lines.append("")
             lines.append(f"*Flagged figures:* {', '.join(turn.guard_flags)}")
         if turn.unquoted_evidence:
             lines.append(f"*Unverified quotes:* {', '.join(turn.unquoted_evidence)}")
+        if turn.claim_text_drift:
+            lines.append(
+                f"*⚠︎ Reused with different wording than the first occurrence:* "
+                f"{', '.join(turn.claim_text_drift)}"
+            )
         lines.append("")
 
     return "\n".join(lines)

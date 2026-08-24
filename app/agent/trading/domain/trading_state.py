@@ -44,8 +44,10 @@ class TradingState(TypedDict, total=False):
     # the pre-crash snapshot. Plain add is correct here.
     debate_turns: Annotated[list[DebateTurn], operator.add]
 
-    # Which termination layer stopped the debate: "round_cap" | "unproductive"
-    # | "no_evidence" | "". Recorded because a capped debate reads in the memo
+    # Which termination layer stopped the debate: "round_cap" | "no_evidence"
+    # | "". ("unproductive" existed until 2026-08-24 — removed with the
+    # router clause that produced it, since it never fired live; see
+    # debate_router.py.) Recorded because a capped debate reads in the memo
     # exactly like a resolved one unless the memo says otherwise.
     debate_terminated_by: str
     risk_summary: str

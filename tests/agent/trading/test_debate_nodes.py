@@ -144,16 +144,21 @@ async def test_close_node_records_a_skipped_debate():
 
 
 @pytest.mark.anyio
-async def test_close_node_records_an_unproductive_stop():
+async def test_close_node_does_not_treat_an_unproductive_pair_as_done():
+    """Regression for the removed early stop (2026-08-24): two consecutive
+    productive=False turns used to be a legitimate reason for the router to
+    say 'done', and this node to record it. It is not any more — the router
+    only considers the debate done at the cap or with no evidence at all, so
+    close_node reached on a 2-turn unproductive transcript must refuse, the
+    same way it refuses on any other live debate."""
     state = {
         "ticker": "ACN",
         "debate_turns": [_turn(0, productive=False), _turn(1, productive=False)],
         "fundamentals_report": object(),
     }
 
-    assert await debate_nodes.debate_close_node(state) == {
-        "debate_terminated_by": "unproductive"
-    }
+    with pytest.raises(RuntimeError, match="conditional edge map is wrong"):
+        await debate_nodes.debate_close_node(state)
 
 
 @pytest.mark.anyio

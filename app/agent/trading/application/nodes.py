@@ -290,6 +290,20 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             + (f" (+{len(unquoted) - 5} more)" if len(unquoted) > 5 else "")
         )
 
+    # A claim_id is meant to name one stable assertion, reused across turns.
+    # Nothing stops a later occurrence from carrying different text — found
+    # live (ACN, 2026-08-24): one id named two different claims across two
+    # turns. Aggregation by claim_id (Phase 6's risk debate is the reason
+    # this matters) must read through `canonical_claims`, not this list —
+    # the caveat only makes the drift visible, it does not resolve it.
+    drifted = sorted({cid for t in turns for cid in t.claim_text_drift})
+    if drifted:
+        gaps.append(
+            f"{len(drifted)} claim_id(s) were reused with different wording across "
+            f"turns, so they do not name one stable assertion: {', '.join(drifted[:5])}"
+            + (f" (+{len(drifted) - 5} more)" if len(drifted) > 5 else "")
+        )
+
     if state.get("debate_terminated_by") == "round_cap":
         gaps.append(
             f"the debate hit the {len(turns) // 2}-round cap rather than resolving — "

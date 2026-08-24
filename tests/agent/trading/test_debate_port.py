@@ -18,7 +18,12 @@ import pytest
 from pydantic import ValidationError
 
 import app.agent.trading.infrastructure.debate_port as port
-from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
+from app.agent.trading.domain.debate import (
+    DebateClaim,
+    DebateTurn,
+    DebateTurnPayload,
+    canonical_claims,
+)
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
@@ -471,6 +476,116 @@ def test_a_turn_that_only_restates_known_claim_ids_is_unproductive():
 
 
 # ---------------------------------------------------------------------------
+# claim_id text stability — a completeness gap closed 2026-08-24.
+#
+# claim_id reuse is what the productivity lever and any future aggregation
+# by id both depend on, and nothing checked that a reused id kept the same
+# meaning. Found live (ACN, technical-only pack, 2026-08-24):
+# `acn-volume-deteriorating` carried "collapsing conviction that exposes
+# recovery moves to reversal risk" in turn 3 and "deteriorating participation
+# that undermines recovery conviction" in turn 5 — one id, two claims.
+# ---------------------------------------------------------------------------
+
+def test_reusing_an_id_with_identical_text_is_not_flagged():
+    turns = [_turn(0, "bull", ["stable-id"])]   # _turn's default claim text is "t"
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{"claim_id": "stable-id", "text": "t", "evidence_ref": "none"}])
+    )
+    assert port.check_claim_stability(payload, turns) == []
+
+
+def test_reusing_an_id_with_different_text_is_flagged():
+    """Flags, does not raise — see the module docstring on check_claim_
+    stability for why a hard reject would make claim_id reuse impractical."""
+    turns = [_turn(0, "bull", ["acn-volume-deteriorating"])]
+    turns[0].payload.claims[0].text = (
+        "collapsing conviction that exposes recovery moves to reversal risk"
+    )
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "acn-volume-deteriorating",
+            "text": "deteriorating participation that undermines recovery conviction",
+            "evidence_ref": "none",
+        }])
+    )
+    assert port.check_claim_stability(payload, turns) == ["acn-volume-deteriorating"]
+
+
+def test_stability_compares_against_the_first_occurrence_not_the_latest():
+    """A third occurrence must be compared to the ORIGINAL text, not
+    whatever the second occurrence drifted to — otherwise a slow drift across
+    many turns could pass one check at a time while ending up far from what
+    the id originally named."""
+    t0 = _turn(0, "bull", ["drift-id"])
+    t0.payload.claims[0].text = "original wording"
+    t1 = _turn(1, "bear", ["drift-id"])
+    t1.payload.claims[0].text = "already drifted once"   # 2nd occurrence
+
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "drift-id",
+            "text": "already drifted once",   # matches t1, not t0
+            "evidence_ref": "none",
+        }])
+    )
+    assert port.check_claim_stability(payload, [t0, t1]) == ["drift-id"]
+
+
+def test_a_brand_new_claim_id_is_never_flagged():
+    assert port.check_claim_stability(
+        DebateTurnPayload.model_validate(_payload()), []
+    ) == []
+
+
+@pytest.mark.anyio
+async def test_run_debate_turn_records_drift_without_raising():
+    """The end-to-end path: drift lands on the turn record, not as an
+    exception. A structural violation (check_concession, check_rebuts) kills
+    the node; paraphrase drift is informational and must not."""
+    turns = [_turn(0, "bull", ["shared-id"])]
+    turns[0].payload.claims[0].text = "first wording"
+    client = _FakeClient([_payload(claims=[{
+        "claim_id": "shared-id",
+        "text": "second wording",
+        "evidence_ref": "none",
+    }])])
+
+    turn = await port.run_debate_turn(_state(debate_turns=turns), "bear", 1, client=client)
+
+    assert turn.claim_text_drift == ["shared-id"]
+
+
+# ---------------------------------------------------------------------------
+# canonical_claims — the actual aggregation-safety mechanism. Lives in
+# domain/debate.py, not here, because it has zero infra dependencies and
+# Phase 6's risk debate is meant to import it directly.
+# ---------------------------------------------------------------------------
+
+def test_canonical_claims_keeps_the_first_occurrence_on_reuse():
+    t0 = _turn(0, "bull", ["shared-id"])
+    t0.payload.claims[0].text = "first wording"
+    t1 = _turn(1, "bear", ["shared-id"])
+    t1.payload.claims[0].text = "second wording"
+
+    result = canonical_claims([t0, t1])
+
+    assert result["shared-id"].text == "first wording"
+
+
+def test_canonical_claims_covers_every_id_across_every_turn():
+    t0 = _turn(0, "bull", ["a", "b"])
+    t1 = _turn(1, "bear", ["c"])
+
+    result = canonical_claims([t0, t1])
+
+    assert set(result) == {"a", "b", "c"}
+
+
+def test_canonical_claims_of_an_empty_transcript_is_empty():
+    assert canonical_claims([]) == {}
+
+
+# ---------------------------------------------------------------------------
 # (e) Quote verification
 # ---------------------------------------------------------------------------
 
@@ -521,6 +636,10 @@ def _technical_state() -> dict:
 
 
 def _quote_flags(quote: str, ref: str = "technical") -> list[str]:
+    """Uses `quotable_texts`, the corpus `run_debate_turn` actually validates
+    against in production — not `report_texts`, which still carries the raw
+    JSON for `build_evidence_pack`/the number-fabrication guard. See
+    `quotable_texts`'s docstring for why the two diverge."""
     payload = DebateTurnPayload.model_validate(
         _payload(claims=[{
             "claim_id": "c",
@@ -529,17 +648,48 @@ def _quote_flags(quote: str, ref: str = "technical") -> list[str]:
             "evidence_quote": quote,
         }])
     )
-    return port.check_quotes(payload, port.report_texts(_technical_state()))
+    return port.check_quotes(payload, port.quotable_texts(_technical_state()))
 
 
-def test_a_citation_that_differs_only_in_punctuation_spacing_verifies():
-    """The technical section of the pack is compact JSON, so the report reads
-    `"rsi_14":38.72` while a debater naturally writes `rsi_14: 38.72`. On the
-    first live Haiku turns that flagged 4 claims out of 4, every one of them
-    faithful — the guard was reporting its own rendering choice as
-    fabrication."""
-    assert _quote_flags("rsi_14: 38.721899422317186") == []
-    assert _quote_flags('"rsi_14":38.721899422317186') == []
+def test_raw_json_is_not_a_valid_quote_source_regardless_of_punctuation():
+    """This test's history is the arc of the underlying bug.
+
+    Originally: the technical section was compact JSON, so the report read
+    `"rsi_14":38.72` while a debater naturally wrote `rsi_14: 38.72` — same
+    value, different punctuation. Comparing raw, that flagged 4 of 4 live
+    Haiku claims, every one faithful. `_norm` was added to strip punctuation
+    and whitespace before comparing, which fixed it — the assertion here used
+    to be `== []` for both spellings.
+
+    That fix was too permissive in a different way: `_norm` doesn't care
+    WHAT text it matches against, so once it tolerated `rsi_14: 38.72` it
+    also tolerated `"rsi_14":38.72` verbatim — the debater grepping the raw
+    serialized dict rather than citing anything the analyst said. Found live
+    (ACN, technical-only pack, 2026-08-24): 2 of 4 claims in one turn cited a
+    raw `key":value` fragment this way. `evidence_ref != 'none'` is supposed
+    to mean "grounded in a report", and a JSON fragment is not what the
+    report SAYS.
+
+    The actual fix is `quotable_texts` excluding the raw JSON from the
+    corpus entirely (see `_render_technical`'s `quotable` param), so both
+    spellings below now fail regardless of how well punctuation is
+    normalized — normalization was never the right lever for this one.
+    """
+    assert _quote_flags("rsi_14: 38.721899422317186") == ["c"]
+    assert _quote_flags('"rsi_14":38.721899422317186') == ["c"]
+
+
+def test_the_relations_block_remains_quotable_after_the_json_exclusion():
+    """The fix must not overcorrect: `derive_relations`'s output is Python-
+    computed and authoritative (§8 of the as-built guide) — excluding raw
+    JSON must not also exclude the relations sentences that were added
+    specifically to give claims something legitimate to cite."""
+    assert _quote_flags(
+        "RSI (38.72) is NEITHER overbought nor oversold (between 30 and 70)"
+    ) == []
+    assert _quote_flags(
+        "last close (368.45) is ABOVE the 200-day average (368.30)"
+    ) == []
 
 
 def test_a_quote_copied_across_a_line_wrap_verifies():
