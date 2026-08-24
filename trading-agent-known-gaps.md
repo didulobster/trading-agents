@@ -112,7 +112,14 @@ when actually closed, not when they become inconvenient.
    lookahead hole in any historical probe. Fix when historical backtesting
    is actually needed, not before.
 
-## Phase 5 — Bull/Bear Debate (logged 2026-08-23)
+## Phase 5 — Bull/Bear Debate (logged 2026-08-23, updated 2026-08-24)
+
+**Exit criteria: all three met.** Five full pipeline runs (AVGO, ACN, FIG,
+ASML, MSFT), fresh thread ids, every one terminating at `round_cap` with
+contiguous indices, strict alternation and cost under budget; both
+forced-crash resume variants pass. Debate cost $0.077–$0.094 per run against
+a $0.35 ceiling. What follows is what those runs revealed *about the quality
+of the debate*, which the exit criteria do not test.
 
 1. **A crash in the first moments of a super-step loses the previous turn's
    completed work.** Found by running the two forced-crash resume tests
@@ -165,15 +172,15 @@ when actually closed, not when they become inconvenient.
    trains readers to skip the flags; if it does, the answer is a separate
    "derived from pack values" category rather than dropping the rule.
 
-4. **Both sides held for all six turns; nothing conceded, nothing
-   sharpened.** The first live debate produced `stance="hold"` 6/6 and zero
-   concessions. The §5(a) guard makes an *unjustified* concession
-   impossible, but nothing makes a justified one attractive, and total
-   entrenchment is as uninformative as convergence — it just fails in the
-   opposite direction. `claim_id` reuse worked (gap 5 below did not
-   materialize), so the early-stop lever is live; the stance field is not
-   yet doing any work. Watch across more runs before changing the prompt.
+4. **Almost nothing is ever conceded or sharpened.** Across **five full
+   pipeline runs, 30 turns**: 29 `hold`, 1 `sharpen`, **0 `concede`**. The
+   §5(a) guard makes an *unjustified* concession structurally impossible, but
+   nothing makes a justified one attractive, and total entrenchment is as
+   uninformative as convergence — it just fails in the opposite direction.
 
+   The single `sharpen` (FIG, turn 3) is the one piece of evidence the stance
+   field is not dead weight. The concession guard has still never fired in
+   production, so its correctness rests entirely on unit tests.
 5. **Debate quality is now tied to `LLM_CLAUDE_MODEL`, and Haiku 4.5 makes
    analytical errors Sonnet 5 did not.** `DEBATE_MODEL` follows the
    project-wide setting as of 2026-08-23. Mechanically Haiku is fine — no
@@ -246,41 +253,46 @@ when actually closed, not when they become inconvenient.
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
 
-8. **`claim_id` reuse is prompt-dependent, and on a full pack it collapsed
-   entirely.** A model inventing a fresh slug for a restated claim inflates
-   `productive` and defeats the early stop. It fails toward *more* rounds,
-   capped at `MAX_TURNS` — a safe direction, but the lever is weaker than it
-   reads.
+8. **`claim_id` reuse does not happen at all on a full pack, so the early
+   stop can never fire.** A model inventing a fresh slug for a restated claim
+   inflates `productive` and defeats the unproductive early stop. It fails
+   toward *more* rounds, capped at `MAX_TURNS` — a safe direction.
 
-   *Measured:* on a technical-only pack, ids were reused across turns
-   (`above-200sma` appeared in turns 0, 2 and 4). On the full-pack run,
-   **25 claims produced 25 distinct ids — zero reuse** — so all six turns
-   scored `productive=True` and the unproductive early stop could not fire
-   under any circumstances. The debate was still engaging rather than talking
-   past itself (`rebuts` grew 0, 2, 2, 3, 3, 4), so the turns were not
-   wasted; the cost lever simply is not there. Treat `MAX_ROUNDS` as the only
-   real bound on debate spend.
+   *Measured across five full runs: **145 claims produced 145 distinct ids —
+   zero reuse.*** Every turn of every run scored `productive=True`, every run
+   terminated `round_cap`, and the unproductive branch of `next_debate_step`
+   has never once been reached outside a unit test. On a small
+   technical-only pack ids *were* reused, so this is a property of pack size,
+   not of the prompt alone.
 
-9. **[Partly addressed 2026-08-23] The debate barely used the news
-   evidence.** On the full-pack AVGO run, of 25 claims: 17 cited
-   fundamentals, 7 cited nothing, **1 cited news**, and 0 cited technical —
-   against a news leg that had just scored 61 primary articles at +0.48
-   sentiment and cost $0.075.
+   Consequences: **`MAX_ROUNDS` is the only real bound on debate spend** —
+   every debate costs the full six turns — and `UNPRODUCTIVE_STOP` is
+   currently decorative. Either accept that and delete the lever, or give the
+   model the prior turns' `claim_id`s explicitly and require reuse.
+9. **[Partly addressed] The debate barely uses the news evidence, and
+   barely uses the technical report at all.** Citations across five full
+   runs, 145 claims:
 
-   The pack was also carrying every article the vendor returned, including
-   the 127 the sentiment node had already judged `mentioned` or `unrelated`.
-   The pack now lists only what `AGGREGATED_RELEVANCE` counts, and states how
-   many it withheld. Measured: AVGO's pack 61,346 -> 37,716 chars (-39%),
-   ACN's 34,702 -> 31,657 (-9%) — the saving scales with how noisy the
-   ticker's feed is, so it is largest exactly where it was needed.
+   | source | claims | share | unverified |
+   |---|---|---|---|
+   | fundamentals | 118 | 81% | 28% |
+   | none (reasoning) | 16 | 11% | — |
+   | news | 9 | 6% | 22% |
+   | **technical** | **2** | **1%** | 50% |
 
-   *Residual:* trimming the pack does not make the debaters cite news. The
-   1-in-25 ratio was measured before the trim and has not been re-measured
-   after it. Ordering, length-balancing, or per-source claim quotas remain
-   plausible and none is obviously right; measure another ticker before
-   choosing. The primary-article count is also still unbounded — a genuine
-   event week could put a hundred primary articles in the pack, and the only
-   cap upstream is `MAX_ARTICLES=300` on the digest.
+   The fundamentals memo dominates the argument regardless of what else is in
+   the pack. Note the technical row: the `derive_relations` block added to fix
+   the "RSI 38.7 is oversold" error is **almost never exercised on a full
+   pack** — 2 citations in 145 — so that fix is verified only on
+   technical-only runs.
+
+   The pack trim helped the *cost* side conclusively. MSFT carried 247 news
+   items into a 44,073-char pack, while pre-trim AVGO carried 188 into
+   61,346. It did not measurably move citation share.
+
+   Ordering, length-balancing, or per-source claim quotas remain plausible;
+   none is obviously right. The primary-article count is also still unbounded
+   — the only cap upstream is `MAX_ARTICLES=300` on the digest.
 10. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
