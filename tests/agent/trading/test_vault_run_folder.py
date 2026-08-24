@@ -87,7 +87,7 @@ def _memo() -> DecisionMemo:
         risk_debate_summary="STUB",
         technical_signal="Momentum is soft.",
         reasoning="STUB",
-        suggested_strategy="STUB",
+        watch_items=[],
         verdict=Verdict.HOLD,
         confidence=0.0,
         data_as_of_date=AS_OF,

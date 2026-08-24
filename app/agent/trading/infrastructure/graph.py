@@ -11,9 +11,15 @@ from app.agent.trading.application.nodes import (
     technical_node,
     news_node,
     sentiment_node,
-    risk_node,
     synthesizer_node,
 )
+from app.agent.trading.application.risk_nodes import (
+    aggressive_turn_node,
+    conservative_turn_node,
+    neutral_turn_node,
+    risk_close_node,
+)
+from app.agent.trading.application.risk_router import next_risk_step
 from app.agent.trading.domain.trading_state import TradingState
 
 # One entry per analyst as the CLI exposes it; the value is that analyst's
@@ -27,22 +33,36 @@ ANALYST_CHAINS = {
 }
 ALL_ANALYSTS = tuple(ANALYST_CHAINS)
 
-# The tail is no longer one chain. The debate is a CYCLE — bull and bear
-# alternate under a conditional edge until the router says stop — and a cycle
-# cannot be expressed as a zip(chain, chain[1:]) edge pair, which is why this
-# builder grew a second shape rather than one more tuple entry.
+# Two cycles, not one. The debate is bull/bear alternating under
+# next_debate_step; the risk panel is neutral/aggressive/conservative
+# rotating under next_risk_step, entered only after the debate closes. Each
+# is its own conditional-edge group because a cycle cannot be expressed as a
+# zip(chain, chain[1:]) edge pair — this is the same reason DEBATE_NODES
+# grew a second shape rather than one more tuple entry in Phase 5, and
+# RISK_NODES repeats it for a three-way rotation instead of two-way
+# alternation.
 DEBATE_NODES = (("bull_turn", bull_turn_node), ("bear_turn", bear_turn_node))
-
-# debate_close/risk/synthesizer always run: the memo is the pipeline's output
-# contract, and a partial run should still say what it did and did not see.
-# debate_close is first because it is the single point every exit path from
-# the cycle passes through, which is where the termination reason gets
-# recorded.
-POST_DEBATE_NODES = (
-    ("debate_close", debate_close_node),
-    ("risk", risk_node),
-    ("synthesizer", synthesizer_node),
+RISK_NODES = (
+    ("neutral_turn", neutral_turn_node),
+    ("aggressive_turn", aggressive_turn_node),
+    ("conservative_turn", conservative_turn_node),
 )
+
+# debate_close is the single point every exit path from the debate cycle
+# passes through (cap or no-evidence), which is where the termination
+# reason gets recorded and where the risk panel's conditional ENTRY edge
+# attaches — same reason the analyst->debate entry edge is conditional
+# rather than plain: a plain edge into neutral_turn would run one turn
+# before any router saw the state, so risk_router's no-debate short-circuit
+# could never skip the panel.
+POST_DEBATE_NODES = (("debate_close", debate_close_node),)
+
+# risk_close plays the identical role for the risk cycle that debate_close
+# plays for the debate: it is where risk_terminated_by gets recorded, and
+# every exit path from RISK_NODES routes through it before the synthesizer
+# — the memo is the pipeline's output contract, so a partial run must still
+# say what it did and did not see rather than skip straight to a stub.
+POST_RISK_NODES = (("risk_close", risk_close_node), ("synthesizer", synthesizer_node))
 
 
 def build_trading_graph(checkpointer, interrupt_after=None, analysts=None):
@@ -50,27 +70,21 @@ def build_trading_graph(checkpointer, interrupt_after=None, analysts=None):
     ["technical"]. Used by the checkpoint round-trip test to stop the graph
     deterministically at a node boundary.
 
-    Two things that were true before Phase 5 and are not any more:
+    `interrupt_after` on either CYCLIC node group interrupts after EVERY
+    execution of a member — `interrupt_after=["bull_turn"]` stops after turn
+    0, then turn 2, then turn 4; `interrupt_after=["neutral_turn"]` stops
+    after risk turn 0, then turn 3. Read N interrupts as N interrupts, not a
+    runaway (same note Phase 5 left for DEBATE_NODES).
 
-      * "The stub nodes downstream have no I/O to await and complete within
-        microseconds of each other, so there is no wall-clock window in which
-        an OS signal could land between them." `bull_turn` and `bear_turn`
-        make network calls taking seconds. That window is now wide, which is
-        what makes a `kill -9` resume test meaningful rather than a race that
-        cannot be hit.
-      * `interrupt_after` on a CYCLIC node interrupts after EVERY execution of
-        it. `interrupt_after=["bull_turn"]` stops after turn 0, then turn 2,
-        then turn 4 — three separate resumes, not "stop once here". That is a
-        legitimate test tool, but read three interrupts as three interrupts,
-        not as a runaway.
+    Existing pre-Phase-6 threads (including anything checkpointed against
+    the Phase 5 graph, which had `risk` as a single stub node and no risk
+    cycle) are unresumable under this graph shape — the node names differ
+    entirely. Use a fresh --thread-id.
 
-    Existing pre-Phase-5 threads are unresumable: the node name `debate` no
-    longer exists in this graph. Use a fresh --thread-id.
-
-    `analysts` selects which analyst legs run, e.g. ["news"]; None runs all of
-    them. Selection order is ignored — legs always run in ANALYST_CHAINS order
-    so that a subset run is a strict subsequence of the full run, and any
-    later cross-analyst dependency holds in both."""
+    `analysts` selects which analyst legs run, e.g. ["news"]; None runs all
+    of them. Selection order is ignored — legs always run in
+    ANALYST_CHAINS order so that a subset run is a strict subsequence of
+    the full run, and any later cross-analyst dependency holds in both."""
     unknown = sorted(set(analysts or ()) - set(ALL_ANALYSTS))
     if unknown:
         raise ValueError(
@@ -88,32 +102,50 @@ def build_trading_graph(checkpointer, interrupt_after=None, analysts=None):
     builder = StateGraph(TradingState)
 
     analyst_chain = [node for a in selected for node in ANALYST_CHAINS[a]]
-    tail = list(POST_DEBATE_NODES)
+    debate_tail = list(POST_DEBATE_NODES)
+    risk_tail = list(POST_RISK_NODES)
 
-    for name, fn in analyst_chain + list(DEBATE_NODES) + tail:
+    for name, fn in (
+        analyst_chain
+        + list(DEBATE_NODES)
+        + debate_tail
+        + list(RISK_NODES)
+        + risk_tail
+    ):
         builder.add_node(name, fn)
 
     builder.add_edge(START, analyst_chain[0][0])
     for (prev, _), (nxt, _) in zip(analyst_chain, analyst_chain[1:]):
         builder.add_edge(prev, nxt)
 
-    # The ENTRY edge is conditional too, not only the loop-back edges. That is
-    # what lets the router skip the debate entirely when no analyst ran and
-    # there is no evidence pack to argue over; a plain edge into bull_turn
-    # would execute one turn before any router ever saw the state.
-    #
-    # Both debate nodes get the FULL route map, including the bull -> bull
-    # branch that correct alternation never takes. If it ever fires, the
-    # result is a visible loop in the checkpoint history that the alternation
-    # assert in debate_nodes then names precisely — not a KeyError deep in
-    # LangGraph routing that reads as a framework bug.
-    route_map = {"bull": "bull_turn", "bear": "bear_turn", "done": tail[0][0]}
+    # The debate cycle's entry edge is conditional, same reasoning as Phase
+    # 5: the router must see the state before the first turn runs, or the
+    # no-evidence skip can never fire. Both debate nodes get the full route
+    # map including the never-taken same-side branch — if it ever fires,
+    # the result is a visible loop the alternation assert in debate_nodes
+    # then names precisely, not a KeyError deep in LangGraph routing.
+    debate_route_map = {"bull": "bull_turn", "bear": "bear_turn", "done": debate_tail[0][0]}
     for src in (analyst_chain[-1][0], "bull_turn", "bear_turn"):
-        builder.add_conditional_edges(src, next_debate_step, route_map)
+        builder.add_conditional_edges(src, next_debate_step, debate_route_map)
 
-    for (prev, _), (nxt, _) in zip(tail, tail[1:]):
+    for (prev, _), (nxt, _) in zip(debate_tail, debate_tail[1:]):
         builder.add_edge(prev, nxt)
-    builder.add_edge(tail[-1][0], END)
+
+    # Same shape one cycle up: debate_close is the risk panel's conditional
+    # entry point, and every risk node carries the full three-way route map
+    # plus "done".
+    risk_route_map = {
+        "neutral": "neutral_turn",
+        "aggressive": "aggressive_turn",
+        "conservative": "conservative_turn",
+        "done": risk_tail[0][0],
+    }
+    for src in (debate_tail[-1][0], "neutral_turn", "aggressive_turn", "conservative_turn"):
+        builder.add_conditional_edges(src, next_risk_step, risk_route_map)
+
+    for (prev, _), (nxt, _) in zip(risk_tail, risk_tail[1:]):
+        builder.add_edge(prev, nxt)
+    builder.add_edge(risk_tail[-1][0], END)
 
     return builder.compile(
         checkpointer=checkpointer, interrupt_after=interrupt_after or []

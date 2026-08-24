@@ -5,6 +5,7 @@ from app.agent.trading.domain.debate import DebateTurn
 from app.agent.trading.domain.decision_memo import DecisionMemo
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.news_digest import NewsDigest, SentimentSummary
+from app.agent.trading.domain.risk import RiskTurn
 from app.agent.trading.domain.technical_report import TechnicalReport
 
 
@@ -50,5 +51,26 @@ class TradingState(TypedDict, total=False):
     # debate_router.py.) Recorded because a capped debate reads in the memo
     # exactly like a resolved one unless the memo says otherwise.
     debate_terminated_by: str
-    risk_summary: str
+
+    # The risk panel's transcript, one entry per turn. Same shape and same
+    # reason as debate_turns: the panel is a CYCLE across three personas, so
+    # an add-reducer is required and nodes return a one-element delta, never
+    # the accumulated list. No separate round counter — round state IS
+    # len(risk_turns) // len(PERSONAS), same "no second source of truth"
+    # rule debate_turns follows.
+    #
+    # `risk_summary` (a plain str channel, one LLM-authored paragraph) is
+    # DELETED, not merely renamed — Phase 6 replaced it with risk_turns plus
+    # a ledger the synthesizer derives from them, the same move Phase 5 made
+    # for debate_summary -> debate_turns. Rendering a summary string AND
+    # keeping the structured turns would be two sources of truth for one
+    # piece of content, and the one that only the synthesizer reads is the
+    # one nothing would catch drifting from the other.
+    risk_turns: Annotated[list[RiskTurn], operator.add]
+
+    # Which termination layer stopped the panel: "round_cap" | "no_debate" |
+    # "". Deliberately only two reachable reasons, same as debate_terminated_by
+    # — there is no productivity/convergence branch to name a third one.
+    risk_terminated_by: str
+
     decision_memo: DecisionMemo
