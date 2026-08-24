@@ -445,8 +445,16 @@ def render_transcript(turns: list[DebateTurn]) -> str:
 # so the constraint is not lost, just not advertised. Where the bound matters
 # to the model (claims 1..5) it is restated in prose in the field
 # description.
+#
+# `minimum`/`maximum` joined this set in Phase 6, found live: RiskScore's
+# `severity`/`likelihood` (pydantic `ge=1, le=5`) 400'd every risk-panel turn
+# with "For 'integer' type, properties maximum, minimum are not supported" —
+# unlike Phase 5's array-length bounds, which were anticipated from the API
+# docs, this one was not caught until a real call hit it. Same fix: state the
+# 1-5 range in the field description (domain/risk.py), and rely on pydantic
+# to still enforce it once the value comes back.
 _STRICT_UNSUPPORTED = frozenset(
-    {"minItems", "maxItems", "minLength", "maxLength", "pattern", "format"}
+    {"minItems", "maxItems", "minLength", "maxLength", "pattern", "format", "minimum", "maximum"}
 )
 
 

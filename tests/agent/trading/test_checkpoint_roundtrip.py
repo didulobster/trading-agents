@@ -48,9 +48,13 @@ from pydantic import BaseModel
 
 import app.agent.trading.application.debate_nodes as debate_nodes
 import app.agent.trading.application.nodes as nodes
+import app.agent.trading.application.risk_nodes as risk_nodes
+from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
+from app.agent.trading.domain.risk import PERSONAS, RiskTurn, RiskTurnPayload
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 from app.agent.trading.domain.trading_state import TradingState
 from app.agent.trading.infrastructure.checkpointer import (
@@ -477,7 +481,7 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
             generated_at=date(2026, 8, 19),
         )
 
-    async def fake_price_history(ticker: str):
+    async def fake_price_history(ticker: str, as_of: date):
         return df, "fixture", 0
 
     async def fake_interpret(ticker: str, indicators):
@@ -568,6 +572,45 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
         )
 
     monkeypatch.setattr(debate_nodes, "run_debate_turn", fake_debate_turn)
+
+    # Same reason as the debate stub above, one cycle further: the risk
+    # panel and the synthesizer both run for real after the debate now, and
+    # both would otherwise make real network calls during what these tests
+    # intend as an offline checkpoint round-trip.
+    async def fake_risk_turn(state, persona, turn_index):
+        return RiskTurn(
+            turn_index=turn_index,
+            round_num=(turn_index // len(PERSONAS)) + 1,
+            persona=persona,
+            payload=RiskTurnPayload(argument=f"stub argument from {persona}"),
+            estimated_cost_usd=0.01,
+        )
+
+    monkeypatch.setattr(risk_nodes, "run_risk_turn", fake_risk_turn)
+
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        technical = state.get("technical_report")
+        return DecisionMemo(
+            ticker=state["ticker"],
+            bull_case="stub bull",
+            bear_case="stub bear",
+            risk_debate_summary="stub risk narrative",
+            technical_signal=(
+                technical.interpretation
+                if technical is not None
+                else "NOT RUN — technical analyst was excluded from this run"
+            ),
+            reasoning="stub reasoning",
+            watch_items=[],
+            verdict=Verdict.HOLD,
+            confidence=0.0,
+            data_as_of_date=as_of,
+            data_gaps=base_gaps,
+            assumptions=[],
+            evidence=base_evidence,
+        )
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
 
 
 @requires_postgres
@@ -754,5 +797,91 @@ def test_debate_transcript_survives_interrupt_and_a_fresh_checkpointer(
         ]
         assert turns[0] == before[0]
         assert final["debate_terminated_by"] in {"round_cap", "unproductive"}
+    finally:
+        asyncio.run(cleanup())
+
+
+@requires_postgres
+def test_risk_transcript_survives_interrupt_and_a_fresh_checkpointer(
+    monkeypatch, tmp_path
+):
+    """Phase 6 exit criterion 7, and the test criterion 7's own description
+    flags as the one most likely to fail late: TWO `operator.add` channels
+    (`debate_turns` and `risk_turns`) accumulating in ONE thread is a
+    configuration Phase 5's debate-only round-trip test never covered, and
+    the failure mode — a pending write re-applied on resume — is a SILENT
+    double-append that still looks like a plausible transcript, just one
+    turn too long.
+
+    Interrupts after `neutral_turn` — the debate has already fully
+    accumulated its own turns by then (POST_DEBATE_NODES runs before the
+    risk cycle even starts), so this is exactly the "crash mid-round-2 of
+    the risk cycle, after debate_turns is already fully accumulated" case
+    the exit criterion asks for. The two assertions that matter: risk_turns
+    ends up exactly right, AND debate_turns is byte-identical to what it was
+    before the interrupt — proving the two reducers didn't interfere.
+    """
+    _stub_expensive_nodes(monkeypatch, tmp_path)
+    thread_id = f"test-risk-checkpoint-roundtrip-{uuid.uuid4()}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    async def phase_1():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer, interrupt_after=["neutral_turn"])
+            await graph.ainvoke(
+                {"ticker": "ACN", "as_of_date": date(2026, 8, 19)}, config=config
+            )
+            snapshot = await graph.aget_state(config)
+            return (
+                snapshot.values.get("debate_turns"),
+                snapshot.values.get("risk_turns"),
+                snapshot.next,
+            )
+
+    async def phase_2():
+        async with build_checkpointer() as checkpointer:
+            graph = build_trading_graph(checkpointer)
+            snapshot = await graph.aget_state(config)
+            resumed_debate = snapshot.values["debate_turns"]
+            resumed_risk = snapshot.values["risk_turns"]
+            final = await graph.ainvoke(None, config=config)
+            return resumed_debate, resumed_risk, final
+
+    async def cleanup():
+        async with build_checkpointer() as checkpointer:
+            await checkpointer.adelete_thread(thread_id)
+
+    try:
+        debate_before, risk_before, next_nodes = asyncio.run(phase_1())
+        # the debate cycle already ran to completion before the risk cycle
+        # was ever entered — this is the "after debate_turns is already
+        # fully accumulated" precondition the criterion asks for
+        assert debate_before is not None and len(debate_before) > 0
+        assert risk_before is not None and len(risk_before) == 1
+        assert next_nodes == ("aggressive_turn",)
+
+        debate_resumed, risk_resumed, final = asyncio.run(phase_2())
+
+        # the checkpointed risk turn comes back as the real type, two levels
+        # deep, rather than the plain dict an unregistered type degrades to
+        assert isinstance(risk_resumed[0], RiskTurn)
+        assert isinstance(risk_resumed[0].payload, RiskTurnPayload)
+        assert risk_resumed[0] == risk_before[0]
+        # and debate_turns is UNCHANGED by the resume of a DIFFERENT
+        # add-reducer channel — the actual point of this test
+        assert debate_resumed == debate_before
+
+        final_debate = final["debate_turns"]
+        final_risk = final["risk_turns"]
+
+        assert final_debate == debate_before   # never touched by the risk resume
+
+        assert len(final_risk) == RISK_MAX_TURNS
+        assert [t.turn_index for t in final_risk] == list(range(RISK_MAX_TURNS))
+        assert [t.persona for t in final_risk] == [
+            PERSONAS[i % len(PERSONAS)] for i in range(RISK_MAX_TURNS)
+        ]
+        assert final_risk[0] == risk_before[0]
+        assert final["risk_terminated_by"] == "round_cap"
     finally:
         asyncio.run(cleanup())

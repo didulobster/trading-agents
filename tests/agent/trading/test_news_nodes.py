@@ -13,9 +13,40 @@ from datetime import date, timedelta
 import pytest
 
 import app.agent.trading.application.nodes as nodes
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 
 AS_OF = date(2025, 3, 15)
+
+
+@pytest.fixture(autouse=True)
+def _stub_synthesis(monkeypatch):
+    """This file is about what the NEWS leg contributes to the memo's
+    data_gaps/evidence via `_news_caveats` — not about the synthesis LLM
+    call, which every test below would otherwise hit for real through
+    `nodes.synthesizer_node`. Stubbed at the same seam
+    test_debate_graph.py's `_stub_synthesis` uses: the memo is built
+    directly from the caveats synthesizer_node already computed in Python
+    (base_gaps/base_evidence), so every assertion on memo.data_gaps /
+    memo.evidence below still exercises the real caveat logic."""
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        return DecisionMemo(
+            ticker=state["ticker"],
+            bull_case="stub bull",
+            bear_case="stub bear",
+            risk_debate_summary="stub risk narrative",
+            technical_signal="NOT RUN — technical analyst was excluded from this run",
+            reasoning="stub reasoning",
+            watch_items=[],
+            verdict=Verdict.HOLD,
+            confidence=0.0,
+            data_as_of_date=as_of,
+            data_gaps=base_gaps,
+            assumptions=[],
+            evidence=base_evidence,
+        )
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
 
 
 def _item(pub: date, sentiment: str = "neutral", relevance: str = "primary") -> NewsItem:
@@ -239,7 +270,6 @@ def _synth_state(**over) -> dict:
     state = {
         "ticker": "ACN",
         "as_of_date": AS_OF,
-        "risk_summary": "STUB",
         "news_digest": digest,
         "news_digest_issues": [],
         "sentiment_summary": SentimentSummary(

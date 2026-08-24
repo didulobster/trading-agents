@@ -407,17 +407,128 @@ of the debate*, which the exit criteria do not test.
    prose in the field description; pydantic still enforces it on the way in,
    so a violation costs the one retry rather than passing.
 
-16. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
-    from `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6).
+16. **[Closed 2026-08-25, Phase 6 Gate C] `technical_node` derived `as_of_date`
+    from `df.index[-1]` and ignored `state["as_of_date"]`** (Phase 4 gap 6).
     The debate is the first node to read all four reports side by side, so it
-    is the first place a mixed-vintage evidence pack can produce a
+    was the first place a mixed-vintage evidence pack could produce a
     confidently wrong argument.
 
     *Observed (AVGO, 2026-08-23):* the run was invoked `--as-of 2026-08-20`
     and the technical report came back `as_of=2026-08-21`. Six debate turns
     then argued in detail over a last close and a set of moving averages
     from **the day after the run's stated bound**, and the memo is dated
-    2026-08-20. Nothing in the memo says the price evidence is from a later
+    2026-08-20. Nothing in the memo said the price evidence was from a later
     date. Not a Phase 5 bug, but Phase 5 is where it stopped being
     theoretical: the debate spent its entire transcript on a 0.15-point
-    margin that belongs to a bar the run was not supposed to see.
+    margin that belonged to a bar the run was not supposed to see.
+
+    **Fix:** `get_price_history(ticker, as_of)` now takes `as_of` and fetches
+    a 400-day trailing window ending there instead of `period="1y"` anchored
+    at wall-clock now; both vendor helpers bound their own result
+    (`_bound_to_as_of`) and `get_price_history` re-asserts the bound as a
+    belt-and-braces check, the same posture as `news_node`'s lookahead
+    post-assert. Verified two ways: a unit test mocking the yfinance SDK
+    boundary (not `_try_yfinance` itself) so the real bounding path runs
+    end-to-end through `technical_node`, and live (MSFT, 2026-08-25,
+    `--as-of 2026-08-24`) — `bars=276`, technical report `as_of=2026-08-24`,
+    exactly the requested bound.
+
+## Phase 6 — Risk Panel + Synthesis (logged 2026-08-25)
+
+**Exit criteria: 1, 3, 4, 5, 7 verified by test (no live run needed for these
+— see §1 of the Phase 6 plan). Criteria 2, 6, 8 verified by one live run**
+(MSFT, technical-only, `--as-of 2026-08-24`) rather than the five-ticker
+sweep Phase 5 used — this phase's own code changes nothing about
+fundamentals/news, so a single run against a real model was enough to prove
+the two new cycles (risk panel, synthesis) actually work end to end; it is
+not the same statistical confidence Phase 5's five-run sweep gives its own
+exit criteria, and should not be read as such.
+
+Measured: 6 risk turns terminated by `round_cap`, 5-factor ledger (1
+contested), 6 debate turns terminated by `round_cap` (unchanged Phase 5
+behavior), synthesis resolved every citation on the first attempt (no
+reference-retry needed), zero fabrication blocks. Cost — debate $0.0441,
+risk panel $0.0697, synthesis $0.0120, technical $0.0016; total $0.128
+against Haiku 4.5 pricing (the project's current `LLM_CLAUDE_MODEL`), well
+under both `RISK_BUDGET_USD`/`SYNTHESIS_BUDGET_USD` ($0.20 each) and the
+plan's $0.30 combined ceiling. The plan's §10 estimate ($0.19-0.22) was built
+on Sonnet 5 pricing ($3/$15); Haiku 4.5 ($1/$5) tracks proportionally lower,
+consistent rather than a surprise.
+
+1. **[Closed 2026-08-25, found before any live run] Anthropic's strict tool
+   schema rejects `minimum`/`maximum` on integer properties, not only the
+   array/string bounds (`minItems` etc.) Phase 5 anticipated.** `RiskScore`'s
+   `severity`/`likelihood` (`ge=1, le=5`) 400'd the first risk-panel API call
+   with `"For 'integer' type, properties maximum, minimum are not
+   supported"`. `debate_port._STRICT_UNSUPPORTED` (shared by risk_port and
+   synthesis_port through `_inline_refs`) now strips `minimum`/`maximum`
+   too; the 1-5 range reaches the model only as prose
+   (`domain/risk.py`), pydantic still enforces it on the way back in — same
+   pattern as the claim-count bound Phase 5 already handles this way.
+   Caught by the test suite hitting a real API call before this was fixed
+   (~$0.06 of avoidable spend, now fixed with every port's LLM calls mocked
+   in tests going forward — see `tests/agent/trading/test_debate_graph.py`,
+   `test_checkpoint_roundtrip.py`, `test_news_nodes.py`).
+
+2. **[Closed 2026-08-25, found on the one live run] The risk panel's own
+   number-fabrication guard didn't recognize a number the panel itself had
+   already established.** RF03's trigger ("RSI falls below 60"), proposed at
+   turn 0 and shown to every later turn in the prompt
+   (`render_risk_transcript`), was flagged `unbacked_number: 60` when turns
+   3-5 legitimately cited it back — the guard's corpus (`_check_turn`'s
+   `number_corpus`) was reports + debate only, never the risk panel's own
+   running transcript. Fixed by adding `render_risk_transcript(turns)` (prior
+   turns only — a turn cannot back itself) to the corpus. Two regression
+   tests added (`test_risk_port.py`) reproducing the exact live shape: a
+   later turn citing an earlier turn's trigger number, and a later turn
+   citing an earlier turn's own severity/likelihood score.
+
+   *Residual, left as-is because it matches Phase 5's own documented
+   precedent* (known-gaps item 3, "arithmetic the debaters do on pack
+   values, correctly flagged... but benign on inspection"): the same live
+   run's turn 4 flagged `4.54` — a genuinely COMPUTED value (64.54 RSI minus
+   the 60 trigger threshold) that never appears verbatim anywhere upstream.
+   That is a true positive under "cite, don't compute," not a bug.
+
+3. **Gate A's design pivot (Python-assigned `factor_id`) is confirmed by the
+   one live run, not just by the historical debate transcripts.** Turn 0
+   (neutral, enumerate) proposed 5 factors; Python assigned `RF00`-`RF04`
+   regardless of whatever placeholder the model sent for `factor_id`. Every
+   subsequent scoring turn correctly referenced those Python-assigned ids
+   (`RF00` through `RF04`), and the adjudication turn (turn 3) correctly
+   scored only the one id (`RF03`) the ledger's `severity_spread`/
+   `likelihood_spread` computed as contested — the contested-only routing
+   worked exactly as designed on the first live attempt.
+
+4. **The risk panel produces real disagreement, unlike the debate's near-
+   total entrenchment (Phase 5 item 4).** On the one live run: aggressive
+   scored RF00-RF04 as low-severity/low-likelihood ("moderate-likelihood,
+   low-severity risks... do not invalidate ownership"), conservative scored
+   the same five factors 1-2 points higher on both axes across the board
+   ("elevated-likelihood, moderate-severity risks"). That is the persona
+   framing (§3's `AGGRESSIVE_STANCE`/`CONSERVATIVE_STANCE`) working as
+   intended — a single data point, not a measured rate, but notable given
+   Phase 5 measured 29 `hold` / 1 `sharpen` / 0 `concede` across 30 debate
+   turns with the same underlying model.
+
+5. **`unquoted_evidence` fired once, on `RF04`.** RF04's `evidence_quote`
+   ("Price remaining above moving averages does not guarantee sustained
+   upside when momentum is failing") is the model's own synthesis of two
+   `derive_relations` facts, not a verbatim span from either report — a
+   plausible true positive on inspection, same shape as Phase 5's
+   fundamentals-quote failures (item 6): the model paraphrases instead of
+   quoting when the "quote" is really a conclusion drawn from two separate
+   facts.
+
+6. **Nothing downstream re-verifies synthesis output**, same residual Phase
+   5 recorded for the debate (item 12) — `citation_verifier`/`memo_verifier`
+   over the rendered memo is explicitly Phase 7 (Phase 6 plan §11), not
+   attempted here. The reference-resolution and numeric guards in
+   `synthesis_port.py` are the only checks between a fabricated memo claim
+   and the reader.
+
+7. **`suggested_strategy` renamed to `watch_items`** (Phase 6 plan §8.4,
+   option 1) — the field most likely to drift into actionable trade advice
+   is now named for what it actually held in spirit (observables that would
+   change the read), not a name that invites the thing the architecture
+   excludes.
