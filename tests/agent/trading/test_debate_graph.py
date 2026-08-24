@@ -141,16 +141,22 @@ async def test_a_productive_debate_stops_at_the_round_cap(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_an_unproductive_debate_stops_early(monkeypatch):
-    """The cost lever: if neither side has a new claim, the remaining rounds
-    are restatement."""
+async def test_an_all_unproductive_debate_still_runs_to_the_cap(monkeypatch):
+    """Regression for the removed early stop (2026-08-24). Across every
+    debate measured, a turn's claims were reused at most ~25%, and the old
+    clause needed BOTH of two consecutive turns at zero new claims — a
+    conjunction that never occurred. Every stub turn here scores
+    productive=False, which used to stop the debate after 2 turns; it must
+    now run the full six and hit round_cap like any other debate, because
+    MAX_ROUNDS is the only lever left."""
     _stub_debate(monkeypatch, productive=False)
     _stub_fundamentals(monkeypatch)
 
     result, _ = await _run(build_trading_graph(InMemorySaver(), analysts=["fundamentals"]))
 
-    assert len(result["debate_turns"]) == 2
-    assert result["debate_terminated_by"] == "unproductive"
+    assert len(result["debate_turns"]) == MAX_TURNS
+    assert all(not t.productive for t in result["debate_turns"])
+    assert result["debate_terminated_by"] == "round_cap"
 
 
 @pytest.mark.anyio

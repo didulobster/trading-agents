@@ -281,23 +281,62 @@ of the debate*, which the exit criteria do not test.
    Right number, wrong period or wrong entity. Same period-consistency gap
    `ask_edgar` has, now one layer further downstream.
 
-8. **`claim_id` reuse does not happen at all on a full pack, so the early
-   stop can never fire.** A model inventing a fresh slug for a restated claim
-   inflates `productive` and defeats the unproductive early stop. It fails
-   toward *more* rounds, capped at `MAX_TURNS` — a safe direction.
 
-   *Measured across five full runs: **145 claims produced 145 distinct ids —
-   zero reuse.*** Every turn of every run scored `productive=True`, every run
-   terminated `round_cap`, and the unproductive branch of `next_debate_step`
-   has never once been reached outside a unit test. On a small
-   technical-only pack ids *were* reused, so this is a property of pack size,
-   not of the prompt alone.
+   **[Related, closed 2026-08-24] Containment on the raw indicators JSON was
+   worse than merely unable to catch a period/entity mismatch — it made a
+   fully ungrounded citation LOOK grounded.** `evidence_quote` passing
+   verbatim on `macd_histogram":0.3556307403914323` satisfies containment,
+   because that exact string is in the pack, but it is the debater grepping
+   the serialized indicator dict rather than citing anything the analyst
+   said. Found live (ACN, technical-only pack, 2026-08-24): 3 of 4 technical
+   citations in one debate did exactly this. `quotable_texts` now excludes
+   the raw JSON from the corpus `check_quotes` validates against — the
+   `derive_relations` sentences and the interpretation prose remain
+   quotable, since those are genuinely something the analyst said, and
+   `build_evidence_pack` (the number-fabrication guard's corpus) is
+   unaffected, so a faithfully-copied full-precision figure in argument
+   prose is still not falsely flagged as fabricated. All three raw-JSON
+   citations in the transcript that surfaced this now fail the quote check.
+8. **[Closed 2026-08-24] `UNPRODUCTIVE_STOP` was structurally dead, and has
+   been removed.** It needed BOTH of two consecutive turns to have zero new
+   `claim_id`s. Across every full-pack run, at most ~25% of a turn's claims
+   were ever reused; the direct trigger case — turn 5 in a technical-only ACN
+   debate reused 1 of 4 ids and still scored `productive=True`, because the
+   other 3 were new — confirms the conjunction the branch needed never comes
+   close to occurring. `MAX_ROUNDS` is now the ONLY termination lever, stated
+   as such in `debate_router.py`'s module docstring rather than left implicit.
+   `DebateTurn.productive` and `is_productive` are kept as an observational
+   signal (cheap, still an honest per-turn reading, still rendered in the
+   vault transcript) — only the router clause that treated it as a
+   termination signal is gone. If restatement-heavy behavior is ever observed
+   for real (a different model, a much larger `MAX_ROUNDS`), reintroduce a
+   ratio-based version calibrated against the transcript that showed it, not
+   against a guess — no debate to date shows what a genuinely-exhausted
+   argument looks like in terms of new-claim ratio, because the round cap
+   always arrives first.
 
-   Consequences: **`MAX_ROUNDS` is the only real bound on debate spend** —
-   every debate costs the full six turns — and `UNPRODUCTIVE_STOP` is
-   currently decorative. Either accept that and delete the lever, or give the
-   model the prior turns' `claim_id`s explicitly and require reuse.
-9. **[Partly addressed] The debate barely uses the news evidence, and
+9. **[Closed 2026-08-24] `claim_id` reuse carried no guarantee the reused id
+   named the same claim.** `acn-volume-deteriorating` appeared in turn 3
+   ("collapsing conviction that exposes recovery moves to reversal risk") and
+   turn 5 ("deteriorating participation that undermines recovery conviction")
+   of one debate — one id, two different assertions. Anything aggregating by
+   `claim_id` — Phase 6's risk debate is the reason this matters — would
+   silently keep whichever occurrence it read last.
+
+   Two changes, not raising: `check_claim_stability` flags a reused id whose
+   text disagrees with its FIRST occurrence onto `DebateTurn.claim_text_drift`
+   (surfaced in the memo caveats and the vault transcript, not blocked — a
+   model paraphrasing the same point differently across turns is expected,
+   and rejecting every wording change would make claim_id reuse impractical).
+   `canonical_claims(turns)` in `domain/debate.py` is the actual safety
+   mechanism: it returns one `DebateClaim` per id, always the first
+   occurrence, and is the function any future aggregation should read
+   through instead of flattening `claims` across turns and indexing by id
+   directly. Verified against the real transcript that surfaced the bug: the
+   fix detects exactly the one drifted id, and `canonical_claims` returns
+   turn 3's wording as authoritative for `acn-volume-deteriorating`.
+
+10. **[Partly addressed] The debate barely uses the news evidence, and
    barely uses the technical report at all.** Citations across five full
    runs, 145 claims:
 
@@ -339,21 +378,21 @@ of the debate*, which the exit criteria do not test.
    regardless of ordering or quota. If more technical grounding in the
    argument is wanted, the lever is Phase 3's output length, not Phase 5's
    pack construction — a separate decision, not made here.
-10. **Order bias is unquantified.** Bull speaks first and bear gets the last
+11. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
    here before building any machinery.
 
-11. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
+12. **Nothing downstream re-verifies debate output.** `memo_verifier` runs
    inside `run_agent`; the debate never calls it. The number guard is the
    only check between a fabricated debate figure and the memo.
 
-12. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
+13. **The memo does not yet render the debate.** `bull_case`/`bear_case` are
    still "STUB" — Phase 7's job. Phase 5 delivers the transcript to the
    vault and the *caveats* to the memo, so a capped or skipped debate is
    visible; the argument itself is not.
 
-13. **The model cannot emit an empty string into a tool call.** Asked for one
+14. **The model cannot emit an empty string into a tool call.** Asked for one
    it writes a stray `</antml parameter>` marker instead, which landed in
    `concession_trigger` on 4 of 4 live turns and tripped the concession
    guard on turns that conceded nothing. Worked around with a `'none'`
@@ -361,14 +400,14 @@ of the debate*, which the exit criteria do not test.
    behaviour, found live — if a future model stops doing it the workaround
    is harmless, but the sentinel is load-bearing today.
 
-14. **Strict tool schemas cost the count bounds.** `strict: true` was needed
+15. **Strict tool schemas cost the count bounds.** `strict: true` was needed
    to stop the model flattening the payload (DebateClaim fields hoisted to
    the top level, `stance` missing, on 3 of 3 turns), and it rejects
    `minItems`/`maxItems`. The 1..5 claim bound now reaches the model only as
    prose in the field description; pydantic still enforces it on the way in,
    so a violation costs the one retry rather than passing.
 
-15. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
+16. **[Cross-phase, CONFIRMED live] `technical_node` derives `as_of_date`
     from `df.index[-1]` and ignores `state["as_of_date"]`** (Phase 4 gap 6).
     The debate is the first node to read all four reports side by side, so it
     is the first place a mixed-vintage evidence pack can produce a

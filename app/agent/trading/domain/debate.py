@@ -118,9 +118,30 @@ class DebateTurn(BaseModel):
     side: Side               # assigned by Python from which node ran
     payload: DebateTurnPayload
 
-    # Did this turn introduce a claim_id nobody had used yet? Two consecutive
-    # false values end the debate — see application/debate_router.py.
+    # Did this turn introduce a claim_id nobody had used yet? OBSERVATIONAL
+    # ONLY as of 2026-08-24 — it no longer terminates the debate. The router
+    # used to stop after two consecutive False turns (UNPRODUCTIVE_STOP), but
+    # across every debate measured, a turn's claims were never more than
+    # ~25% reused, so the clause never fired: MAX_TURNS was always what
+    # actually stopped the run. A dead branch inside a termination guard is
+    # worse than no branch — it reads as a second safety layer that isn't
+    # there. See application/debate_router.py and known-gaps.md.
     productive: bool = True
+
+    # claim_ids in THIS turn whose text differs from the first time that id
+    # appeared earlier in the transcript. Not itself a violation — a model
+    # paraphrasing the same underlying point across turns is expected, and
+    # raising on any wording drift would make claim_id reuse impractical in
+    # the first place. Flagged so the drift is visible, same posture as
+    # guard_flags/unquoted_evidence below. The actual safety mechanism is
+    # `canonical_claims`: any downstream aggregation keyed on claim_id should
+    # read through that rather than trusting whichever occurrence it happens
+    # to see, because two occurrences of one id are not guaranteed to agree.
+    # Found live (ACN, technical-only pack, 2026-08-24): `acn-volume-
+    # deteriorating` carried "collapsing conviction that exposes recovery
+    # moves to reversal risk" in turn 3 and "deteriorating participation that
+    # undermines recovery conviction" in turn 5 — same id, two claims.
+    claim_text_drift: list[str] = Field(default_factory=list)
 
     # Per-turn findings live here rather than in a state channel: a cyclic
     # node cannot write to a plain overwrite channel without clobbering its
@@ -132,3 +153,32 @@ class DebateTurn(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost_usd: float | None = None
+
+
+def canonical_claims(turns: list[DebateTurn]) -> dict[str, DebateClaim]:
+    """One DebateClaim per claim_id — the FIRST occurrence, transcript order.
+
+    This is the safety mechanism `claim_text_drift` only flags. A `claim_id`
+    is meant to be a stable handle for "the same assertion, restated" (the
+    system prompt tells the model to reuse ids for exactly that reason), but
+    nothing enforces that its `text` stays the same across occurrences, and
+    live transcripts show it does not always. Any code that aggregates
+    claims by id — Phase 6's risk debate is the reason this exists — must
+    NOT flatten `claims` across turns and index by id directly: two entries
+    sharing an id can carry different assertions, and a naive index silently
+    keeps whichever one it read last, merging them into one claim that
+    neither side actually made in those exact words.
+
+    Reading through this function instead fixes the meaning of a claim_id to
+    whatever it meant when it was FIRST introduced — first occurrence, not
+    last, because the id was coined to name that assertion and every later
+    reuse is claiming to restate it, not redefine it. `claim_text_drift`
+    remains the record of where a later occurrence disagreed, for a reader
+    or a future guard to act on; this function just makes sure that
+    disagreement never propagates silently into an aggregate.
+    """
+    canonical: dict[str, DebateClaim] = {}
+    for turn in turns:
+        for claim in turn.payload.claims:
+            canonical.setdefault(claim.claim_id, claim)
+    return canonical
