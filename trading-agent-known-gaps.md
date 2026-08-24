@@ -181,6 +181,34 @@ of the debate*, which the exit criteria do not test.
    The single `sharpen` (FIG, turn 3) is the one piece of evidence the stance
    field is not dead weight. The concession guard has still never fired in
    production, so its correctness rests entirely on unit tests.
+
+   **[Investigated 2026-08-24, falsified] Read against claim volume, this
+   looked like it might be worse than "rare concessions": 145 claims / 30
+   turns = 4.83 per turn against a `max_length=5` cap — the schema is binding
+   on nearly every turn. Put beside 145/145 distinct ids and 0 concessions,
+   the hypothesis was that each side mines fresh claims from a 37k–44k-char
+   pack indefinitely without ever contesting the other — two analysts
+   writing in alternation, not a debate.**
+
+   Checked directly rather than argued: for every turn 1–5 across all five
+   transcripts, does `rebuts` resolve to a claim actually made in the
+   opponent's immediately preceding turn? **95 of 95 do — 100%, independently
+   across all five tickers (14–24 each), 0% of turns with empty `rebuts`.**
+   That is the strongest form of engagement available to check (the
+   *previous* turn specifically, not just some opposing claim anywhere in
+   the transcript) and it is fully satisfied. The hypothesis is falsified:
+   the claim cap is real and forces volume, but genuine engagement is
+   happening underneath it, not instead of it.
+
+   `rebuts` itself was unvalidated when this was checked — nothing stopped a
+   turn from naming a hallucinated or own-side id, so the 95/95 result could
+   only be trusted because it was measured directly against the raw
+   transcripts. **Closed 2026-08-24**: `check_rebuts` now enforces the same
+   structural requirement `check_concession` enforces for `concession_trigger`
+   — every rebutted id must be a real claim belonging to the opposing side.
+   Same reasoning as (a): a turn that fails this should raise, not pass
+   silently, because an unvalidated `rebuts` makes "theatre that looks
+   adversarial" possible even though this batch shows it did not happen.
 5. **Debate quality is now tied to `LLM_CLAUDE_MODEL`, and Haiku 4.5 makes
    analytical errors Sonnet 5 did not.** `DEBATE_MODEL` follows the
    project-wide setting as of 2026-08-23. Mechanically Haiku is fine — no
@@ -293,6 +321,24 @@ of the debate*, which the exit criteria do not test.
    Ordering, length-balancing, or per-source claim quotas remain plausible;
    none is obviously right. The primary-article count is also still unbounded
    — the only cap upstream is `MAX_ARTICLES=300` on the digest.
+
+   **[Settled 2026-08-24] Is technical being starved, or is the report just
+   short?** The latter. Measured pack share vs citation share, summed across
+   all five transcripts:
+
+   | source | pack share | citation share |
+   |---|---|---|
+   | fundamentals | 76.7% | 81% |
+   | technical | **4.5%** | **1.4%** |
+
+   Both track their pack share closely — fundamentals slightly over,
+   technical slightly under, neither by much. There is no disproportionate
+   crowding-out to fix in the debate pack or the trim. Phase 3 caps the
+   technical interpretation at 3–5 sentences plus one JSON block; a
+   multi-page fundamentals memo will out-cite that at roughly its size
+   regardless of ordering or quota. If more technical grounding in the
+   argument is wanted, the lever is Phase 3's output length, not Phase 5's
+   pack construction — a separate decision, not made here.
 10. **Order bias is unquantified.** Bull speaks first and bear gets the last
    rebuttal in each round. Full mitigation doubles cost. Run one ticker
    bear-first by hand, compare the surviving claim sets, and put the number
