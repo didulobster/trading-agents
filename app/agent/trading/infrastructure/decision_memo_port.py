@@ -23,19 +23,29 @@ def _render(value: str) -> str:
 
 
 def _format_memo_markdown(memo: DecisionMemo) -> str:
+    overridden = memo.verdict != memo.research_preliminary_verdict
     lines = [
         f"# {memo.ticker} — Decision Memo",
-        f"**Verdict:** {memo.verdict.value.upper()}  ·  "
+        f"**Verdict (Risk Judge, final):** {memo.verdict.value.upper()}  ·  "
         f"**Confidence:** {memo.confidence:.2f}",
+        f"**Research Manager's preliminary verdict:** "
+        f"{memo.research_preliminary_verdict.value.upper()}"
+        + (
+            " — **OVERRIDDEN by the Risk Judge** (see Reasoning)"
+            if overridden
+            else " — affirmed by the Risk Judge"
+        ),
         f"**Data as of:** {memo.data_as_of_date}",
         "",
     ]
 
     if memo.confidence == 0.0:
         lines += [
-            "> **This memo is not a recommendation.** Confidence is 0.00 and the "
-            "synthesis logic is still a stub — the verdict below is a placeholder "
-            "the schema requires, not a conclusion drawn from the evidence.",
+            "> **Treat this memo with extreme caution.** Confidence computed at "
+            "0.00 — some combination of zero analyst coverage, full ledger "
+            "contestation, and heavy guard-flag density. The verdict below is "
+            "the Risk Judge's real output, not a placeholder, but the observables "
+            "confidence is built from say this run saw very little to go on.",
             "",
         ]
 
@@ -51,6 +61,10 @@ def _format_memo_markdown(memo: DecisionMemo) -> str:
         "## Bear case",
         "",
         _render(memo.bear_case),
+        "",
+        "## Research Manager's thesis",
+        "",
+        _render(memo.research_thesis),
         "",
         "## Technical signal",
         "",
