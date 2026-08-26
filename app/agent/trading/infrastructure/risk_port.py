@@ -200,15 +200,26 @@ HARD RULES — checked in code after you answer:
    slate (or contested-ids list). A score for an id not on the list is
    dropped and flagged, not silently accepted.
 
-{PHASE}
+Each turn's user message tells you which phase you're in (enumerate, score,
+adjudicate, or respond) and what that phase specifically requires — follow
+those instructions for the current turn.
 
 Call `submit_risk_turn` exactly once. Say nothing else."""
 
 
-def _build_system(persona: Persona, phase: Phase) -> str:
+def _build_system(persona: Persona) -> str:
+    """Deliberately NOT a function of `phase` (cost fix, Phase 8 follow-up):
+    the phase text used to be baked in here, which meant round 1
+    (enumerate/score) and round 2+ (adjudicate/respond) always produced a
+    DIFFERENT cached prefix per persona — a guaranteed cache miss on every
+    phase transition, live-measured as ~2 of every 3 rounds paying full
+    price instead of reading a 90%-cheaper cache hit. `_PHASE_INSTRUCTIONS`
+    now goes in the per-turn user message instead (build_risk_evidence_pack
+    already isn't phase-dependent either), so the cached prefix — stance +
+    evidence pack — is stable across a persona's ENTIRE panel, not just
+    within one phase."""
     return (
         _SYSTEM_TEMPLATE.replace("{STANCE}", _STANCE_BY_PERSONA[persona])
-        .replace("{PHASE}", _PHASE_INSTRUCTIONS[phase])
         .replace("{EXTERNAL_TEXT_FRAMING}", EXTERNAL_TEXT_FRAMING)
     )
 
@@ -577,7 +588,7 @@ async def run_risk_turn(
     client = client or AsyncAnthropic()
 
     system_blocks = [
-        {"type": "text", "text": _build_system(persona, phase)},
+        {"type": "text", "text": _build_system(persona)},
         {"type": "text", "text": pack, "cache_control": {"type": "ephemeral"}},
     ]
     id_line = (
@@ -591,6 +602,7 @@ async def run_risk_turn(
         f"{render_risk_transcript(turns)}\n\n{id_line}\n\n"
         f"You are the {persona.upper()} panelist. This is turn {turn_index} "
         f"(round {(turn_index // len(PERSONAS)) + 1}, phase={phase}). "
+        f"{_PHASE_INSTRUCTIONS[phase]}\n\n"
         f"Submit your contribution now."
     )
     messages: list[dict] = [{"role": "user", "content": user_text}]
