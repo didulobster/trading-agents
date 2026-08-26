@@ -786,3 +786,77 @@ priority: repeat the widened 4-observable determinism check on that input,
 since the one non-degenerate result available so far (this section) is a
 single ticker, single fixed debate transcript, and already failed 2 of 4
 observables.
+
+## Phase 6 determinism/stability, resolved on a contested ticker (logged 2026-08-26)
+
+The "next check" from the section above: ran the same widened check against
+AVGO (`--as-of 2026-08-25`, fresh fixed 6-turn debate, real API calls
+throughout, Haiku). This is no longer a degenerate distribution — the
+debate leaned bearish and the risk panel produced a real, contested read.
+
+**Determinism (temperature=0, replayed twice):**
+
+```
+verdict:        MATCH    (sell / sell)
+ledger_scores:  MISMATCH
+contested_set:  MISMATCH  (trial 1: {RF03, RF04}; trial 2: {RF00, RF03})
+resolved_refs:  MATCH
+DETERMINISM: FAIL (2/4 observables matched)
+```
+
+**Stability (production temperature, 3 samples) — FAILS outright, not a
+near miss:**
+
+| sample | research lean | verdict | overridden |
+|---|---|---|---|
+| stability-1 | sell | **sell** | no |
+| stability-2 | sell | **hold** | **yes — caught live** |
+| stability-3 | hold | **hold** | no |
+
+`['sell', 'hold', 'hold']` — verdict direction does not agree across the
+three samples. Sample 2 is the first live instance in this project's
+history of the Risk Judge actually exercising its override power: the
+Research Manager leaned `sell` from the debate, the Risk Judge reviewed the
+risk panel and overrode to `hold`. That mechanism was built and tested with
+mocks (`test_synthesis_port.py`) but never observed on a real run until
+this one — confirms the override path works, and simultaneously is the
+reason stability fails: whether the Judge overrides or not turned out to
+depend on run-to-run variance, not on some judgement holding steady sample
+to sample.
+
+Confidence spread 0.07 (0.59/0.56/0.52) — narrow, notably tighter than the
+verdict disagreement would suggest. Contested-set Jaccard 0.00 again — as
+on MSFT, no two samples agreed on which factor was contested.
+
+**Conclusion: criteria 4 and 5, tested on an input where they can actually
+say something, both fail.** MSFT's result (Phase 6 determinism correction,
+above) was consistent with "the pipeline is stable" and with "the pipeline
+always says hold" and could not distinguish them. AVGO removes that
+ambiguity: given a debate that leans bearish, the final verdict is NOT
+stable across production-temperature samples, and even at temperature=0 the
+ledger's substance (which factors end up contested, what score each
+persona lands on) is not reproducible either. The literal wording of
+criterion 4 (verdict identical across two temp=0 replays) still passes here
+by coincidence — both replays happened to land on `sell` — but criterion 5
+(verdict direction across 3 production samples) does not, on the same
+run, with the same code.
+
+Cost: $0.57 for this run (one debate + 2 determinism trials + 3 stability
+trials, Haiku throughout). One `KeyError` in the reporting script itself
+(mismatched key name between the `checks` display list and the per-trial
+detail dict) was found and fixed mid-investigation — see the commit fixing
+`scripts/risk_determinism_check.py`; it took down the first AVGO attempt
+right after determinism reported a real mismatch, before the stability
+section ran, and had to be re-run.
+
+**Status: Phase 6's determinism/stability exit criteria are NOT met.** Not
+"met with a caveat" — failed, on the one input tested so far that isn't
+degenerate. What would need to change to close this honestly: either the
+criteria get redefined around what temperature=0 can actually guarantee on
+production LLM serving (verdict-level stability under some tolerance,
+rather than bit-identical ledger reproduction), or the Risk Judge's
+decision process needs something that isn't pure sampling variance
+deciding a sell/hold override — e.g. a majority-of-N-samples rule, or
+constraining what "contested" can mean turn to turn. Neither is attempted
+here; this section's job is to say plainly that the gap is real; deciding
+how to close it is a design call this file has been recording, not making.
