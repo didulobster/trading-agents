@@ -22,6 +22,18 @@ def _render(value: str) -> str:
     return value
 
 
+def _confidence_band(confidence: float) -> str:
+    """Display label only — the raw float (`compute_confidence` in
+    synthesis_port.py) is still shown alongside it. Thirds, not calibrated:
+    same "declared prior, not a finding" status as the weights that
+    produce `confidence` itself."""
+    if confidence < 1 / 3:
+        return "LOW"
+    if confidence < 2 / 3:
+        return "MEDIUM"
+    return "HIGH"
+
+
 def _render_verdict_line(memo: DecisionMemo) -> str:
     """`verdict_samples` is empty when no risk panel ran to sample (the
     Risk Judge's single call is genuinely the sole decision then) and
@@ -46,7 +58,8 @@ def _render_verdict_line(memo: DecisionMemo) -> str:
 def _format_memo_markdown(memo: DecisionMemo) -> str:
     lines = [
         f"# {memo.ticker} — Decision Memo",
-        f"{_render_verdict_line(memo)}  ·  **Confidence:** {memo.confidence:.2f}",
+        f"{_render_verdict_line(memo)}  ·  **Confidence:** "
+        f"{_confidence_band(memo.confidence)} ({memo.confidence:.2f})",
         f"**Data as of:** {memo.data_as_of_date}",
         "",
     ]

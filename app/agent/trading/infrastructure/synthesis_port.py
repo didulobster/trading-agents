@@ -46,6 +46,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 
 from anthropic import AsyncAnthropic
 from pydantic import ValidationError
@@ -119,6 +120,17 @@ class SynthesisFabricationError(Exception):
     Judge's `risk_narrative`/`reasoning`) appears in no report, no debate
     claim, and no risk factor. Blocking, not flagging — see
     `_numeric_guard`."""
+
+
+class MemoVerificationError(Exception):
+    """The FULLY ASSEMBLED memo failed `verify_decision_memo` even though
+    every individual call that produced it passed its own guard at
+    generation time. More serious than a plain SynthesisFabricationError/
+    SynthesisReferenceError: those catch a bad call before its output is
+    used; this catches a bad artifact built from calls that each looked
+    clean in isolation — an assembly-step bug (e.g. a future DecisionMemo
+    field wired in without going through the guard), not a model output
+    the pipeline already knows how to reject."""
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +367,61 @@ def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[
     return (
         _flag_debate_numbers(block_text, corpus),
         _flag_debate_numbers(other_text, corpus),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Post-hoc memo verification — Phase 7. `_numeric_guard` above checks each
+# call's own payload fields DURING generation; nothing previously re-checked
+# the FULLY ASSEMBLED memo synthesizer_node actually returns (majority-of-N
+# voting picks one sample's narrative and Python appends data_gaps/
+# verdict_samples on top of it — nothing re-verified that result). This is
+# the same containment methodology as `_numeric_guard`, not a second
+# implementation, run once more over the assembled whole rather than one
+# call's fragment — deliberately not app/application/citation_verifier's
+# tolerance-band matching (see debate_port.py's module docstring for why
+# that goes blind on a corpus this dense: bands overlap and a fabricated
+# figure lands inside somebody's band).
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MemoVerification:
+    passed: bool
+    unbacked_numbers: list[str] = field(default_factory=list)
+    unresolved_references: list[str] = field(default_factory=list)
+
+
+def verify_decision_memo(
+    memo: DecisionMemo,
+    state,
+    ledger: list[RiskLedgerEntry],
+    debate_turns: list[DebateTurn],
+) -> MemoVerification:
+    """`state`/`ledger`/`debate_turns` must be the SAME trial the memo was
+    generated from — under majority-of-N sampling each trial ran its own
+    independent risk panel with its own factor ids, so verifying against a
+    different trial's ledger would misreport a real citation as unresolved.
+
+    `data_gaps`/`assumptions`/`evidence` are excluded from the scanned text
+    on purpose: `data_gaps` entries quote already-flagged unbacked numbers
+    BY DESIGN (that's why they're gaps, not claims), and `evidence` is
+    Python-rendered from resolved references, not model prose — scanning
+    either would just re-report what the pipeline already knows."""
+    corpus = _numeric_corpus(state, ledger, debate_turns)
+    narrative = "\n".join([
+        memo.bull_case, memo.bear_case, memo.research_thesis,
+        memo.risk_debate_summary, memo.reasoning, *memo.watch_items,
+    ])
+    numeric_flags, _ = _numeric_guard(narrative, "", corpus)
+
+    claims = canonical_claims(debate_turns)
+    ledger_by_id = {e.factor_id: e for e in ledger}
+    unresolved = resolve_refs([narrative], claims, ledger_by_id)
+
+    return MemoVerification(
+        passed=not numeric_flags and not unresolved,
+        unbacked_numbers=numeric_flags,
+        unresolved_references=unresolved,
     )
 
 

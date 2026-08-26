@@ -389,6 +389,100 @@ async def test_happy_path_assembles_a_complete_memo():
 
 
 # ---------------------------------------------------------------------------
+# Post-hoc memo verification (Phase 7) — verify_decision_memo re-checks the
+# FULLY ASSEMBLED memo, independent of the per-call guards above that only
+# ever see one call's own payload fields. Same containment methodology
+# (_numeric_guard/_flag_debate_numbers), not a second implementation.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_a_clean_assembled_memo_passes_post_hoc_verification():
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+
+    result = port.verify_decision_memo(memo, _state(), _ledger(), _debate_turns())
+
+    assert result.passed
+    assert result.unbacked_numbers == []
+    assert result.unresolved_references == []
+
+
+@pytest.mark.anyio
+async def test_a_number_spliced_into_the_assembled_memo_fails_verification():
+    """The per-call guards already passed on the way to `memo` — this
+    proves the post-hoc check catches a fabrication introduced AFTER
+    generation (e.g. by assembly or rendering), not just re-deriving what
+    the guard already knew."""
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+    corrupted = memo.model_copy(update={
+        "reasoning": memo.reasoning + " Margin could reach 91.4 next year."
+    })
+
+    result = port.verify_decision_memo(corrupted, _state(), _ledger(), _debate_turns())
+
+    assert not result.passed
+    assert "91.4" in result.unbacked_numbers
+
+
+@pytest.mark.anyio
+async def test_an_unresolvable_reference_spliced_into_the_assembled_memo_fails_verification():
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+    corrupted = memo.model_copy(update={
+        "reasoning": memo.reasoning + " A latent risk exists [RF99]."
+    })
+
+    result = port.verify_decision_memo(corrupted, _state(), _ledger(), _debate_turns())
+
+    assert not result.passed
+    assert result.unresolved_references == ["RF99"]
+
+
+def test_verification_works_standalone_not_only_after_run_synthesis():
+    """Constructs a DecisionMemo directly, never through run_synthesis —
+    proves the check is a real, independent re-derivation over whatever
+    memo it's handed, not something that only works because it's reusing a
+    flag the generation path already computed."""
+    from app.agent.trading.domain.decision_memo import DecisionMemo
+
+    memo = DecisionMemo(
+        ticker="ACN", bull_case="clean", bear_case="clean",
+        research_thesis="clean", risk_debate_summary="clean",
+        technical_signal="clean", reasoning="Fabricated growth of 63.2%.",
+        watch_items=[], verdict=Verdict.HOLD, confidence=0.5,
+        data_as_of_date=date(2026, 8, 19), data_gaps=[], assumptions=[], evidence=[],
+    )
+
+    result = port.verify_decision_memo(memo, _state(), _ledger(), _debate_turns())
+
+    assert not result.passed
+    assert "63.2" in result.unbacked_numbers or "63.2%" in result.unbacked_numbers
+
+
+def test_verification_does_not_scan_data_gaps_or_evidence():
+    """data_gaps deliberately quotes already-flagged unbacked numbers (that
+    IS why they're gaps); evidence is Python-rendered from resolved
+    references, not model prose. Scanning either would just re-report
+    numbers the pipeline already knows about, not find something new."""
+    from app.agent.trading.domain.decision_memo import DecisionMemo
+
+    memo = DecisionMemo(
+        ticker="ACN", bull_case="clean", bear_case="clean",
+        research_thesis="clean", risk_debate_summary="clean",
+        technical_signal="clean", reasoning="clean",
+        watch_items=[], verdict=Verdict.HOLD, confidence=0.5,
+        data_as_of_date=date(2026, 8, 19),
+        data_gaps=["number 77.7 did not appear in any source and may be fabricated"],
+        assumptions=[], evidence=["[C:margin-hold] cites 77.7 in the debate"],
+    )
+
+    result = port.verify_decision_memo(memo, _state(), _ledger(), _debate_turns())
+
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
 # Confidence — computed, not model-emitted
 # ---------------------------------------------------------------------------
 
