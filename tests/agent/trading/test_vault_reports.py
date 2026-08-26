@@ -142,6 +142,8 @@ def _memo(**over) -> DecisionMemo:
         ticker="AVGO",
         bull_case="STUB",
         bear_case="STUB",
+        research_thesis="STUB",
+        research_preliminary_verdict=Verdict.HOLD,
         risk_debate_summary="STUB — Phase 6",
         technical_signal="RSI at 36.2 indicates oversold conditions.",
         reasoning="STUB — synthesis logic not yet implemented.",
@@ -168,15 +170,15 @@ def test_stub_fields_are_marked_not_presented_as_findings():
     assert "RSI at 36.2 indicates oversold conditions." in md
 
 
-def test_zero_confidence_memo_says_it_is_not_a_recommendation():
+def test_zero_confidence_memo_carries_an_extreme_caution_warning():
     md = _format_memo_markdown(_memo())
-    assert "not a recommendation" in md
-    assert "placeholder" in md
+    assert "extreme caution" in md
+    assert "0.00" in md
 
     real = _format_memo_markdown(
         _memo(confidence=0.72, reasoning="Cash generation is durable.")
     )
-    assert "not a recommendation" not in real
+    assert "extreme caution" not in real
 
 
 def test_raw_json_block_preserves_the_unedited_memo():
@@ -208,3 +210,18 @@ def test_watch_items_are_rendered_and_counted():
     empty = _format_memo_markdown(_memo(watch_items=[]))
     assert "## Watch items (0)" in empty
     assert "_None recorded._" in empty
+
+
+def test_risk_judge_override_is_called_out_when_verdicts_differ():
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.SELL, research_preliminary_verdict=Verdict.HOLD)
+    )
+    assert "OVERRIDDEN by the Risk Judge" in md
+
+
+def test_risk_judge_affirmation_is_noted_when_verdicts_agree():
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.HOLD, research_preliminary_verdict=Verdict.HOLD)
+    )
+    assert "affirmed by the Risk Judge" in md
+    assert "OVERRIDDEN" not in md

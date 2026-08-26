@@ -332,3 +332,47 @@ async def test_a_number_from_an_earlier_risk_turns_own_score_is_not_flagged():
     turn = await port.run_risk_turn(_state(risk_turns=[prior, scored]), "conservative", 2, client=client)
 
     assert not any("unbacked_number: 2" in f for f in turn.guard_flags)
+
+
+# ---------------------------------------------------------------------------
+# turn_phase generalizes over RISK_MAX_ROUNDS (Phase 6 gap closure: 2 -> 3
+# rounds) rather than being hardcoded to a fixed 6-turn shape
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "turn_index,expected",
+    [
+        (0, "enumerate"),
+        (1, "score"), (2, "score"),
+        (3, "adjudicate"), (4, "respond"), (5, "respond"),
+        (6, "adjudicate"), (7, "respond"), (8, "respond"),
+    ],
+)
+def test_turn_phase_over_three_rounds(turn_index, expected):
+    assert port.turn_phase(turn_index) == expected
+
+
+# ---------------------------------------------------------------------------
+# Temperature plumbing — the determinism/stability check needs this
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_production_calls_omit_temperature_by_default():
+    payload = _turn_payload()
+    client = _FakeClient([payload])
+
+    await port.run_risk_turn(_state(), "neutral", 0, client=client)
+
+    assert "temperature" not in client.messages.calls[0]
+
+
+@pytest.mark.anyio
+async def test_an_explicit_temperature_is_sent_and_disables_thinking():
+    payload = _turn_payload()
+    client = _FakeClient([payload])
+
+    await port.run_risk_turn(_state(), "neutral", 0, client=client, temperature=0.0)
+
+    call = client.messages.calls[0]
+    assert call["temperature"] == 0.0
+    assert "thinking" not in call
