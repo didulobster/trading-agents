@@ -410,6 +410,12 @@ async def test_an_explicit_temperature_is_threaded_to_both_calls_and_disables_th
         assert "thinking" not in call
 
 
-def test_research_manager_and_risk_judge_are_pinned_to_sonnet_by_default():
-    assert port.RESEARCH_MANAGER_MODEL == "claude-sonnet-5"
-    assert port.RISK_JUDGE_MODEL == "claude-sonnet-5"
+def test_research_manager_and_risk_judge_follow_the_project_wide_model_by_default():
+    """Not pinned to Sonnet, despite the spec text naming it — Sonnet 5
+    deprecated `temperature` outright, which undercuts the determinism
+    guarantee these two roles exist to support. See synthesis_port's module
+    docstring and create_with_temperature_fallback."""
+    from app.agent.researcher import AGENT_MODEL
+
+    assert port.RESEARCH_MANAGER_MODEL == AGENT_MODEL
+    assert port.RISK_JUDGE_MODEL == AGENT_MODEL

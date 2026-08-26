@@ -12,6 +12,13 @@ guarantee on THE RISK VERDICT specifically, which only means something once
 there is a Risk Judge call whose own output IS that verdict, separable from
 whatever the Research Manager leaned toward on the debate alone.
 
+Model choice diverges from that spec text on purpose: both roles follow the
+project-wide `LLM_CLAUDE_MODEL` (Haiku 4.5), not a Sonnet pin. Sonnet 5
+turned out to have deprecated `temperature` outright — see
+debate_port.create_with_temperature_fallback — which undercuts exactly the
+determinism guarantee these two roles exist to support; Haiku 4.5 honors
+the parameter for real.
+
 Still the highest-fabrication-risk part of the pipeline — the only calls
 that can invent a figure appearing nowhere upstream, and the only output a
 human reads directly. Same discipline as before: neither payload carries a
@@ -37,6 +44,7 @@ from anthropic import AsyncAnthropic
 from pydantic import ValidationError
 
 from app.agent.researcher import (
+    AGENT_MODEL,
     _MODEL_PRICING,
     UsageSummary,
     log_cost,
@@ -49,22 +57,25 @@ from app.agent.trading.domain.decision_memo import (
 )
 from app.agent.trading.domain.risk import RiskLedgerEntry, RiskTurn
 
-# Pinned to Sonnet specifically — NOT AGENT_MODEL/LLM_CLAUDE_MODEL, which in
-# this project resolves to Haiku 4.5. The spec names the model explicitly
-# for these two roles ("Research Manager (Sonnet)", "Risk Judge (Sonnet)"),
-# unlike every other port in this pipeline, which follows the project-wide
-# default. Still overridable per-role for anyone who wants to re-run the
-# determinism/stability checks against a different model.
-RESEARCH_MANAGER_MODEL = os.getenv("TRADING_RESEARCH_MANAGER_MODEL") or "claude-sonnet-5"
-RISK_JUDGE_MODEL = os.getenv("TRADING_RISK_JUDGE_MODEL") or "claude-sonnet-5"
+# Follows the project-wide model from .env (LLM_CLAUDE_MODEL), same override
+# pattern as DEBATE_MODEL/RISK_MODEL — NOT pinned to Sonnet. The spec names
+# Sonnet explicitly for these two roles, but Sonnet 5 turned out to have
+# deprecated `temperature` outright (create_with_temperature_fallback exists
+# because of it), which undercuts exactly the determinism guarantee these
+# two calls exist to support; Haiku 4.5 accepts the parameter for real, so
+# switching back makes the temperature=0 replay a genuine controlled
+# condition for the Research Manager/Risk Judge too, not just the risk
+# panel. Still overridable per-role independent of the project-wide default.
+RESEARCH_MANAGER_MODEL = os.getenv("TRADING_RESEARCH_MANAGER_MODEL") or AGENT_MODEL
+RISK_JUDGE_MODEL = os.getenv("TRADING_RISK_JUDGE_MODEL") or AGENT_MODEL
 
 SYNTHESIS_MAX_TOKENS = 4000
 
-# Combined ceiling across BOTH calls (Research Manager + Risk Judge), Sonnet
-# pricing. Phase 6 plan §10's single-call estimate was ~$0.096 on the same
-# $3/$15 basis; two Sonnet calls over a comparable pack roughly doubles
-# that, so this leaves real margin rather than being tight against a
-# projection. Re-measure and tighten once a live run exists on this split.
+# Combined ceiling across BOTH calls (Research Manager + Risk Judge).
+# Measured live on Sonnet pricing at $0.1232 (Research Manager) + $0.2139
+# (Risk Judge) per call — kept as the ceiling even after the Haiku switch
+# since it's meant to catch a prompt-bloat regression, not track whichever
+# model is cheapest today.
 SYNTHESIS_BUDGET_USD = 0.30
 
 for _model in (RESEARCH_MANAGER_MODEL, RISK_JUDGE_MODEL):

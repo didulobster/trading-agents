@@ -64,9 +64,8 @@ RISK_MAX_TOKENS = 4000
 # Whole-panel ceiling. Measured live (MSFT, 2026-08-25, Haiku 4.5, 6-turn
 # 2-round panel): $0.0697-$0.0704. Raised with the round count (2 -> 3,
 # Phase 6 gap-closure) since a 9-turn panel costs proportionally more; kept
-# well above the Haiku-measured figure because RESEARCH_MANAGER_MODEL/
-# RISK_JUDGE_MODEL below are pinned to Sonnet, not whatever LLM_CLAUDE_MODEL
-# resolves to, and Sonnet costs ~3x Haiku's per-token rate.
+# with real margin above the measured 6-turn figure rather than tight
+# against a linear extrapolation.
 RISK_BUDGET_USD = 0.35
 
 if RISK_MODEL not in _MODEL_PRICING:
