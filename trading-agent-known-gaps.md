@@ -679,3 +679,110 @@ section is the closure.
    ticker, and especially against an input where the risk panel itself
    lands closer to a genuine 50/50 split, would be the next check worth
    running before treating "PASS" here as more than it is.
+
+## Phase 6 determinism correction (logged 2026-08-25, same day, external code review)
+
+Everything above this section stood for a few hours before an external
+review of the checklist found two things the "PASS" verdicts had not
+actually ruled out. Not removing the section above — it's what was
+believed and why, at the time — this is the correction, per this file's
+own rule of recording what changed rather than editing history away.
+
+1. **[Found by review, confirmed and fixed] `build_risk_ledger` silently
+   discarded every score revision from round 2 onward.** The guard `if
+   turn.persona in entry.scores: continue` was checked against `entry.scores`
+   — state that persists across the WHOLE turn loop — not against
+   turn-local state. Intended to catch one turn emitting two scores for the
+   same factor (a model error), it also caught the thing that was never
+   supposed to be caught: a persona's turn-4 "respond" revision of its own
+   turn-1 score, or neutral's turn-6 re-adjudication of its own turn-3
+   verdict. Both look identical to the guard — "this persona already has a
+   score for this factor" — so both were dropped. The risk panel's turns
+   argued, revised, and re-adjudicated for real; `build_risk_ledger` kept
+   only round 1's numbers, permanently, for the entire life of this
+   feature. `contested` and `confidence` were therefore computed from
+   frozen first-round positions, not from wherever the personas actually
+   landed after seeing each other's reasoning — which is the entire
+   justification for having more than one round.
+
+   Fixed by scoping the duplicate-detection to the current turn only
+   (`scored_this_turn`, reset every turn) while letting a later turn
+   overwrite `entry.scores[persona]` unconditionally. Verified as a real
+   regression, not a hypothesis: two new tests in `test_risk_ledger.py`
+   were run against the pre-fix code first (both failed, reproducing the
+   exact stale-score values) and again after (both pass).
+
+2. **[Found by review, confirmed by re-running with a wider observable]
+   The determinism claim from item 2 above does not survive checking
+   anything besides the verdict.** `scripts/risk_determinism_check.py` now
+   compares four observables between the two `temperature=0` replays —
+   verdict, the full per-`factor_id` ledger scores, the contested set, and
+   the resolved reference set actually cited in the memo — instead of only
+   the verdict. Re-run (MSFT, `--as-of 2026-08-24`, Haiku, with the ledger
+   fix from item 1 in place):
+
+   ```
+   verdict:        MATCH   (hold / hold)
+   ledger_scores:  MISMATCH  — RF03: [severity 3,3] -> [severity 4,4]
+                     (both personas shifted by the same +1, likelihoods
+                     unchanged, between the two temperature=0 replays)
+   contested_set:  MATCH   (both empty)
+   resolved_refs:  MISMATCH — one extra debate claim cited in replay 2
+   ```
+
+   **Determinism: FAIL on 2 of 4 observables**, even with `temperature=0`
+   genuinely sent and accepted (no fallback fired). The verdict-only
+   criterion, as literally worded, still passes — `hold` both times — but
+   that is now known to be true DESPITE the underlying process not being
+   deterministic, not BECAUSE it is. Most likely explanation: `temperature=0`
+   makes next-token sampling greedy but does not guarantee bit-identical
+   output across calls on Anthropic's serving stack, which is a documented
+   property of production LLM inference generally (batch composition,
+   floating-point non-associativity), not something this project's
+   temperature plumbing got wrong. Nine sequential risk turns plus two
+   synthesis calls gives that variance nine-plus opportunities to
+   compound; this run, it surfaced in one factor's score and one citation,
+   not in the verdict. A different run could surface it in the verdict
+   instead — nothing here rules that out.
+
+   Stability's widened metrics tell the same story from the production-
+   temperature side: across the 3 samples, verdict direction held (`hold`
+   x3) but the contested-set Jaccard similarity was **0.00** — no two of
+   the three samples agreed on which factor was contested — and confidence
+   spread was 0.12 (0.60/0.48/0.60). The verdict is stable; the risk read
+   underneath it is not, and the stability criterion as specified has no
+   way to see that.
+
+3. **Net effect on the exit-criteria table**: criterion 4 (determinism) as
+   LITERALLY worded — replay twice at temperature 0, verdict identical —
+   still passes on every run to date. Criterion 4 as a claim about the
+   PIPELINE being deterministic does not, and should not be represented as
+   closed. Criterion 5 (stability) is unchanged in its literal pass, but
+   its power to detect a real problem remains close to zero given finding
+   4 in the section above (every verdict this project has ever produced,
+   29 of 29 counting this run, is `hold`) — a stability check that cannot
+   distinguish "the pipeline is stable" from "the pipeline always says
+   hold" is not exercising the property the criterion is meant to protect.
+
+   The fabrication-laundering, `reasoning`/`verdict`-coherence, and
+   `recursion_limit`-superstep concerns raised in the same review were
+   checked directly against the current code and do NOT apply: the Risk
+   Judge's numeric-guard corpus never includes the Research Manager's own
+   prose (`_numeric_corpus` in `synthesis_port.py` — reports, debate
+   claims, ledger text, risk-score rationales only); `reasoning` and
+   `verdict` are both set from the same `RiskJudgePayload` in
+   `run_synthesis`, so they cannot originate from different agents; and
+   Research Manager + Risk Judge run sequentially inside the single
+   `synthesizer` graph node, not as two graph nodes, so they cost zero
+   additional LangGraph supersteps — `RECURSION_LIMIT` (27, derived live
+   from `RISK_MAX_ROUNDS`, not a literal) already accounts for this
+   correctly.
+
+**Next check worth running, if this is picked back up**: a ticker/date
+combination with a genuinely bearish or genuinely contested setup, to
+establish whether the pipeline can produce a non-`hold` verdict at all —
+without that, "stability" is unfalsifiable by construction. Second
+priority: repeat the widened 4-observable determinism check on that input,
+since the one non-degenerate result available so far (this section) is a
+single ticker, single fixed debate transcript, and already failed 2 of 4
+observables.

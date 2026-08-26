@@ -14,18 +14,45 @@ against):
 "Same debate transcript" means the debate itself is generated ONCE (real
 API calls, not a hand-built fixture) and then held fixed across every
 trial — only the risk panel, Research Manager, and Risk Judge are re-run
-per trial. At temperature=0 that means EVERY risk-panel turn runs at 0, not
-just the Risk Judge: the criterion is about the reproducibility of the
-whole downstream process given fixed upstream input, and a Risk Judge that
-is itself deterministic over a risk ledger that varies run to run would not
-actually demonstrate that.
+per trial.
+
+CODE REVIEW FINDING (2026-08-25), incorporated here: `verdict` alone is the
+most-collapsed thing this pipeline emits and the weakest detector of
+non-determinism — two runs can produce the identical verdict via different
+per-factor ledger scores and a different contested set, which is a FAILED
+determinism check that a verdict-only assertion would still pass. This
+script now compares four observables, not one:
+
+  - verdict (buy/sell/hold)
+  - the ledger's per-factor_id scores, `{factor_id: {persona: (severity,
+    likelihood)}}` — exact equality required for the determinism trials
+  - the contested set (factor_ids where contested=True)
+  - the resolved reference set actually cited in the final memo's prose
+
+For determinism (temperature=0, replayed twice), ALL FOUR must match
+exactly, and each is reported PASS/FAIL independently — a verdict match
+with a ledger-score or contested-set mismatch is reported as a determinism
+FAILURE, not papered over. For stability (production temperature, 3
+samples), verdict direction is still the pass/fail bar (the criterion as
+specified only asks for that), but confidence spread and the contested-set
+Jaccard similarity across the three samples are reported alongside it,
+since — per the same review — that is where instability actually shows up
+even when the verdict itself doesn't move.
+
+Also worth stating plainly, not just here but every time this script's
+output is read: check `--verdict-distribution` first. If every decision
+memo this project has ever produced is `hold` (it is, as of this writing —
+see trading-agent-known-gaps.md), a stability PASS has limited power to
+detect non-determinism in the DIRECTION dimension specifically, because the
+sampling distribution may be degenerate rather than genuinely stable. This
+script does not manufacture a non-hold input; that requires a different
+ticker/date or a deliberately adversarial fixture, tracked as a follow-up
+in trading-agent-known-gaps.md rather than solved here.
 
 Cost: one real debate (6 turns) generated once and reused as fixed input;
 5 trials of the risk panel (9 turns each, RISK_MAX_ROUNDS=3) + Research
 Manager + Risk Judge (2 trials at temperature=0, 3 at production
-temperature). Risk panel model follows TRADING_RISK_MODEL/LLM_CLAUDE_MODEL
-as normal; Research Manager and Risk Judge are pinned to Sonnet per the
-spec, via synthesis_port.RESEARCH_MANAGER_MODEL/RISK_JUDGE_MODEL.
+temperature). Measured (Haiku 4.5 throughout): ~$0.63 for all 5 trials.
 
 Run:
 
@@ -51,7 +78,7 @@ from app.agent.trading.domain.technical_report import TechnicalReport
 from app.agent.trading.infrastructure.debate_port import run_debate_turn
 from app.agent.trading.infrastructure.price_data_port import get_price_history
 from app.agent.trading.infrastructure.risk_port import run_risk_turn
-from app.agent.trading.infrastructure.synthesis_port import run_synthesis
+from app.agent.trading.infrastructure.synthesis_port import extract_refs, run_synthesis
 from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators
 
 
@@ -85,11 +112,21 @@ async def build_fixed_debate_state(ticker: str, as_of: date, client: AsyncAnthro
     return state
 
 
+def _ledger_scores(ledger) -> dict:
+    """{factor_id: {persona: [severity, likelihood]}} — a plain, JSON- and
+    equality-comparable snapshot of the ledger's actual numbers, not just
+    its size. Lists rather than tuples so two independently-built dicts
+    compare equal after a JSON round-trip too, not only in-process."""
+    return {e.factor_id: {p: list(v) for p, v in e.scores.items()} for e in ledger}
+
+
 async def run_pipeline_once(
     fixed_state: dict, *, temperature: float | None, client: AsyncAnthropic, label: str,
-) -> tuple[str, dict]:
+) -> dict:
     """Fresh risk panel (from an empty risk_turns) + Research Manager + Risk
-    Judge, over the SAME fixed debate. Returns (verdict, detail dict)."""
+    Judge, over the SAME fixed debate. Returns a detail dict carrying every
+    observable the comparison in `main` needs — verdict alone is not enough,
+    see the module docstring."""
     trial_state = dict(fixed_state)
     turns = []
     for i in range(RISK_MAX_TURNS):
@@ -113,18 +150,87 @@ async def run_pipeline_once(
         as_of=trial_state["as_of_date"], client=client,
         research_temperature=temperature, risk_temperature=temperature,
     )
-    contested = sum(1 for e in ledger if e.contested)
+
+    contested = sorted(e.factor_id for e in ledger if e.contested)
+    resolved_refs = sorted(set(extract_refs(
+        memo.bull_case, memo.bear_case, memo.research_thesis,
+        memo.risk_debate_summary, memo.reasoning, *memo.watch_items,
+    )))
     detail = {
-        "label": label, "temperature": temperature, "verdict": memo.verdict.value,
+        "label": label,
+        "temperature": temperature,
+        "verdict": memo.verdict.value,
         "research_preliminary_verdict": memo.research_preliminary_verdict.value,
         "overridden": memo.verdict != memo.research_preliminary_verdict,
-        "ledger_size": len(ledger), "contested": contested, "confidence": memo.confidence,
+        "confidence": memo.confidence,
+        "ledger_size": len(ledger),
+        "ledger_scores": _ledger_scores(ledger),
+        "contested": contested,
+        "resolved_refs": resolved_refs,
     }
     print(f"[{label}] temperature={temperature} verdict={memo.verdict.value} "
           f"(research lean: {memo.research_preliminary_verdict.value}"
           f"{', OVERRIDDEN' if detail['overridden'] else ''}) "
-          f"ledger={len(ledger)} contested={contested} confidence={memo.confidence}")
-    return memo.verdict.value, detail
+          f"ledger={len(ledger)} contested={len(contested)} confidence={memo.confidence}")
+    return detail
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a and not b:
+        return 1.0
+    return len(a & b) / len(a | b)
+
+
+def _report_determinism(results: list[dict]) -> bool:
+    """Every observable must match exactly across the two temperature=0
+    trials. Each dimension is checked and reported independently — a
+    verdict match riding on top of a ledger-score or contested-set mismatch
+    is a determinism FAILURE, not a pass with an asterisk."""
+    a, b = results
+    checks = {
+        "verdict": a["verdict"] == b["verdict"],
+        "ledger_scores": a["ledger_scores"] == b["ledger_scores"],
+        "contested_set": a["contested"] == b["contested"],
+        "resolved_refs": a["resolved_refs"] == b["resolved_refs"],
+    }
+    print("\nDETERMINISM — per-observable:")
+    for name, ok in checks.items():
+        print(f"  {name}: {'MATCH' if ok else 'MISMATCH'}")
+        if not ok:
+            print(f"    trial 1: {a[name] if name != 'verdict' else a['verdict']}")
+            print(f"    trial 2: {b[name] if name != 'verdict' else b['verdict']}")
+    overall = all(checks.values())
+    print(f"DETERMINISM: {'PASS' if overall else 'FAIL'} "
+          f"({sum(checks.values())}/{len(checks)} observables matched)")
+    return overall
+
+
+def _report_stability(results: list[dict]) -> bool:
+    directions = {r["verdict"] for r in results}
+    direction_holds = len(directions) == 1
+
+    confidences = [r["confidence"] for r in results]
+    confidence_spread = max(confidences) - min(confidences)
+
+    contested_sets = [set(r["contested"]) for r in results]
+    pairwise_jaccard = [
+        _jaccard(contested_sets[i], contested_sets[j])
+        for i in range(len(contested_sets))
+        for j in range(i + 1, len(contested_sets))
+    ]
+    min_jaccard = min(pairwise_jaccard) if pairwise_jaccard else 1.0
+
+    print(f"\nSTABILITY — verdict direction: {'PASS' if direction_holds else 'FAIL'} "
+          f"({[r['verdict'] for r in results]})")
+    print(f"  confidence spread across samples: {confidence_spread:.2f} "
+          f"({confidences})")
+    print(f"  contested-set Jaccard similarity (min pairwise): {min_jaccard:.2f} "
+          f"— 1.0 means identical contested sets every sample, 0.0 means no overlap")
+    print("  (confidence spread and contested-set Jaccard are reported, not gated — "
+          "the exit criterion is verdict direction only; a wide spread here with a "
+          "held direction means the VERDICT is stable while the RISK READ under it "
+          "is not, which the criterion as specified does not catch)")
+    return direction_holds
 
 
 async def main(ticker: str, as_of: date) -> None:
@@ -134,30 +240,27 @@ async def main(ticker: str, as_of: date) -> None:
     print("\n=== 1. DETERMINISM: same debate, temperature=0, twice ===")
     det_results = []
     for i in range(2):
-        verdict, detail = await run_pipeline_once(
+        detail = await run_pipeline_once(
             fixed_state, temperature=0.0, client=client, label=f"determinism-{i + 1}"
         )
         det_results.append(detail)
-    determinism_holds = det_results[0]["verdict"] == det_results[1]["verdict"]
-    print(f"\nDETERMINISM: {'PASS' if determinism_holds else 'FAIL'} — "
-          f"{det_results[0]['verdict']} vs {det_results[1]['verdict']}")
+    determinism_holds = _report_determinism(det_results)
 
     print("\n=== 2. STABILITY: same debate, production temperature, 3 samples ===")
     stab_results = []
     for i in range(3):
-        verdict, detail = await run_pipeline_once(
+        detail = await run_pipeline_once(
             fixed_state, temperature=None, client=client, label=f"stability-{i + 1}"
         )
         stab_results.append(detail)
-    directions = {r["verdict"] for r in stab_results}
-    stability_holds = len(directions) == 1
-    print(f"\nSTABILITY: {'PASS' if stability_holds else 'FAIL'} — "
-          f"verdicts: {[r['verdict'] for r in stab_results]}")
+    stability_holds = _report_stability(stab_results)
 
     print("\n=== Summary ===")
     print(json.dumps({"determinism": det_results, "stability": stab_results}, indent=2))
-    print(f"\nDeterminism (temp=0, replayed twice): {'PASS' if determinism_holds else 'FAIL'}")
-    print(f"Stability (production temp, 3 samples): {'PASS' if stability_holds else 'FAIL'}")
+    print(f"\nDeterminism (temp=0, replayed twice, 4 observables): "
+          f"{'PASS' if determinism_holds else 'FAIL'}")
+    print(f"Stability (production temp, 3 samples, verdict direction): "
+          f"{'PASS' if stability_holds else 'FAIL'}")
 
 
 if __name__ == "__main__":
