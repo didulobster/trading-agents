@@ -559,6 +559,13 @@ async def run_research_manager(
         claims=claims, ledger_by_id={}, label="research_manager",
     )
 
+    # log_cost runs BEFORE the fabrication guard below, not after: usage is
+    # already final at this point (no more API calls happen past this line),
+    # and a call that trips the guard still spent real tokens. Logging after
+    # the guard's raise meant a blocked call's spend never reached
+    # cost-log.jsonl — see trading-agent-known-gaps.md (FIG, 2026-08-26).
+    cost = log_cost(ticker, "trading-research-manager", usage, model=RESEARCH_MANAGER_MODEL)
+
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     corpus = _numeric_corpus(state, [], debate_turns)
     block_flags, gap_flags = _numeric_guard(
@@ -575,7 +582,6 @@ async def run_research_manager(
         # append to.
         print(f"[synthesis] research_manager: unbacked number(s) outside thesis: {gap_flags}")
 
-    cost = log_cost(ticker, "trading-research-manager", usage, model=RESEARCH_MANAGER_MODEL)
     return payload, cost, gap_flags
 
 
@@ -618,6 +624,11 @@ async def run_risk_judge(
         claims=claims, ledger_by_id=ledger_by_id, label="risk_judge",
     )
 
+    # See the identical comment in run_research_manager: log the cost before
+    # the fabrication guard can raise, since usage is already final and a
+    # blocked call still spent real tokens.
+    cost = log_cost(ticker, "trading-risk-judge", usage, model=RISK_JUDGE_MODEL)
+
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     corpus = _numeric_corpus(state, ledger, debate_turns)
     block_flags, gap_flags = _numeric_guard(
@@ -632,7 +643,6 @@ async def run_risk_judge(
             f"debate claim, or risk factor"
         )
 
-    cost = log_cost(ticker, "trading-risk-judge", usage, model=RISK_JUDGE_MODEL)
     return payload, cost, gap_flags
 
 

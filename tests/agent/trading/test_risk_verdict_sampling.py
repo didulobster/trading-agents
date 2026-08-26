@@ -32,6 +32,10 @@ from app.agent.trading.domain.risk import (
     RiskTurn,
     RiskTurnPayload,
 )
+from app.agent.trading.infrastructure.synthesis_port import (
+    SynthesisFabricationError,
+    SynthesisReferenceError,
+)
 
 AS_OF = date(2026, 8, 22)
 
@@ -216,3 +220,82 @@ async def test_sampling_runs_exactly_risk_verdict_samples_total_trials(monkeypat
     await nodes.synthesizer_node(_state())
 
     assert call_count == nodes.RISK_VERDICT_SAMPLES == 3
+
+
+# ---------------------------------------------------------------------------
+# A trial's citation/fabrication guard tripping must not crash the whole
+# node — measured live hit rate is ~1-in-8 Risk Judge calls (FIG,
+# trading-agent-known-gaps.md, 2026-08-26), which gave a 3-sample run
+# better-than-even odds of aborting with no memo at all, discarding every
+# trial already paid for.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_a_guard_dropped_sample_is_excluded_from_the_vote_not_a_crash(monkeypatch):
+    """sample 2 trips the fabrication guard; samples 1 and 3 both say hold.
+    The run must still produce a memo — the majority of the SURVIVING
+    samples, not a crash — and must say honestly that a sample was
+    dropped."""
+    _stub_extra_panel_samples(monkeypatch)
+    calls = iter([
+        _memo("ACN", Verdict.HOLD, tag="1"),
+        SynthesisFabricationError("unbacked number(s) in reasoning: ['5']"),
+        _memo("ACN", Verdict.HOLD, tag="3"),
+    ])
+
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        outcome = next(calls)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
+
+    memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
+
+    assert memo.verdict == Verdict.HOLD
+    assert memo.verdict_samples == ["hold", "hold"]
+    assert any("dropped by the citation/fabrication guard" in g for g in memo.data_gaps)
+    assert any("1 of 3" in g for g in memo.data_gaps)
+
+
+@pytest.mark.anyio
+async def test_a_dropped_reference_error_sample_is_also_excluded_not_fatal(monkeypatch):
+    """SynthesisReferenceError (unresolved [C:id]/[RFnn] citation after the
+    in-call retry) is a per-trial data-quality failure exactly like the
+    fabrication guard — same drop-and-continue treatment, not a crash."""
+    _stub_extra_panel_samples(monkeypatch)
+    calls = iter([
+        _memo("ACN", Verdict.SELL, tag="1"),
+        _memo("ACN", Verdict.SELL, tag="2"),
+        SynthesisReferenceError("still cites unresolved reference(s): ['RF99']"),
+    ])
+
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        outcome = next(calls)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
+
+    memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
+
+    assert memo.verdict == Verdict.SELL
+    assert memo.verdict_samples == ["sell", "sell"]
+
+
+@pytest.mark.anyio
+async def test_all_samples_dropped_by_the_guard_raises_one_clear_aggregate_error(monkeypatch):
+    """If every trial is dropped there is genuinely no memo to return — this
+    must still raise, but with one message naming all the failures, not
+    just whichever trial happened to run last."""
+    _stub_extra_panel_samples(monkeypatch)
+
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        raise SynthesisFabricationError("unbacked number(s): ['5']")
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
+
+    with pytest.raises(SynthesisFabricationError, match="all 3 risk-verdict samples"):
+        await nodes.synthesizer_node(_state())

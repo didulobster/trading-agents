@@ -29,7 +29,11 @@ from app.agent.trading.infrastructure.news_data_port import fetch_company_news, 
 from app.agent.trading.infrastructure.news_digest_port import build_digest
 from app.agent.trading.infrastructure.price_data_port import get_price_history
 from app.agent.trading.application.technical_indicators import compute_indicators
-from app.agent.trading.infrastructure.synthesis_port import run_synthesis
+from app.agent.trading.infrastructure.synthesis_port import (
+    SynthesisFabricationError,
+    SynthesisReferenceError,
+    run_synthesis,
+)
 from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators, save_technical_report
 
 # Phase 6 exit-criteria fix (2026-08-26, code review): post-fix measurement
@@ -467,27 +471,58 @@ async def synthesizer_node(state: TradingState) -> dict:
     )
     base_evidence = news_evidence + debate_evidence + risk_evidence
 
-    memo = await run_synthesis(
-        state, ledger=ledger, base_gaps=base_gaps, base_evidence=base_evidence, as_of=as_of
-    )
-
     if not ledger:
         # No risk panel ran (e.g. `--only technical`) — nothing to sample,
         # same single-call behavior as before this change. `verdict_samples`
         # stays its default empty list, which is the honest signal that
         # sampling did not run, not that it ran and produced one entry.
+        memo = await run_synthesis(
+            state, ledger=ledger, base_gaps=base_gaps, base_evidence=base_evidence, as_of=as_of
+        )
         return {"decision_memo": memo}
 
-    memos = [memo]
+    # Each of the RISK_VERDICT_SAMPLES trials is an independent (panel,
+    # Research Manager, Risk Judge) run, and the Research Manager/Risk Judge
+    # calls carry a citation/fabrication guard that raises on an untrusted
+    # output (SynthesisFabricationError, SynthesisReferenceError). Measured
+    # live hit rate is ~1-in-8 calls (trading-agent-known-gaps.md, FIG,
+    # 2026-08-26) — at that rate a 3-sample run has better than even odds of
+    # tripping it somewhere, and letting one trial's guard crash the whole
+    # node threw away every OTHER trial already paid for, including ones
+    # that passed cleanly. A trial the guard blocks is dropped from the
+    # vote instead of aborting the run; only if EVERY trial is dropped does
+    # this raise, since at that point there is genuinely no memo to return.
+    memos: list = []
+    dropped: list[str] = []
     client = AsyncAnthropic()
-    for _ in range(RISK_VERDICT_SAMPLES - 1):
-        sample_turns = await _sample_additional_risk_panel(state)
-        sample_ledger = build_risk_ledger(sample_turns)
-        sample_state = {**state, "risk_turns": sample_turns}
-        memos.append(await run_synthesis(
-            sample_state, ledger=sample_ledger, base_gaps=base_gaps,
-            base_evidence=base_evidence, as_of=as_of, client=client,
-        ))
+    for i in range(RISK_VERDICT_SAMPLES):
+        if i == 0:
+            # The first trial reuses the graph-checkpointed panel already in
+            # `state`/`ledger` rather than sampling a fresh one — same as
+            # before this change.
+            sample_ledger, sample_state, sample_client = ledger, state, None
+        else:
+            sample_turns = await _sample_additional_risk_panel(state)
+            sample_ledger = build_risk_ledger(sample_turns)
+            sample_state = {**state, "risk_turns": sample_turns}
+            sample_client = client
+        try:
+            memos.append(await run_synthesis(
+                sample_state, ledger=sample_ledger, base_gaps=base_gaps,
+                base_evidence=base_evidence, as_of=as_of, client=sample_client,
+            ))
+        except (SynthesisFabricationError, SynthesisReferenceError) as exc:
+            print(
+                f"[synthesizer] sample {i + 1}/{RISK_VERDICT_SAMPLES} dropped by "
+                f"the citation/fabrication guard: {exc}"
+            )
+            dropped.append(str(exc))
+
+    if not memos:
+        raise SynthesisFabricationError(
+            f"all {RISK_VERDICT_SAMPLES} risk-verdict samples for {state['ticker']} "
+            f"were dropped by the citation/fabrication guard — no memo produced: {dropped}"
+        )
 
     verdicts = [m.verdict.value for m in memos]
     top_verdict, top_count = Counter(verdicts).most_common(1)[0]
@@ -508,8 +543,17 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"reported as UNRESOLVED rather than picking one sample's answer"
         )
 
+    extra_gaps = [split_note]
+    if dropped:
+        extra_gaps.append(
+            f"{len(dropped)} of {RISK_VERDICT_SAMPLES} risk-verdict sample(s) were "
+            f"dropped by the citation/fabrication guard before voting (untrustworthy "
+            f"output, not counted) — this verdict reflects only the surviving "
+            f"{len(memos)} sample(s), a weaker signal than a full {RISK_VERDICT_SAMPLES}-way vote"
+        )
+
     final = final.model_copy(update={
         "verdict_samples": verdicts,
-        "data_gaps": final.data_gaps + [split_note],
+        "data_gaps": final.data_gaps + extra_gaps,
     })
     return {"decision_memo": final}

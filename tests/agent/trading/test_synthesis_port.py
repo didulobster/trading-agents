@@ -244,6 +244,39 @@ async def test_an_unbacked_number_in_risk_judge_reasoning_blocks_the_run():
 
 
 @pytest.mark.anyio
+async def test_a_blocked_research_manager_call_still_logs_its_cost(monkeypatch):
+    """log_cost must run before the fabrication guard's raise: the guard
+    fires only after the LLM call already spent real tokens, and logging
+    after the raise meant a blocked call's spend never reached
+    cost-log.jsonl (trading-agent-known-gaps.md, FIG, 2026-08-26)."""
+    logged = []
+    monkeypatch.setattr(port, "log_cost", lambda *a, **k: logged.append(a[:2]) or 0.02)
+
+    bait = _research_payload(thesis="Revenue could reach $9,999 million [C:margin-hold].")
+    coro, _ = _run([bait])
+
+    with pytest.raises(port.SynthesisFabricationError):
+        await coro
+
+    assert ("ACN", "trading-research-manager") in logged
+
+
+@pytest.mark.anyio
+async def test_a_blocked_risk_judge_call_still_logs_its_cost(monkeypatch):
+    logged = []
+    monkeypatch.setattr(port, "log_cost", lambda *a, **k: logged.append(a[:2]) or 0.02)
+
+    bait = _risk_payload(reasoning="Losses could hit $12,345 thousand [RF00].")
+    coro, _ = _run([_research_payload(), bait])
+
+    with pytest.raises(port.SynthesisFabricationError):
+        await coro
+
+    assert ("ACN", "trading-research-manager") in logged  # the earlier, clean call
+    assert ("ACN", "trading-risk-judge") in logged          # the blocked call itself
+
+
+@pytest.mark.anyio
 async def test_an_unbacked_number_in_bull_case_is_a_gap_not_a_block():
     bait = _research_payload(bull_case="Upside could reach $7,777 million [C:margin-hold].")
     coro, _ = _run([bait, _risk_payload()])
