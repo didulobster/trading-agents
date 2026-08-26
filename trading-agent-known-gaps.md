@@ -1387,3 +1387,51 @@ same reason stated in the MSFT entry: converting `SynthesisFabricationError`
 from a hard stop into something a caller can recover from is a real design
 decision on the guard's existing safety posture, not a one-line fix — but
 the decision is no longer optional to defer indefinitely.
+
+## The hard-stop decision, made: drop the trial, not the run (2026-08-26)
+
+`synthesizer_node`'s majority-of-N loop now catches `SynthesisFabrication
+Error`/`SynthesisReferenceError` per trial instead of letting either crash
+the whole node. A trial whose Research Manager or Risk Judge call trips
+either guard is dropped from the vote — its output is untrustworthy, not
+its neighbors' — and the run proceeds with the remaining trials. Only if
+EVERY trial in a run is dropped does this now raise, with one aggregate
+`SynthesisFabricationError` naming every failure, not just whichever trial
+happened to run last. The final memo's `data_gaps` says explicitly when a
+sample was dropped and how many survived, so a verdict computed from 2
+trials instead of 3 doesn't read as an ordinary 3-way vote.
+
+This does NOT weaken the guard itself — a trial with a fabricated number
+still never becomes part of the memo. It only changes what happens to the
+OTHER trials when one of them fails: previously nothing, now they still
+get to vote. The `SynthesisFabricationError`/`SynthesisReferenceError`
+guard raise sites in `synthesis_port.py` are unchanged.
+
+Also fixed in the same pass, found while reading the guard's raise sites
+for this change: `run_research_manager`/`run_risk_judge` in
+`synthesis_port.py` were calling `log_cost` AFTER the fabrication-guard
+check, so a blocked call's real spend — the exact cost gap this file's FIG
+entry above flagged as unmeasured — never reached `docs/cost-log.jsonl`.
+`log_cost` now runs immediately once `usage` is final (right after the
+schema/reference-resolution retry loop returns), before the guard can
+raise, so every call that spends tokens is logged regardless of whether it
+subsequently gets blocked.
+
+**Tests**: 5 new — `test_a_guard_dropped_sample_is_excluded_from_the_vote_
+not_a_crash`, `test_a_dropped_reference_error_sample_is_also_excluded_not_
+fatal`, and `test_all_samples_dropped_by_the_guard_raises_one_clear_
+aggregate_error` in `test_risk_verdict_sampling.py`; two cost-logging tests
+in `test_synthesis_port.py` asserting `log_cost` fires even when the
+subsequent guard check raises. All mocked (no network, no live cost) — the
+existing test harness already simulates a guard trip deterministically via
+a monkeypatched `run_synthesis`/`_call_model`, which is a more reliable way
+to exercise this path than waiting on the live ~1-in-8 hit rate. Full
+suite: 460 passed (was 455).
+
+**Not done here, left for whoever next runs the FIG/AVGO/ASML-style
+determinism/stability battery**: this fix is unverified against a live
+run that actually trips the guard mid-battery — the mocked tests prove the
+mechanism, not the live behavior end to end. The next live verification
+run against any ticker is the natural place to confirm a dropped trial
+in practice, rather than paying for a dedicated run here just to reproduce
+a ~1-in-8 event.
