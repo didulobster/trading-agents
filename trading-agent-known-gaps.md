@@ -1721,3 +1721,115 @@ already flagged as verdict-unstable, which this battery did not use.
 closed (5/5). 4 closed with (a) inconclusive due to ticker choice, (b)/(c)
 clean. 7 closed with a real finding and a shipped fix (see the entry
 above) rather than a clean pass on the first attempt.
+
+## Phase 9 gates: closed, battery held (2026-08-26)
+
+Gates A–D done, harness built and tested, **no live battery run** — the
+battery was explicitly held pending a spend decision. Everything below is
+pre-battery evidence.
+
+**Gate A failed on NFLX, as predicted, and is now fixed.**
+`scripts/gate_a_corpus_probe.py` probes `RetrievalService` directly rather
+than the agent's `ask_edgar` tool, so a zero is unambiguously an empty
+corpus and not a downed FastAPI app or a model declining to answer.
+
+| ticker | probe hits (k=5, ×4 probes) | filings | chunks | latest filed |
+|---|---|---|---|---|
+| AVGO | 5,5,5,5 | 6 | 737 | 2026-06-09 |
+| ACN | 5,5,5,5 | 6 | 640 | 2026-06-18 |
+| NFLX | **0,0,0,0** → 5,5,5,5 after ingest | 0 → 6 | 0 → 514 | — → 2026-07-17 |
+| FIG | 5,5,5,5 | 4 | 785 | 2026-08-05 |
+| ASML | 5,5,5,5 | 6 | 1591 | 2026-02-25 |
+| MSFT | 5,5,5,5 | 8 | 684 | 2026-07-29 |
+
+NFLX had never exercised the fundamentals path. Its only prior run (vault
+`NFLX/20260826/2026-0826-165512`, the Phase 7 battery's fifth ticker) was
+`--only technical`, so the empty corpus had never been reachable. Ingested
+3× 10-K + 3× 10-Q to match the shape the other five carry.
+
+**FIG's expected THIN reading does not appear at the retrieval layer.** 4
+filings against AVGO's 6, but 5/5 hits on every probe. A short filing
+history shows up in what the corpus *holds*, not in whether a query finds
+something. So the open question — "a thin corpus should surface as lower
+confidence and more `data_gaps`" — has to be checked against FIG's memo,
+not against this probe. Carried into the battery as an audit item.
+
+### New finding: the citation pattern went blind on ~85% of risk factors
+
+`_REF_PATTERN` in `synthesis_port.py` was `RF\d+`, written when `factor_id`
+was `f"RF{i:02d}"`. The 2026-08-26 code review replaced that with
+`_content_id` — `RF` plus a 4-char SHA-1 prefix in **uppercase hex** — and
+the pattern was never moved with it. Only the ~15% of the id space that
+happens to be all-digits ever matched.
+
+Two consumers of `extract_refs` went blind:
+
+- `_render_evidence` drops the citation, so a memo prints `[RFC50B]` in its
+  Reasoning with no matching line in its Evidence section.
+- `resolve_refs` never sees the id, so a hallucinated factor id containing
+  any of A–F passes `verify_decision_memo`'s unresolved-reference check.
+  **That is a hole in the Phase 7 post-hoc verifier itself**, and it means
+  Phase 7's criterion 4 was weaker than its record implies.
+
+Confirmed on a real memo, not in review: the NFLX run above cites RF487E,
+RFC50B, RF3755, RF6ECA and RF901B, and its Evidence section renders exactly
+one — RF3755, the only all-digit id of the five.
+
+The whole suite missed it because every fixture in `test_synthesis_port`,
+`test_risk_ledger` and `test_risk_port` still uses `RF00`, the pre-hash
+shape: the tests only ever fed the pattern the part of the id space that
+worked. Fixed with three hex-id regression tests.
+
+### Two Phase 9 criteria restated, because the plan's versions are unsound here
+
+**Criterion 4 ("re-run `verify_decision_memo` over the six memos as a
+batch") cannot be done, and doing it would be worse than not.** The
+function must be given the SAME trial the memo came from — under
+majority-of-N sampling each trial runs its own risk panel with its own
+content-hashed factor ids, and the winning memo is frequently not from the
+trial whose panel survives in the checkpoint. Verifying against a different
+trial's ledger reports real citations as unresolved: a false failure, not a
+check. What the pipeline already does is stronger — `synthesizer_node`
+calls the verifier on the final memo against its own trial and *raises*,
+saving a `*-decision_failed.md`. So a `*-decision.md` on disk is proof of a
+pass, and the criterion is checked by the absence of the failed artifact.
+
+**Criterion 7 ("no evidence item has a source date after `as_of_date`") has
+no per-item date to check.** `DecisionMemo.evidence` is `list[str]`,
+rendered by `_render_evidence` from resolved references; neither
+`DebateClaim` nor `RiskLedgerEntry` carries a source date. The gate asserts
+what is checkable — one shared `data_as_of_date` equal to the battery's —
+and reports later-year prose mentions as audit *leads*, not as a verdict.
+
+### Cost basis: the plan's $0.45/run is contradicted by the cost log
+
+The Phase 9 plan derives $0.45/run from Phase 7's $2.24 ÷ 5. The Phase 8
+battery measured five full runs directly: $0.5210–$0.6648, **mean
+$0.5712**, 370–422 s each. The plan's 9-run programme is therefore ~$5.15,
+not $4.04.
+
+Criterion 9's `$4.00` battery ceiling is **kept as written** by explicit
+decision. Recorded here so a breach is interpretable rather than
+mysterious: at the measured mean the 6-run battery lands at ~$3.43, but at
+Phase 8's worst observed run ($0.6648, the 202-article AVGO run) it reaches
+$3.99 — on the line. If criterion 9 fails, the finding is that per-run cost
+drifted above what Phase 7 implied, **not** that any individual run
+breached the $0.75 hard cap the code enforces. News volume is the swing
+factor (Phase 8 entry above), so a high-article-count ticker is where a
+breach would come from.
+
+### Gates B–D
+
+- **B** — `run_p9_battery.py` records git SHA + dirty flag, all seven
+  model-selecting env vars, and pinned package versions into the manifest
+  automatically. By env var, not by a "Haiku nodes / Sonnet nodes" tiering,
+  which the code does not know and so cannot be checked on a rerun.
+- **C** — one `as_of_date`, passed once at the CLI boundary.
+- **D** — `thread_id LIKE 'trading-%-p9-%'` returns 0 rows. Clean.
+
+**Not yet done:** the battery itself (§3), the automated gate against real
+output (§4), the six worksheets, the §7 stability re-runs, and the manual
+audit (criteria 5–6), which is the actual deliverable. Also note `.env`
+carries `RISK_CRASH_AT_TURN=45` — inert at `RISK_MAX_ROUNDS=3` (max turn
+index 8), but it is fault-injection config sitting in the battery's
+environment and should be unset before the runs rather than reasoned about.
