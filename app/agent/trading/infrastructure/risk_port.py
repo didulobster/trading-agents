@@ -17,6 +17,7 @@ assigns the id that everything downstream keys on.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -451,6 +452,66 @@ def _assert_within_budget(ticker: str, turns: list[RiskTurn], this_turn: float |
         )
 
 
+_NORMALIZE_NONWORD = re.compile(r"[^\w\s]")
+_NORMALIZE_SPACE = re.compile(r"\s+")
+
+
+def _normalize_factor_text(text: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace — the same
+    concept phrased with different capitalization or a trailing period
+    still hashes identically. Not fuzzy: "export-control exposure" and
+    "export control risk" are different strings after normalization and
+    get different ids, on purpose — see `_content_id`'s docstring."""
+    return _NORMALIZE_SPACE.sub(" ", _NORMALIZE_NONWORD.sub("", text.lower())).strip()
+
+
+def _content_id(text: str, taken: set[str]) -> str:
+    """factor_id = content hash of the (normalized) factor text, not a
+    position in the enumeration.
+
+    Found live (2026-08-26, code review + a diagnostic run correlated to
+    the exact replay pair it was explaining): `f"RF{i:02d}"` bound
+    identity to ENUMERATION ORDER, which the model does not hold fixed —
+    two temperature=0 replays of the identical prompt produced factor
+    lists that differed in count (5 vs 6) AND had the same underlying
+    concepts under swapped positional ids (RF01 was "MACD deterioration"
+    in one replay, "50-day/200-day crossover" in the other). Every
+    downstream comparison (ledger diffs, contested-set stability,
+    determinism checks) was silently comparing scores attached to
+    DIFFERENT real-world risks under a shared label. Python was assigning
+    a position, not an identity — the guide's original framing ("Python
+    owns identity") was correct in intent and wrong in implementation.
+
+    A content hash fixes the part that's fixable in code: the SAME
+    proposed text gets the SAME id regardless of where in the list it
+    landed or which replay produced it. It does NOT fix, and cannot fix,
+    the model proposing a genuinely different set of risks between
+    replays (the 5-vs-6 case above) — that's enumeration variance, a
+    property of the free-text generation itself, not an identity bug. A
+    closed taxonomy (Python owns the categories, the model only supplies
+    per-ticker materiality and trigger) would close that gap too, at
+    higher cost; not attempted here. Near-duplicate wording ("export
+    control exposure" vs "export-control risk") still hashes differently
+    and is a known, accepted gap of this fix specifically — it makes
+    replay diffs interpretable (same content -> visibly same id) more than
+    it guarantees convergence on paraphrase.
+
+    Collision handling: 4 hex chars is 65,536 buckets for a slate that
+    never exceeds ~13 factors (enumerate cap 7 + up to 1 new per scoring
+    turn x 6 scoring turns), so a true hash collision is not the expected
+    failure mode — but two DIFFERENT factors normalizing to the exact same
+    string would collide by construction, so `taken` is checked and a
+    numeric suffix appended rather than trusting the hash space size.
+    """
+    digest = hashlib.sha1(_normalize_factor_text(text).encode()).hexdigest()[:4].upper()
+    candidate = f"RF{digest}"
+    suffix = 0
+    while candidate in taken:
+        suffix += 1
+        candidate = f"RF{digest}{suffix}"
+    return candidate
+
+
 def _assemble(
     payload: RiskTurnPayload, turn_index: int, persona: Persona, slate: list[str]
 ) -> tuple[RiskTurn, list[str]]:
@@ -463,10 +524,10 @@ def _assemble(
 
     accepted = payload.proposes[:cap]
     dropped = payload.proposes[cap:]
-    next_id = len(slate)
+    taken = set(slate)
     for factor in accepted:
-        factor.factor_id = f"RF{next_id:02d}"
-        next_id += 1
+        factor.factor_id = _content_id(factor.text, taken)
+        taken.add(factor.factor_id)
     payload.proposes = accepted
 
     turn = RiskTurn(

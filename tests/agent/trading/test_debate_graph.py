@@ -56,7 +56,6 @@ def _stub_synthesis(monkeypatch):
             bull_case="stub bull",
             bear_case="stub bear",
             research_thesis="stub thesis",
-            research_preliminary_verdict=Verdict.HOLD,
             risk_debate_summary="stub risk narrative",
             technical_signal="NOT RUN — technical analyst was excluded from this run",
             reasoning="stub reasoning",

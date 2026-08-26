@@ -67,7 +67,6 @@ def _research_payload(**overrides) -> dict:
         "bull_case": "Margins are stable [C:margin-hold].",
         "bear_case": "Growth is slowing [C:margin-hold].",
         "thesis": "The bull case rests on stable margins [C:margin-hold], on balance a hold.",
-        "preliminary_verdict": "hold",
     }
     base.update(overrides)
     return base
@@ -276,35 +275,21 @@ async def test_a_faithfully_cited_number_from_the_pack_is_not_flagged():
 
 
 # ---------------------------------------------------------------------------
-# The override/affirm bookkeeping — the point of the two-call split
+# The Research Manager issues no verdict — removed 2026-08-26 (code review):
+# it was shown to the Judge as prior context and measured live (ASML) to
+# flip-flop sell/hold/sell across production-temperature samples of the
+# SAME fixed debate, a pure noise source with nothing downstream requiring
+# it. The Risk Judge's `verdict` is now the pipeline's only verdict.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio
-async def test_risk_judge_affirming_the_research_manager_is_recorded_without_an_override_gap():
-    coro, _ = _run([
-        _research_payload(preliminary_verdict="hold"),
-        _risk_payload(verdict="hold"),
-    ])
-
-    memo = await coro
-
-    assert memo.verdict == Verdict.HOLD
-    assert memo.research_preliminary_verdict == Verdict.HOLD
-    assert not any("OVERRODE" in g for g in memo.data_gaps)
-
-
-@pytest.mark.anyio
-async def test_risk_judge_overriding_the_research_manager_is_recorded_as_a_data_gap():
-    coro, _ = _run([
-        _research_payload(preliminary_verdict="buy"),
-        _risk_payload(verdict="sell"),
-    ])
+async def test_the_risk_judges_verdict_is_the_memos_only_verdict():
+    coro, _ = _run([_research_payload(), _risk_payload(verdict="sell")])
 
     memo = await coro
 
     assert memo.verdict == Verdict.SELL
-    assert memo.research_preliminary_verdict == Verdict.BUY
-    assert any("OVERRODE" in g and "buy" in g and "sell" in g for g in memo.data_gaps)
+    assert not hasattr(memo, "research_preliminary_verdict")
 
 
 @pytest.mark.anyio
@@ -329,7 +314,8 @@ async def test_risk_judge_is_shown_the_research_managers_output():
     risk_judge_call = client.messages.calls[1]
     system_text = "\n".join(b["text"] for b in risk_judge_call["system"])
     assert "RESEARCH MANAGER'S SYNTHESIS" in system_text
-    assert "Preliminary verdict: hold" in system_text
+    assert _research_payload()["thesis"] in system_text
+    assert "Preliminary verdict" not in system_text   # the field no longer exists
 
 
 # ---------------------------------------------------------------------------

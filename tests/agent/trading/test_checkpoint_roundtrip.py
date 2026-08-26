@@ -595,7 +595,6 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
             bull_case="stub bull",
             bear_case="stub bear",
             research_thesis="stub thesis",
-            research_preliminary_verdict=Verdict.HOLD,
             risk_debate_summary="stub risk narrative",
             technical_signal=(
                 technical.interpretation

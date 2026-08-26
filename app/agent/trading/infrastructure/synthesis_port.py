@@ -1,7 +1,6 @@
 """The two-call synthesis split: a Research Manager that synthesizes the
-bull/bear DEBATE, and a Risk Judge that synthesizes the risk-panel LEDGER
-and issues the pipeline's FINAL verdict — reviewing, and empowered to
-override, the Research Manager's own preliminary lean.
+bull/bear DEBATE into cases and a thesis, and a Risk Judge that synthesizes
+the risk-panel LEDGER and issues the pipeline's ONLY verdict.
 
 This is a Phase 6 gap-closure rewrite. The original single-call
 `run_synthesis` (one model producing bull_case/bear_case/risk_narrative/
@@ -9,8 +8,16 @@ verdict together) is gone: the actual spec calls for two distinct roles —
 "Research Manager (Sonnet) synthesizes the bull/bear debate; Risk Judge
 (Sonnet) synthesizes the risk debate" — and a determinism/stability
 guarantee on THE RISK VERDICT specifically, which only means something once
-there is a Risk Judge call whose own output IS that verdict, separable from
-whatever the Research Manager leaned toward on the debate alone.
+there is a Risk Judge call whose own output IS that verdict.
+
+`ResearchManagerPayload` originally also carried a `preliminary_verdict`,
+reviewed by the Risk Judge and either affirmed or overridden. Removed
+(2026-08-26, code review): it was an intermediate discrete emission nothing
+downstream required, shown to the Judge as prior context — an anchoring
+effect on the agent that actually decides. Measured live (ASML): the
+preliminary verdict alone flip-flopped sell/hold/sell across three
+production-temperature samples of the identical fixed debate. The Research
+Manager's job is cases, not a verdict.
 
 Model choice diverges from that spec text on purpose: both roles follow the
 project-wide `LLM_CLAUDE_MODEL` (Haiku 4.5), not a Sonnet pin. Sonnet 5
@@ -132,20 +139,20 @@ HARD RULES — checked in code after you answer:
    it appears in the transcript. Python resolves these into the actual
    evidence — you never retype a figure already established elsewhere.
 2. Every load-bearing sentence in `thesis` carries at least one citation.
-3. `preliminary_verdict` is your own lean from the debate ALONE — buy, sell,
-   or hold. A separate Risk Judge reviews the risk panel afterward and may
-   override you; that is the system working as designed, not a failure on
-   your part. Do not hedge your lean to avoid being overridden.
+3. You do NOT issue a verdict. Your job ends at synthesizing the debate
+   into cases and a thesis; a separate Risk Judge, who also reviews the
+   risk panel you never see, decides buy/sell/hold. Do not hedge your
+   `thesis` toward a particular direction in anticipation of that decision
+   — describe what the debate actually supports.
 
 Call `submit_research_synthesis` exactly once. Say nothing else."""
 
 RISK_JUDGE_SYSTEM = """\
-You are the Risk Judge for an equity research pipeline — the final decision
+You are the Risk Judge for an equity research pipeline — the sole decision
 maker. You will be given the analyst reports, the bull/bear debate, the
 three-persona risk panel's ledger, AND the Research Manager's own synthesis
-of the debate (their bull_case, bear_case, thesis, and preliminary_verdict).
-Your job is to weigh the risk panel against the Research Manager's lean and
-issue the FINAL verdict.
+of the debate (their bull_case, bear_case, and thesis — they do not issue a
+verdict; that is your job alone, informed by risk factors they never saw).
 
 HARD RULES — checked in code after you answer:
 
@@ -156,13 +163,12 @@ HARD RULES — checked in code after you answer:
    needs to reference the underlying debate. Python resolves these into the
    actual evidence — you never retype a figure already established
    elsewhere.
-2. `reasoning` must state PLAINLY whether you are affirming or overriding
-   the Research Manager's `preliminary_verdict`, and why. Every load-bearing
+2. `reasoning` must state which risk factor(s) were decisive for `verdict`
+   and why — not whether you agree with the Research Manager, since they
+   offered no verdict to agree or disagree with. Every load-bearing
    sentence carries a citation.
 3. `verdict` is buy/sell/hold — no fourth option, no hedge. This is the
-   PIPELINE'S FINAL ANSWER, not a second opinion alongside the Research
-   Manager's — if you affirm, say so in `reasoning`; if you override, name
-   the specific risk factor(s) that changed your mind.
+   PIPELINE'S ONLY verdict.
 4. `watch_items`: at most 5, each an observable (not a vague sentiment) that
    would change this read, each citing the `[RFnn]` factor it comes from.
 
@@ -214,12 +220,11 @@ def _render_ledger(ledger: list[RiskLedgerEntry]) -> str:
 
 def _render_research_output(research: ResearchManagerPayload) -> str:
     return (
-        "RESEARCH MANAGER'S SYNTHESIS OF THE DEBATE (for your review — you "
-        "may affirm or override its preliminary_verdict):\n"
+        "RESEARCH MANAGER'S SYNTHESIS OF THE DEBATE (context for your own "
+        "verdict — they issued none; the decision is yours alone):\n"
         f"Bull case: {research.bull_case}\n"
         f"Bear case: {research.bear_case}\n"
-        f"Thesis: {research.thesis}\n"
-        f"Preliminary verdict: {research.preliminary_verdict.value}"
+        f"Thesis: {research.thesis}"
     )
 
 
@@ -297,16 +302,30 @@ def compute_confidence(
     two-call split — it reads final state (coverage, contestation, guard
     flags), not which call produced which field. Calibrating the weights
     against realised outcomes remains a later-phase item, not attempted
-    here."""
+    here.
+
+    Reads `normalized_spread` (continuous, 0-1), NOT `contested` (boolean).
+    Found live (2026-08-26, code review): `contested` is a hard threshold
+    (spread >= 2) on a 1-5 scale with three raters, so a plain ±1 score
+    drift — exactly what temperature=0 non-determinism produces even with
+    factor identity fixed — flips the boolean for any factor already
+    sitting at spread 1. Feeding that flip into confidence meant a 1-point
+    drift could move confidence by 0.3 (a third of the whole contestation
+    term) or by nothing, depending on which side of the cliff it landed.
+    `normalized_spread`'s average moves confidence by at most ~0.03 per
+    point of drift on a typical ledger — continuous input, continuous
+    output, matching the reasoning `contested_share` was supposed to
+    capture without the cliff.
+    """
     from app.agent.trading.application.nodes import ANALYST_OUTPUTS
 
     coverage = sum(1 for key in ANALYST_OUTPUTS.values() if state.get(key)) / len(ANALYST_OUTPUTS)
-    contested_share = sum(1 for e in ledger if e.contested) / len(ledger) if ledger else 0.0
+    mean_spread = sum(e.normalized_spread for e in ledger) / len(ledger) if ledger else 0.0
     risk_turns: list[RiskTurn] = state.get("risk_turns") or []
     flags = sum(len(t.guard_flags) for t in debate_turns) + sum(
         len(t.guard_flags) for t in risk_turns
     )
-    score = 0.6 * coverage + 0.3 * (1 - contested_share) + 0.1 * max(0.0, 1 - flags / 10)
+    score = 0.6 * coverage + 0.3 * (1 - mean_spread) + 0.1 * max(0.0, 1 - flags / 10)
     return round(max(0.0, min(1.0, score)), 2)
 
 
@@ -671,12 +690,6 @@ async def run_synthesis(
             f"{len(risk_gaps)} number(s) in the Risk Judge's watch items did not "
             f"appear in any source and may be fabricated: {', '.join(risk_gaps[:5])}"
         )
-    if risk_judgment.verdict != research.preliminary_verdict:
-        data_gaps.append(
-            f"the Risk Judge OVERRODE the Research Manager's preliminary verdict "
-            f"({research.preliminary_verdict.value} -> {risk_judgment.verdict.value}) "
-            f"after reviewing the risk panel — see `reasoning` for why"
-        )
 
     evidence = (
         base_evidence
@@ -692,7 +705,6 @@ async def run_synthesis(
         bull_case=research.bull_case,
         bear_case=research.bear_case,
         research_thesis=research.thesis,
-        research_preliminary_verdict=research.preliminary_verdict,
         risk_debate_summary=risk_judgment.risk_narrative,
         technical_signal=(
             technical.interpretation

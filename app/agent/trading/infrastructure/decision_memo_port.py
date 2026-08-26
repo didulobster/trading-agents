@@ -23,18 +23,10 @@ def _render(value: str) -> str:
 
 
 def _format_memo_markdown(memo: DecisionMemo) -> str:
-    overridden = memo.verdict != memo.research_preliminary_verdict
     lines = [
         f"# {memo.ticker} — Decision Memo",
-        f"**Verdict (Risk Judge, final):** {memo.verdict.value.upper()}  ·  "
+        f"**Verdict (Risk Judge, sole decision maker):** {memo.verdict.value.upper()}  ·  "
         f"**Confidence:** {memo.confidence:.2f}",
-        f"**Research Manager's preliminary verdict:** "
-        f"{memo.research_preliminary_verdict.value.upper()}"
-        + (
-            " — **OVERRIDDEN by the Risk Judge** (see Reasoning)"
-            if overridden
-            else " — affirmed by the Risk Judge"
-        ),
         f"**Data as of:** {memo.data_as_of_date}",
         "",
     ]

@@ -1037,3 +1037,106 @@ before structured numbers do, at temperature=0), same contested-set
 Jaccard of 0.00. The diagnosis moves upstream, as anticipated: this is
 about how the scoring/enumeration prompts elicit free-text reasoning, not
 a property of one contested ticker.
+
+## Phase 6, mechanism A fixed — and what that reveals (logged 2026-08-26)
+
+A third review pass caught a real contradiction in the section above:
+"structured fields reproduce reliably" and "contested-set Jaccard is 0.00"
+cannot both be true if the contested set is computed only from those
+scores. Root cause, confirmed by the diagnostic the review specified (turn-0
+proposes dumped side by side, correlated to the exact replay pair already
+being compared, not a separately-sampled probe): **mechanism A — slate
+identity.** `factor_id = f"RF{i:02d}"` was positional over a free-text
+enumeration Python did not control the order or membership of. On AVGO, the
+two temperature=0 replays proposed 6 vs 5 factors with the same underlying
+concepts bound to swapped positional ids (RF01 was "MACD deterioration" in
+one replay, "50/200-day crossover" in the other) — every downstream
+comparison was silently scoring DIFFERENT real-world risks under a shared
+label.
+
+**Fixed: `factor_id` is now content-addressed** — `"RF" + sha1(normalized
+text)[:4]`, with a collision-disambiguation suffix, in
+`risk_port._content_id`. Same proposed text now gets the same id regardless
+of replay or position; different text gets a different id. Does not and
+cannot fix the model proposing a genuinely different SET of risks between
+replays (the 6-vs-5 case) — that remains enumeration variance, a property
+of free generation, not an identity bug; a closed taxonomy would close that
+gap too, at higher cost, not attempted.
+
+**Also implemented in the same pass** (all measured together, not
+independently — see the caveat below on what that costs the analysis):
+- `RiskTurnPayload` field order changed to `proposes, scores,
+  accept_condition, argument` — structured output fills fields in
+  schema-declaration order, so `argument` (freely-sampled prose) no longer
+  precedes and conditions the numeric fields. Adaptive thinking already
+  runs a private reasoning pass before any field is generated, so this
+  costs nothing for reasoning quality specifically.
+- `contested` (spread >= 2) demoted to a DISPLAY-ONLY flag.
+  `RiskLedgerEntry.normalized_spread` (continuous, 0-1) is what
+  `compute_confidence` reads now — a 1-point score drift moves confidence
+  by ~0.03 instead of flipping a boolean the confidence term used to treat
+  as a measurement.
+- `ResearchManagerPayload.preliminary_verdict` deleted entirely. It was
+  shown to the Risk Judge as prior context (an anchoring effect on the
+  agent that actually decides) and, per the ASML section above, flip-
+  flopped sell/hold/sell on its own with nothing downstream requiring it
+  to exist. `DecisionMemo.research_preliminary_verdict` and the
+  override/affirm banner are gone with it — the Risk Judge's verdict is
+  now the memo's only verdict.
+- NOT implemented: production temperature is still unset (adaptive
+  thinking on), not forced to 0. Real trade-off, not a defer-by-default:
+  `{"type": "adaptive"}` thinking was added in Phase 5 specifically because
+  `{"type": "disabled"}` produced malformed tool calls on 2 of 2 live
+  turns, and adaptive thinking requires the API's default temperature —
+  setting `temperature=0` in production would disable it, trading back
+  into a documented failure mode to buy a determinism property not yet
+  shown to need it at that layer. Left as an open decision, not resolved
+  here.
+
+**Re-measured on AVGO post-fix — the identity bug is gone, and a different,
+more fundamental fact is now visible underneath it:**
+
+```
+IDENTITY DIAGNOSTIC: same ids, same order, same text — ALL MATCHED.
+  6/6 factors identical between both temperature=0 replays.
+
+verdict:        MISMATCH  (hold vs sell)
+ledger_scores:  MISMATCH  (5 of 6 factors identical; 2 factors drifted by 1 point)
+contested_set:  MATCH     (both empty)
+resolved_refs:  MISMATCH  (two extra debate-claim citations in trial 2)
+DETERMINISM: FAIL (1/4 — down from 2/4, because verdict itself now diverges)
+
+Aggregate: severity_mass 50 vs 48, likelihood_mass 27 vs 28 — MISMATCH on both
+```
+
+**With the identity confusion cleared away, the verdict itself flips on
+nearly-identical underlying scores.** Before this fix, both replays happened
+to land on `sell` — which looked like a determinism pass but was
+uninterpretable, since the two replays weren't scoring the same six things.
+Now that they demonstrably are (byte-identical enumeration, 5 of 6 factors
+scored identically), the residual few points of drift — itself the kind of
+temperature=0 non-determinism documented earlier as a property of the
+serving stack, not fixable from this codebase — is enough to move the Risk
+Judge's discrete choice from `hold` to `sell`. Stability: `['hold', 'sell',
+'sell']` across three production samples, still not unanimous, same as
+before the fix — the failure shape didn't go away, it just stopped being
+explainable by the identity bug.
+
+**This is the exact condition specified for concluding the split is real
+rather than an identity artifact**: mechanism A is fixed, and AVGO still
+splits. That's evidence for treating `UNRESOLVED` (or an equivalent
+abstention path) as the honest next design step — not yet implemented,
+since it's a `Verdict` enum / schema change with real downstream
+implications (CLI output, any consumer of `DecisionMemo.verdict`), and
+because ASML has not been re-measured post-fix to confirm the same pattern
+holds on a second ticker before committing to a schema change on the
+strength of one.
+
+**Caveat on method**: four fixes were implemented and measured together in
+this pass, not one-at-a-time as originally sequenced — cost and turn budget
+did not allow four separate 5-trial re-measurements. The identity fix's
+effect is cleanly isolated (the diagnostic directly proves it: ids/order/
+text all now match, which only that fix could produce). The field-reorder,
+continuous-confidence, and RM-verdict-deletion fixes' individual
+contributions to the residual verdict-flip are NOT separately isolated by
+this measurement — recorded honestly rather than claimed.

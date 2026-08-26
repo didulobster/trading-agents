@@ -143,7 +143,6 @@ def _memo(**over) -> DecisionMemo:
         bull_case="STUB",
         bear_case="STUB",
         research_thesis="STUB",
-        research_preliminary_verdict=Verdict.HOLD,
         risk_debate_summary="STUB — Phase 6",
         technical_signal="RSI at 36.2 indicates oversold conditions.",
         reasoning="STUB — synthesis logic not yet implemented.",
@@ -212,16 +211,12 @@ def test_watch_items_are_rendered_and_counted():
     assert "_None recorded._" in empty
 
 
-def test_risk_judge_override_is_called_out_when_verdicts_differ():
-    md = _format_memo_markdown(
-        _memo(verdict=Verdict.SELL, research_preliminary_verdict=Verdict.HOLD)
-    )
-    assert "OVERRIDDEN by the Risk Judge" in md
-
-
-def test_risk_judge_affirmation_is_noted_when_verdicts_agree():
-    md = _format_memo_markdown(
-        _memo(verdict=Verdict.HOLD, research_preliminary_verdict=Verdict.HOLD)
-    )
-    assert "affirmed by the Risk Judge" in md
+def test_verdict_line_names_the_risk_judge_as_sole_decision_maker():
+    """No more override/affirm banner — removed alongside
+    ResearchManagerPayload.preliminary_verdict (2026-08-26, code review):
+    the Risk Judge's verdict is the memo's only verdict, nothing to compare
+    it against."""
+    md = _format_memo_markdown(_memo(verdict=Verdict.SELL))
+    assert "Verdict (Risk Judge, sole decision maker):** SELL" in md
     assert "OVERRIDDEN" not in md
+    assert "affirmed" not in md

@@ -12,11 +12,12 @@ class Verdict(str, Enum):
 
 class ResearchManagerPayload(BaseModel):
     """EXACTLY what the Research Manager LLM returns. It synthesizes the
-    bull/bear DEBATE ONLY — it never sees the risk-panel ledger, so its
-    `preliminary_verdict` is a lean from the debate alone, not the pipeline's
-    final answer. No numbers, no quotes: every narrative field cites
-    `[C:claim_id]`; Python resolves those and renders their evidence, never
-    retyping a figure the model wrote. See infrastructure/synthesis_port.py.
+    bull/bear DEBATE ONLY — it never sees the risk-panel ledger, and it
+    issues no verdict (see the field-level comment below for why not — the
+    Risk Judge is the pipeline's sole decision maker). No numbers, no
+    quotes: every narrative field cites `[C:claim_id]`; Python resolves
+    those and renders their evidence, never retyping a figure the model
+    wrote. See infrastructure/synthesis_port.py.
     """
 
     bull_case: str = Field(description="<=150 words. Cite claims as [C:claim_id].")
@@ -28,13 +29,17 @@ class ResearchManagerPayload(BaseModel):
             "carries a citation."
         )
     )
-    preliminary_verdict: Verdict = Field(
-        description=(
-            "Your own lean from the bull/bear debate ALONE, before risk review. "
-            "The Risk Judge may override this after weighing the risk panel; "
-            "that is expected, not a failure of this call."
-        )
-    )
+    # Deliberately NO verdict field here. Removed 2026-08-26 (code review):
+    # a `preliminary_verdict` was an intermediate discrete emission nothing
+    # downstream required — the Risk Judge is the only agent whose verdict
+    # is used — and it was shown to the Judge as prior context
+    # (`_render_research_output` in synthesis_port.py), which is an
+    # anchoring effect on the agent that actually decides. Measured live
+    # (ASML, 2026-08-26): the preliminary verdict alone flip-flopped
+    # sell/hold/sell across three production-temperature samples of the
+    # SAME fixed debate, making it a pure noise source with nothing
+    # downstream requiring it to exist. The Research Manager's job is
+    # cases, not a verdict — that's the Risk Judge's.
 
 
 class RiskJudgePayload(BaseModel):
@@ -68,12 +73,14 @@ class DecisionMemo(BaseModel):
     bull_case: str
     bear_case: str
     # The Research Manager's own debate-level synthesis, kept distinct from
-    # `reasoning` (the Risk Judge's FINAL reasoning) so a reader — or an
-    # automated check — can see directly whether risk review affirmed or
-    # overrode the research lean, rather than that decision being folded
-    # invisibly into one paragraph. See synthesis_port.py's two-call split.
+    # `reasoning` (the Risk Judge's FINAL reasoning) so a reader can see the
+    # bull/bear case separately from the risk-adjusted decision, rather
+    # than that decision being folded invisibly into one paragraph. See
+    # synthesis_port.py's two-call split. No `research_preliminary_verdict`
+    # field — removed alongside `ResearchManagerPayload.preliminary_verdict`
+    # (see that class's docstring); `verdict` below is the Risk Judge's
+    # alone, with nothing upstream of it to have "overridden".
     research_thesis: str
-    research_preliminary_verdict: Verdict
     risk_debate_summary: str
     technical_signal: str
     reasoning: str
