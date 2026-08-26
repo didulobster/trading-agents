@@ -956,3 +956,84 @@ specifically was marginal). Not decided here — the next measurement is
 running this same localization against a ticker with an UNAMBIGUOUS
 technical picture (not just directionally clear like AVGO, but extreme) and
 checking whether turn-0 variance shrinks.
+
+## Phase 6 determinism, second ticker (ASML, logged 2026-08-26)
+
+The open question from the AVGO section: is the variance panel noise
+(shows up on any ticker) or AVGO being marginal despite looking
+directionally clear. Ran both scripts against ASML (`--as-of 2026-08-25`,
+Haiku throughout, $0.63 combined).
+
+**Localization walk — different first-divergence point than AVGO, same
+underlying pattern once you look closely.** Turn 0 (neutral, enumerate) was
+byte-identical on BOTH prompt and output — argument text and all 5
+enumerated factors matched verbatim, a cleaner match than AVGO's turn 0
+(which diverged in content immediately). First divergence: **turn 1
+(aggressive, score)** — but the severity/likelihood NUMBERS were identical
+across both replays for every one of the 5 factors; only the rationale
+PROSE and `accept_condition` wording differed. Re-reading AVGO's turn 1
+output (recorded in the prior section) shows the same shape: numbers
+matched, prose didn't. **Structured numeric fields (severity, likelihood)
+appear to be reliably reproducible at temperature=0; free-text fields
+(argument, rationale, accept_condition) are not**, on both tickers checked
+so far. That is a more specific and more useful finding than "the model's,
+localized to some turn" — it says WHICH KIND of output is the problem.
+
+By the time the full 9-turn panel completes, that prose variance has
+cascaded into real numeric drift too — `ledger_scores` mismatch shows RF02
+(conservative) and RF03 (neutral) each moved by exactly 1 severity point
+between replays, small but real, consistent with early prose divergence
+changing what a later adjudication/response turn actually decides even
+though the immediately-following turn's own numbers had matched.
+
+**Determinism (temp=0, twice):**
+
+```
+verdict:        MATCH   (sell / sell)
+ledger_scores:  MISMATCH (RF02 conservative severity 5→4; RF03 neutral severity 3→2)
+contested_set:  MATCH   (both {RF00, RF01, RF03} — unlike AVGO, held this time)
+resolved_refs:  MISMATCH (one extra debate-claim citation in trial 1's Risk Judge narrative)
+DETERMINISM: FAIL (2/4 observables matched)
+```
+
+**Restated (aggregate) determinism:**
+
+```
+contested_count:  MATCH   (3 vs 3)
+severity_mass:    MISMATCH (47 vs 45 — off by ~4%)
+likelihood_mass:  MATCH   (38 vs 38)
+AGGREGATE DETERMINISM: FAIL
+```
+
+Closer than AVGO's aggregate result (which matched on all three) but not
+clean — severity mass moved by 2 points out of 47. The favorable pattern
+from AVGO (aggregates fully stable while membership drifts) does not
+replicate exactly on ASML; it's directionally similar (2 of 3 aggregate
+measures held) but not the same clean pass.
+
+**Stability (production temp, 3 samples): FAILS again.**
+
+| sample | research lean | verdict |
+|---|---|---|
+| stability-1 | sell | sell |
+| stability-2 | **hold** | hold |
+| stability-3 | sell | sell |
+
+`['sell', 'hold', 'sell']` — not unanimous, same shape of failure as AVGO.
+**Different mechanism this time, worth distinguishing from AVGO's**: no
+override occurred on any ASML sample (verdict matches research lean in all
+three) — the instability here originates at the RESEARCH MANAGER stage,
+its own preliminary verdict flipping sell/hold/sell sample to sample,
+before the Risk Judge is even in a position to override anything. AVGO's
+instability was demonstrated at the override step specifically; ASML's is
+upstream of it. Confidence spread 0.18 (wider than AVGO's 0.07);
+contested-set Jaccard 0.00 again — no two samples agreed on which factor
+was contested, a third-ticker repeat of that same pattern.
+
+**Answer to the open question**: panel noise, not AVGO being marginal.
+Two tickers, same failure shape (verdict direction not stable across
+production-temperature samples), same localization pattern (prose diverges
+before structured numbers do, at temperature=0), same contested-set
+Jaccard of 0.00. The diagnosis moves upstream, as anticipated: this is
+about how the scoring/enumeration prompts elicit free-text reasoning, not
+a property of one contested ticker.
