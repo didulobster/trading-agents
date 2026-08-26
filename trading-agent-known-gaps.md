@@ -1818,6 +1818,56 @@ breached the $0.75 hard cap the code enforces. News volume is the swing
 factor (Phase 8 entry above), so a high-article-count ticker is where a
 breach would come from.
 
+### The $0.75 hard cap would abort every run of this battery
+
+Following the cost basis above one step further turns it from a planning
+note into a blocker. **The five Phase 8 runs that set the $0.5712 mean never
+ran fundamentals.** They used `MOCK_FUNDAMENTALS=1`, which loads
+`app/agent/trading/.fundamentals_cache/<TICKER>.json` and returns before
+any LLM call. Verified directly: not one `"mode": "trading-fundamentals"`
+line appears in the cost log under any of the five run ids
+(`phase8-battery-{msft,v,asml}-1`, `phase8-exit-criteria-run-{1,acn-1}`).
+Their per-stage breakdown is technical + news + debate + risk + synthesis
+and nothing else.
+
+Real fundamentals cost, measured over the 36 logged calls (recent ones,
+warm corpus, current code): **$0.19–$0.45, ~$0.28 typical**, peak $0.4504.
+
+So a Phase 9 run — which *must* exercise real fundamentals, or it is not
+validating the memo a reader would act on — costs roughly:
+
+    $0.5712  (measured, fundamentals-free)
+  + $0.28    (fundamentals, typical)
+  = ~$0.85/run,  range ~$0.73 to ~$1.02
+
+**That is above the $0.75 hard per-run cap.** At the default `--max-usd`,
+most or all six runs abort with `budget_exceeded` before a memo exists, and
+criterion 2 fails 0/6 — not because anything is broken, but because the cap
+was calibrated against runs that skipped the single most expensive node.
+Criterion 9's $4.00 battery ceiling implies ~$5.1 for six real runs on the
+same arithmetic.
+
+Two consequences worth stating plainly:
+
+1. **Phase 8's criterion 1 ("per-run cost within target across 5 runs") was
+   closed on runs that never ran fundamentals.** The $0.60 target and $0.75
+   cap have therefore never been measured against a full-pipeline run. That
+   does not invalidate what Phase 8 measured — the news-volume finding
+   holds, and the guards themselves were breach-tested for real — but the
+   *numbers* those thresholds were set against are not full-run numbers.
+2. **A `MOCK_FUNDAMENTALS=1` battery would not be homogeneous**, which is
+   the one thing a cross-ticker comparison needs. There is no
+   `NFLX.json` cache file; the other five exist. NFLX would fall through to
+   the real agent (~$0.28+, and on a corpus ingested only today it is the
+   run most likely to hit `LOOP_MAX_TURNS=45`) while the other five load
+   from disk at $0. Five cached memos and one live one is not a battery.
+
+Nothing here is decided. Recorded so the decision is made before the spend
+rather than discovered at run two: raise `--max-usd` to something a real
+run fits in (~$1.10 leaves headroom over the $1.02 worst case), and
+re-baseline criterion 9, or accept a mock-fundamentals battery and drop the
+claim that it validates the fundamentals path.
+
 ### Gates B–D
 
 - **B** — `run_p9_battery.py` records git SHA + dirty flag, all seven
