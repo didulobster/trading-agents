@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from app.agent.trading.domain.risk import PERSONAS, RiskLedgerEntry, RiskTurn
 
-CONTESTED_THRESHOLD = 2  # either spread >= this marks the factor contested
+CONTESTED_THRESHOLD = 2  # either spread >= this marks the factor contested (display only)
+MAX_SPREAD = 4           # severity/likelihood each range 1-5; widest possible spread
 
 
 def build_slate(turns: list[RiskTurn]) -> list[str]:
@@ -91,6 +92,15 @@ def build_risk_ledger(risk_turns: list[RiskTurn]) -> list[RiskLedgerEntry]:
                 entry.severity_spread >= CONTESTED_THRESHOLD
                 or entry.likelihood_spread >= CONTESTED_THRESHOLD
             )
+            # MAX_SPREAD=4: severity/likelihood each range 1-5, so the
+            # widest possible disagreement on either axis is 4. Averaging
+            # the two axes before normalizing (rather than normalizing each
+            # and taking the max) means a factor split on BOTH axes reads
+            # as more contested than one split on only one — a real
+            # distinction `contested`'s OR-of-two-booleans throws away.
+            entry.normalized_spread = (
+                (entry.severity_spread + entry.likelihood_spread) / 2
+            ) / MAX_SPREAD
 
     return [entries[fid] for fid in order]
 

@@ -143,7 +143,6 @@ def _memo(**over) -> DecisionMemo:
         bull_case="STUB",
         bear_case="STUB",
         research_thesis="STUB",
-        research_preliminary_verdict=Verdict.HOLD,
         risk_debate_summary="STUB — Phase 6",
         technical_signal="RSI at 36.2 indicates oversold conditions.",
         reasoning="STUB — synthesis logic not yet implemented.",
@@ -212,16 +211,32 @@ def test_watch_items_are_rendered_and_counted():
     assert "_None recorded._" in empty
 
 
-def test_risk_judge_override_is_called_out_when_verdicts_differ():
-    md = _format_memo_markdown(
-        _memo(verdict=Verdict.SELL, research_preliminary_verdict=Verdict.HOLD)
-    )
-    assert "OVERRIDDEN by the Risk Judge" in md
-
-
-def test_risk_judge_affirmation_is_noted_when_verdicts_agree():
-    md = _format_memo_markdown(
-        _memo(verdict=Verdict.HOLD, research_preliminary_verdict=Verdict.HOLD)
-    )
-    assert "affirmed by the Risk Judge" in md
+def test_verdict_line_names_the_risk_judge_as_sole_decision_maker():
+    """No more override/affirm banner — removed alongside
+    ResearchManagerPayload.preliminary_verdict (2026-08-26, code review):
+    the Risk Judge's verdict is the memo's only verdict, nothing to compare
+    it against."""
+    md = _format_memo_markdown(_memo(verdict=Verdict.SELL))
+    assert "Verdict (Risk Judge, sole decision maker):** SELL" in md
     assert "OVERRIDDEN" not in md
+    assert "affirmed" not in md
+
+
+def test_a_sampled_verdict_shows_the_split_not_a_bare_label():
+    """Added 2026-08-26 alongside majority-of-N sampling: when
+    `verdict_samples` is populated, the verdict was never any ONE Risk
+    Judge call's alone, so the old "sole decision maker" line would
+    misattribute it. A reader should see the actual samples the verdict
+    was computed from."""
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.SELL, verdict_samples=["hold", "sell", "sell"])
+    )
+    assert "Risk Judge, sole decision maker" not in md
+    assert "**Verdict:** SELL (majority of 3 samples: hold, sell, sell)" in md
+
+
+def test_an_unresolved_verdict_names_itself_as_no_majority():
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.UNRESOLVED, verdict_samples=["buy", "sell", "hold"])
+    )
+    assert "**Verdict:** UNRESOLVED (no majority of 3 samples: buy, sell, hold)" in md

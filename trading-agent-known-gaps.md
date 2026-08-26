@@ -1037,3 +1037,312 @@ before structured numbers do, at temperature=0), same contested-set
 Jaccard of 0.00. The diagnosis moves upstream, as anticipated: this is
 about how the scoring/enumeration prompts elicit free-text reasoning, not
 a property of one contested ticker.
+
+## Phase 6, mechanism A fixed — and what that reveals (logged 2026-08-26)
+
+A third review pass caught a real contradiction in the section above:
+"structured fields reproduce reliably" and "contested-set Jaccard is 0.00"
+cannot both be true if the contested set is computed only from those
+scores. Root cause, confirmed by the diagnostic the review specified (turn-0
+proposes dumped side by side, correlated to the exact replay pair already
+being compared, not a separately-sampled probe): **mechanism A — slate
+identity.** `factor_id = f"RF{i:02d}"` was positional over a free-text
+enumeration Python did not control the order or membership of. On AVGO, the
+two temperature=0 replays proposed 6 vs 5 factors with the same underlying
+concepts bound to swapped positional ids (RF01 was "MACD deterioration" in
+one replay, "50/200-day crossover" in the other) — every downstream
+comparison was silently scoring DIFFERENT real-world risks under a shared
+label.
+
+**Fixed: `factor_id` is now content-addressed** — `"RF" + sha1(normalized
+text)[:4]`, with a collision-disambiguation suffix, in
+`risk_port._content_id`. Same proposed text now gets the same id regardless
+of replay or position; different text gets a different id. Does not and
+cannot fix the model proposing a genuinely different SET of risks between
+replays (the 6-vs-5 case) — that remains enumeration variance, a property
+of free generation, not an identity bug; a closed taxonomy would close that
+gap too, at higher cost, not attempted.
+
+**Also implemented in the same pass** (all measured together, not
+independently — see the caveat below on what that costs the analysis):
+- `RiskTurnPayload` field order changed to `proposes, scores,
+  accept_condition, argument` — structured output fills fields in
+  schema-declaration order, so `argument` (freely-sampled prose) no longer
+  precedes and conditions the numeric fields. Adaptive thinking already
+  runs a private reasoning pass before any field is generated, so this
+  costs nothing for reasoning quality specifically.
+- `contested` (spread >= 2) demoted to a DISPLAY-ONLY flag.
+  `RiskLedgerEntry.normalized_spread` (continuous, 0-1) is what
+  `compute_confidence` reads now — a 1-point score drift moves confidence
+  by ~0.03 instead of flipping a boolean the confidence term used to treat
+  as a measurement.
+- `ResearchManagerPayload.preliminary_verdict` deleted entirely. It was
+  shown to the Risk Judge as prior context (an anchoring effect on the
+  agent that actually decides) and, per the ASML section above, flip-
+  flopped sell/hold/sell on its own with nothing downstream requiring it
+  to exist. `DecisionMemo.research_preliminary_verdict` and the
+  override/affirm banner are gone with it — the Risk Judge's verdict is
+  now the memo's only verdict.
+- CLOSED (2026-08-26, code review): production `temperature=0` — decided
+  no, on measurement, not deferred on a trade-off. This was originally
+  framed as weighing a determinism gain against `reasoning_config`'s
+  documented cost (an explicit temperature disables thinking outright —
+  see `debate_port.reasoning_config`). That framing was wrong on both
+  sides:
+  - **The gain is zero.** Every determinism trial on AVGO and ASML ran at
+    `temperature=0`, and both split verdict at that setting (AVGO
+    hold/sell, ASML sell/hold) — see the post-fix sections above/below.
+    There is no determinism benefit to trade the cost against.
+  - **The cost, at least for the schemas this pass touches, is not
+    supported by the evidence available.** Grepped `reasoning_config`
+    directly: an explicit temperature (as every determinism trial passes)
+    disables `thinking` unconditionally for that call — already correctly
+    documented, not a bug. That means the 4 temperature=0 trials run for
+    this investigation (2 AVGO, 2 ASML) — 9 risk-panel turns + Research
+    Manager + Risk Judge each, 44 calls total — all ran with thinking
+    disabled. Grepped both run logs (`/tmp/postfix_avgo.log`,
+    `/tmp/postfix_asml.log`) for the retry-on-schema-violation message
+    risk_port.py prints (`[risk] {persona} turn {n}: schema violation, one
+    retry`): zero matches in either. 44 thinking-disabled calls on the
+    `RiskTurnPayload`/`ResearchManagerPayload`/`RiskJudgePayload` schemas,
+    zero malformed tool calls — against the Phase 5 finding of 2 malformed
+    calls out of 2, on `DebateTurnPayload` specifically. This is not a
+    retraction of the Phase 5 finding — the debate turns themselves are
+    generated ONCE per trial at production settings (adaptive thinking on)
+    and held fixed, so `DebateTurnPayload` was never resampled at
+    temperature=0 by this investigation, and that original finding stands
+    for that schema until it is. But the finding does not generalize to
+    the risk-panel/synthesis schemas the way the original "adaptive
+    thinking must stay on everywhere" framing assumed, and the framing
+    above should not be read that way again.
+  Net: no benefit measured, and the specific cost the trade-off invoked
+  does not show up where it would need to. `temperature=0` is not being
+  set in production because there is nothing to gain by setting it, full
+  stop — not because of an unresolved trade-off.
+
+**Re-measured on AVGO post-fix — the identity bug is gone, and a different,
+more fundamental fact is now visible underneath it:**
+
+```
+IDENTITY DIAGNOSTIC: same ids, same order, same text — ALL MATCHED.
+  6/6 factors identical between both temperature=0 replays.
+
+verdict:        MISMATCH  (hold vs sell)
+ledger_scores:  MISMATCH  (5 of 6 factors identical; 2 factors drifted by 1 point)
+contested_set:  MATCH     (both empty)
+resolved_refs:  MISMATCH  (two extra debate-claim citations in trial 2)
+DETERMINISM: FAIL (1/4 — down from 2/4, because verdict itself now diverges)
+
+Aggregate: severity_mass 50 vs 48, likelihood_mass 27 vs 28 — MISMATCH on both
+```
+
+**With the identity confusion cleared away, the verdict itself flips on
+nearly-identical underlying scores.** Before this fix, both replays happened
+to land on `sell` — which looked like a determinism pass but was
+uninterpretable, since the two replays weren't scoring the same six things.
+Now that they demonstrably are (byte-identical enumeration, 5 of 6 factors
+scored identically), the residual few points of drift — itself the kind of
+temperature=0 non-determinism documented earlier as a property of the
+serving stack, not fixable from this codebase — is enough to move the Risk
+Judge's discrete choice from `hold` to `sell`. Stability: `['hold', 'sell',
+'sell']` across three production samples, still not unanimous, same as
+before the fix — the failure shape didn't go away, it just stopped being
+explainable by the identity bug.
+
+**This is the exact condition specified for concluding the split is real
+rather than an identity artifact**: mechanism A is fixed, and AVGO still
+splits. That's evidence for treating `UNRESOLVED` (or an equivalent
+abstention path) as the honest next design step — not yet implemented,
+since it's a `Verdict` enum / schema change with real downstream
+implications (CLI output, any consumer of `DecisionMemo.verdict`), and
+because ASML has not been re-measured post-fix to confirm the same pattern
+holds on a second ticker before committing to a schema change on the
+strength of one.
+
+**Caveat on method**: four fixes were implemented and measured together in
+this pass, not one-at-a-time as originally sequenced — cost and turn budget
+did not allow four separate 5-trial re-measurements. The identity fix's
+effect is cleanly isolated (the diagnostic directly proves it: ids/order/
+text all now match, which only that fix could produce). The field-reorder,
+continuous-confidence, and RM-verdict-deletion fixes' individual
+contributions to the residual verdict-flip are NOT separately isolated by
+this measurement — recorded honestly rather than claimed.
+
+**Re-measured on ASML post-fix (2026-08-26) — the pattern holds, and it
+localizes further:**
+
+```
+IDENTITY DIAGNOSTIC: same ids, same order, same text — 5/5 factors matched.
+DIAGNOSIS: C (threshold brittleness) — one factor's scores drifted by <=1
+point per persona and crossed the contested cutoff on that drift alone.
+
+verdict:        MISMATCH  (sell vs hold)
+ledger_scores:  MISMATCH  (drift on 3 of 5 factors, each <=1 point/persona)
+contested_set:  MISMATCH  (2 ids vs 3 ids — RF9EF6 flips in/out)
+resolved_refs:  MISMATCH
+DETERMINISM: FAIL (0/4)
+
+Stability (3 production samples): verdict direction FAIL (['hold','sell','hold'])
+  confidence spread 0.06, contested-set Jaccard (min pairwise) 0.00
+```
+
+Two tickers now, both re-measured with all four fixes in place, both still
+split on verdict direction at temperature=0 and at production temperature.
+That is the condition specified above for treating the split as real rather
+than an artifact of one ticker's numbers.
+
+**What's new here, beyond confirming AVGO**: ASML's diagnosis is mechanism
+C, not "none" — and tracing where `contested` is actually read shows the
+"DISPLAY ONLY" comment added alongside the `normalized_spread` fix
+(`app/agent/trading/domain/risk.py`) is not accurate. `compute_confidence`
+was moved onto the continuous `normalized_spread`, as intended — but
+`contested_ids()` (`app/agent/trading/application/risk_ledger.py:108`)
+still reads the boolean `contested` field, and its output is `expected_ids`
+for the adjudicate/respond turns (`risk_port.py:567`) — i.e. it still
+decides which factors round 2 and round 3 are allowed to re-litigate. A
+factor that drifts across the spread>=2 cutoff between replays doesn't just
+get mis-labeled in a table; the two replays hand the persona a different
+set of ids to argue about in the next round, which is a real branch in
+the prompt, not cosmetic disagreement downstream of otherwise-identical
+turns. This is arguably not a fix-able bug in the usual sense: which
+factors get re-opened for round 2 is inherently a discrete decision, and
+something has to draw that line from continuous, noisy severity/likelihood
+scores. Recorded here as the more precise localization of the remaining
+non-determinism — not a new action item, since no clear alternative (e.g.
+hysteresis banding between rounds) has been evaluated yet.
+
+## Phase 6 exit criteria: closing production temperature, localizing the
+## split, and shipping majority-of-N sampling (2026-08-26, code review)
+
+Follow-up to the two sections above, executing the reviewer's five-step
+sequence in full.
+
+**1. Grepped the thinking config on the determinism path — one Phase 5
+belief needed amending, one didn't.** `reasoning_config` (`debate_port.py`)
+disables `thinking` unconditionally whenever an explicit temperature is
+passed — already correctly documented, not a bug. That means the 4
+temperature=0 trials run across the AVGO+ASML investigation (2 each) — 9
+risk-panel turns + Research Manager + Risk Judge per trial, 44 calls total —
+all ran with thinking DISABLED. Grepped both run logs
+(`/tmp/postfix_avgo.log`, `/tmp/postfix_asml.log`) for risk_port.py's
+schema-violation retry message: zero matches. 44 thinking-disabled calls on
+`RiskTurnPayload`/`ResearchManagerPayload`/`RiskJudgePayload`, zero
+malformed tool calls — against Phase 5's 2-of-2 finding on
+`DebateTurnPayload`. Not a retraction of that finding (debate turns are
+generated once per trial at production settings, adaptive thinking on, and
+were never resampled at temperature=0 here) — but it does not generalize to
+the risk-panel/synthesis schemas the way the original framing assumed.
+
+**2. Production `temperature=0`: closed as no, on measurement.** The prior
+entry framed this as a trade-off (determinism gain vs. a documented
+thinking-disabled cost). Both sides of that framing were wrong: the gain is
+zero (both tickers split verdict AT temperature=0, not just at production
+temperature), and the specific cost invoked (malformed tool calls) does not
+show up in the 44 thinking-disabled calls actually measured on these
+schemas. `temperature=0` is not being set in production because there is
+nothing to gain by setting it — not because of an unresolved trade-off.
+Superseded the "NOT implemented... open decision" wording in the section
+above with this closed one.
+
+**3. Fixed-ledger Risk Judge repeat (AVGO, N=3, real cost $0.0201 for the 3
+Judge calls) — localizes the split to the panel, not the Judge.**
+`scripts/fixed_ledger_judge_repeat.py` (new): generates ONE real ledger +
+ONE Research Manager output, freezes both, then calls only the Risk Judge
+3 times at production temperature against byte-identical input. Result:
+`['sell', 'sell', 'sell']` — unanimous. Combined with the earlier direct
+evidence (AVGO's two temperature=0 determinism replays produced DIFFERENT
+ledgers before the Judge ever saw them), this says the verdict split
+measured on both tickers is explained by panel/ledger variance, not Judge
+variance — so sampling has to re-run the whole (panel, Research Manager,
+Risk Judge) trial, not just resample the Judge's call. (Weak power in the
+agreeing direction on N=3 noted and accepted — see the MSFT caveat below.)
+
+**4. Majority-of-N sampling implemented in production
+(`application/nodes.py`, `RISK_VERDICT_SAMPLES = 3`).**
+`synthesizer_node` now: runs the graph-checkpointed risk panel + synthesis
+as sample 1 (unchanged cost — this was always going to run); if the ledger
+came back empty (no risk panel ran, e.g. `--only technical`), returns that
+single sample unchanged, exactly as before this change; otherwise generates
+2 MORE independent (panel, Research Manager, Risk Judge) trials over the
+same fixed debate — via a new `_sample_additional_risk_panel`, which
+deliberately drives `risk_nodes._risk_turn` (not `risk_port.run_risk_turn`
+directly) so it goes through the same module-attribute seam the existing
+graph tests already monkeypatch, and does NOT checkpoint these extra
+samples per-turn (they live and die inside the one synthesizer node call —
+same resumability granularity `run_synthesis` already had). Takes the
+majority verdict across all 3 samples; on a majority, reuses the full memo
+from the first sample whose OWN verdict agrees (so narrative and verdict
+label are never inconsistent); on no majority, uses sample 1's memo with
+`verdict` overridden to `Verdict.UNRESOLVED`. Either way, `data_gaps` gets
+an explicit line naming the actual sample split.
+
+*Cost, measured not extrapolated*: real 9-turn panel cost from `docs/
+cost-log.jsonl`, most recent full AVGO trial: $0.0867 (below the earlier
+$0.105 extrapolation). One full trial (panel + RM + 1 Judge call): $0.1076.
+`RISK_BUDGET_USD` ($0.35, per-panel) and `SYNTHESIS_BUDGET_USD` ($0.30,
+per-RM+Judge-pair) are PER-TRIAL budgets, not aggregate across samples —
+neither needed raising, since each individual trial stays far under its own
+cap regardless of how many trials run. The real, new cost is operational:
+every live run that reaches the risk panel now pays for 3 trials instead of
+1 — roughly +$0.2 to +$0.3 per run for the risk+synthesis stage, a
+deliberate trade for the sampling this fix requires, not a bug.
+
+**5. `Verdict.UNRESOLVED` added, but never reachable from a single LLM
+call.** `RiskJudgePayload.verdict` now types on a NEW, narrower
+`IndividualVerdict` enum (buy/sell/hold only) instead of the full `Verdict`
+— so the tool schema sent to the model literally never lists `unresolved`
+as an option (asserted directly against `_risk_judge_tool()`'s JSON schema,
+not just the Python type). `Verdict.UNRESOLVED` exists only as
+`synthesizer_node`'s aggregate output over N samples with no majority.
+`decision_memo_port._format_memo_markdown` renders the actual sample split
+next to the verdict (`**Verdict:** SELL (majority of 3 samples: hold, sell,
+sell)`) rather than a bare label, and drops the old "Risk Judge, sole
+decision maker" wording whenever sampling ran (kept, unchanged, for the
+no-risk-panel case, where a single Judge call genuinely is the sole
+decision).
+
+**Also fixed in the same pass**: `RiskJudgePayload`'s docstring and its
+`reasoning` field's tool-schema description still told the model to "state
+plainly whether you are affirming or overriding the Research Manager's
+preliminary_verdict" — a live dangling reference into a deleted field, left
+over from the identity-fix pass earlier in this file. Corrected to describe
+weighing the ledger against the Research Manager's thesis instead.
+
+**Tests**: 8 new (`tests/agent/trading/test_risk_verdict_sampling.py` — 5,
+covering no-panel/majority/no-majority/unanimous/exactly-N-samples;
+`test_synthesis_port.py` — 1, the tool-schema assertion above;
+`test_vault_reports.py` — 2, the renderer's two branches). Full suite: 455
+passed (was 447).
+
+**Live verification (MSFT, `--only technical`, fresh thread-id to force
+real execution rather than resuming a checkpoint) — confirms the wiring,
+and surfaces a real reliability consequence of tripling the call count.**
+The run reached and executed the sampling loop's second `run_synthesis`
+call for real (debate ran, sample 1 succeeded, sample 2 started) before
+crashing with `SynthesisFabricationError: ... unbacked number(s) in
+risk_narrative/reasoning: ['4']`. This is NOT a new bug — the numeric-
+fabrication guard is a pre-existing, deliberately strict "cite, don't
+compute" check (see the closed items above documenting it catching a
+genuinely-computed `4.54` as a correct positive, not a false one), and a
+single triggered call already crashed the whole `synthesizer_node` before
+this change too. What IS new: sampling triples the number of Risk Judge
+calls per live run, which roughly triples the probability that ANY ONE of
+them trips this guard somewhere and takes down the entire run with no memo
+produced at all (not even the successful sample(s) already paid for).
+**Left as-is, not patched**: converting a raised
+`SynthesisFabricationError` into a soft per-sample failure (drop the
+sample, continue with fewer votes; retry; etc.) is a real design decision
+about the guard's existing hard-stop posture, not a bug fix — flagged here
+for a decision, not made unilaterally.
+
+**MSFT caveat, stated in advance rather than after the fact**: N=3 has weak
+power in the AGREEING direction — three samples splitting is a strong
+signal, three agreeing is not strong evidence of stability, since MSFT
+agreed 10/10 pre-Phase-6 and that was correctly not read as a stability
+pass (see earlier known-gaps entries on the degenerate `hold`-only
+distribution). Expect `UNRESOLVED` to catch gross instability and miss
+marginal cases. If most live runs come back `UNRESOLVED`, that is the
+pipeline reporting that the risk panel cannot resolve directions at this
+model tier — the fix then is a model change or a closed taxonomy, not more
+sampling. Worth deciding in advance so a wall of `UNRESOLVED` reads as
+signal, not as a bug.

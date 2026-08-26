@@ -85,7 +85,6 @@ def _memo() -> DecisionMemo:
         bull_case="STUB",
         bear_case="STUB",
         research_thesis="STUB",
-        research_preliminary_verdict=Verdict.HOLD,
         risk_debate_summary="STUB",
         technical_signal="Momentum is soft.",
         reasoning="STUB",

@@ -174,17 +174,28 @@ async def run_pipeline_once(
         "label": label,
         "temperature": temperature,
         "verdict": memo.verdict.value,
-        "research_preliminary_verdict": memo.research_preliminary_verdict.value,
-        "overridden": memo.verdict != memo.research_preliminary_verdict,
         "confidence": memo.confidence,
         "ledger_size": len(ledger),
         "ledger_scores": _ledger_scores(ledger),
         "contested": contested,
         "resolved_refs": resolved_refs,
+        # The diagnostic a strict per-observable check can't answer on its
+        # own (found by review, 2026-08-26): does `factor_id` point at the
+        # SAME semantic content across the two replays being compared, or
+        # is "RF00" a positional label over an enumeration whose order/
+        # membership itself isn't stable? `ledger_scores` matching or not
+        # is silent on this — two replays could have identical-looking
+        # score matrices while RF00 means something different in each.
+        # Captured from turn 0 (the enumeration turn) of THIS SPECIFIC
+        # trial, not a separately-sampled probe, so it's the real
+        # diagnostic for whatever ledger_scores/contested this detail dict
+        # reports, not a proxy for it.
+        "turn0_proposes": [
+            (f.factor_id, f.text) for f in turns[0].payload.proposes
+        ],
+        "ledger_factor_text": {e.factor_id: e.text for e in ledger},
     }
     print(f"[{label}] temperature={temperature} verdict={memo.verdict.value} "
-          f"(research lean: {memo.research_preliminary_verdict.value}"
-          f"{', OVERRIDDEN' if detail['overridden'] else ''}) "
           f"ledger={len(ledger)} contested={len(contested)} confidence={memo.confidence}")
     return detail
 
@@ -227,6 +238,85 @@ def _report_aggregate_determinism(results: list[dict]) -> None:
           f"— this is NOT the criterion as specified (that's _report_determinism "
           f"above); it's the measurement that decides whether a computed-from-"
           f"aggregates verdict design is viable.")
+
+
+def _report_identity_diagnostic(results: list[dict]) -> str:
+    """The diagnostic requested by review (2026-08-26): distinguishes three
+    mechanisms that can each produce "verdict matches, ledger_scores and
+    contested_set don't" — and they need different fixes, so which one is
+    live matters more than the fact that something diverges.
+
+      A. Slate identity — factor_id is assigned positionally
+         (RiskFactor.factor_id = f"RF{i:02d}") over a free-text
+         enumeration Python does not control the membership or order of.
+         Same id can point at different content across replays, or the
+         same content can land under a different id. This is a design
+         error, not a sampling artifact, if it's what's actually
+         happening.
+      B. Prose conditioning — RiskTurnPayload's field order (argument,
+         proposes, scores, accept_condition) means autoregressive
+         generation samples ~180 words of prose BEFORE the scores, so
+         score variance can be downstream of prose variance rather than
+         independent of it.
+      C. Threshold brittleness — `contested = spread >= 2` turns a ±1
+         score drift into a boolean flip whenever a factor sits at
+         spread 1 or 2, which is most of them on a 1-5 scale with three
+         raters.
+
+    Printed here from the turn-0 proposes lists and ledger factor text of
+    the SAME two trials `_report_determinism` already compared — not a
+    separately-sampled probe, which would answer a different question.
+    """
+    a, b = results
+    print("\nIDENTITY DIAGNOSTIC — turn-0 proposes, side by side:")
+    print(f"  trial 1: {[(fid, text[:60]) for fid, text in a['turn0_proposes']]}")
+    print(f"  trial 2: {[(fid, text[:60]) for fid, text in b['turn0_proposes']]}")
+
+    ids_a = [fid for fid, _ in a["turn0_proposes"]]
+    ids_b = [fid for fid, _ in b["turn0_proposes"]]
+    same_ids_same_order = ids_a == ids_b
+    same_id_set = set(ids_a) == set(ids_b)
+
+    text_a, text_b = a["ledger_factor_text"], b["ledger_factor_text"]
+    common_ids = set(text_a) & set(text_b)
+    same_text_per_id = all(text_a[fid] == text_b[fid] for fid in common_ids)
+
+    print(f"\n  same ids, same order: {same_ids_same_order}")
+    print(f"  same id SET (order may differ): {same_id_set}")
+    print(f"  for ids present in both ledgers, same text under that id: {same_text_per_id}")
+
+    if not same_id_set or not same_text_per_id:
+        mechanism = "A (slate identity) — SEVERE: different factor membership, or same id / different text"
+    elif not same_ids_same_order:
+        mechanism = "A (slate identity) — same content, different order: same id bound to different text positionally"
+    else:
+        # Membership and order both hold — check whether the SAME id's
+        # scores drifted by >=2 (B: prose conditioning pushed a real score
+        # change) or by exactly the amount that crosses the contested
+        # threshold without a large underlying move (C: threshold
+        # brittleness on a small, real drift).
+        max_drift = 0
+        threshold_flips = 0
+        for fid in common_ids:
+            scores_a, scores_b = a["ledger_scores"].get(fid, {}), b["ledger_scores"].get(fid, {})
+            for persona in set(scores_a) & set(scores_b):
+                sev_a, lik_a = scores_a[persona]
+                sev_b, lik_b = scores_b[persona]
+                max_drift = max(max_drift, abs(sev_a - sev_b), abs(lik_a - lik_b))
+        contested_a, contested_b = set(a["contested"]), set(b["contested"])
+        threshold_flips = len(contested_a ^ contested_b)
+        if max_drift >= 2:
+            mechanism = f"B (prose conditioning) — a same-id score drifted by {max_drift} (>=2)"
+        elif threshold_flips:
+            mechanism = (
+                f"C (threshold brittleness) — scores drift by <=1 per id, but "
+                f"{threshold_flips} factor(s) flipped contested status on that drift"
+            )
+        else:
+            mechanism = "none of A/B/C — ids, order, text, and contested status all matched"
+
+    print(f"\n  DIAGNOSIS: {mechanism}")
+    return mechanism
 
 
 def _report_determinism(results: list[dict]) -> bool:
@@ -304,6 +394,7 @@ async def main(ticker: str, as_of: date) -> None:
             fixed_state, temperature=0.0, client=client, label=f"determinism-{i + 1}"
         )
         det_results.append(detail)
+    mechanism = _report_identity_diagnostic(det_results)
     determinism_holds = _report_determinism(det_results)
     _report_aggregate_determinism(det_results)
 
@@ -322,6 +413,7 @@ async def main(ticker: str, as_of: date) -> None:
           f"{'PASS' if determinism_holds else 'FAIL'}")
     print(f"Stability (production temp, 3 samples, verdict direction): "
           f"{'PASS' if stability_holds else 'FAIL'}")
+    print(f"Identity diagnosis: {mechanism}")
 
 
 if __name__ == "__main__":
