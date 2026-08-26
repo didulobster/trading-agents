@@ -1346,3 +1346,44 @@ pipeline reporting that the risk panel cannot resolve directions at this
 model tier — the fix then is a model change or a closed taxonomy, not more
 sampling. Worth deciding in advance so a wall of `UNRESOLVED` reads as
 signal, not as a bug.
+
+## FIG: the fabrication-guard crash is not rare, and it hides real spend
+## (2026-08-26)
+
+Ran `scripts/risk_determinism_check.py FIG --as-of 2026-08-25` — a third
+ticker, same post-fix code as AVGO/ASML. It never reached a single
+comparison: `SynthesisFabricationError: ... unbacked number(s) in
+risk_narrative/reasoning: ['5']` on determinism trial 1's Risk Judge call,
+before trial 2 or any stability sample ran. Exit criteria for FIG are
+**INCOMPLETE, not measured** — this is a harder failure than AVGO/ASML's
+measured splits, not a third data point of the same kind.
+
+**Cost — and a real observability gap.** `docs/cost-log.jsonl` shows
+$0.1374 logged for this run (technical report + 6-turn debate + 9-turn risk
+panel + Research Manager). The Risk Judge call that tripped the guard is
+NOT in that total: `run_risk_judge` (`synthesis_port.py`) calls
+`_resolve_with_retry` (which spends real tokens and returns a payload)
+*before* the fabrication guard runs, and `log_cost` is the last line of the
+function, after the guard's `raise`. A blocked call spends money and
+completes a real API round trip, but is invisible to `cost-log.jsonl` —
+this run's true cost is somewhat higher than $0.1374, by whatever that one
+Risk Judge call cost, and there is currently no record of exactly how much.
+Same root cause as the MSFT crash two entries above (this file), on the
+identical guard, on the FIRST live run afterward — not a coincidence worth
+ignoring.
+
+**This raises the guard's real hit rate above what the MSFT entry
+estimated.** Counting every live Risk Judge call across this whole
+investigation (AVGO det+stab, ASML det+stab, the fixed-ledger repeat, MSFT
+sample 1+2, this FIG trial): roughly 16 calls, 2 crashes — about 1-in-8, not
+the rough 1-in-14 estimated after MSFT alone. At that rate, a 5-trial
+verification battery (5 Risk Judge calls, the shape every ticker check in
+this file has used) has something like a 1-in-2 chance of crashing before
+completing, independent of anything majority-of-N sampling adds on top in
+production. **This is no longer a theoretical reliability question flagged
+for later — it is now blocking the exit-criteria verification process
+itself** on two of the last two tickers tried. Not patched here, for the
+same reason stated in the MSFT entry: converting `SynthesisFabricationError`
+from a hard stop into something a caller can recover from is a real design
+decision on the guard's existing safety posture, not a one-line fix — but
+the decision is no longer optional to defer indefinitely.
