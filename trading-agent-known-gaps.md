@@ -860,3 +860,99 @@ deciding a sell/hold override — e.g. a majority-of-N-samples rule, or
 constraining what "contested" can mean turn to turn. Neither is attempted
 here; this section's job is to say plainly that the gap is real; deciding
 how to close it is a design call this file has been recording, not making.
+
+## Phase 6 determinism, localized (logged 2026-08-26, external review directed)
+
+The AVGO section above established that determinism and stability fail; it
+did not establish WHERE the variance enters. A second review pass asked for
+that directly, in order of cost: does the RENDERED PROMPT differ between
+replays (a bug this project owns), does the "replay" actually hold upstream
+state fixed, or is it the model. Answered by measurement, not inference —
+`scripts/localize_risk_variance.py`, new this section.
+
+**Category 1 (mine, in Python) — CLEAR, measured at zero API cost.**
+`build_risk_evidence_pack` called twice on the identical fixed state
+produces byte-identical output (14,237 chars, checked both before and after
+the correction below). Grepped the risk/synthesis ports for raw `set`
+iteration rendered into prompt text: every one found is either post-
+processing (never rendered) or passed through `sorted()` first. Also
+already weakly true by construction: both temperature=0 trials run in one
+Python process, so even an unsorted-set bug would iterate identically for
+both (`PYTHONHASHSEED` doesn't vary within one process) — checked directly
+anyway rather than resting on that alone.
+
+**Category 2 (mine, upstream) — CLEAR, confirmed by identity, not
+inspection.** `technical_report` and `debate_turns` are the same object
+(`is`, not `==`) across a trial-shaped shallow copy of the fixed state. No
+RAG retrieval runs in this script at all (technical-only) — Phase 2's
+documented retrieval non-determinism cannot be the cause here by
+construction.
+
+**Category 3 (the model's) — CONFIRMED, and localized to turn 0, the very
+first call.** First attempt at this measurement was wrong and is worth
+recording as a mistake, not quietly fixed: the initial turn-snapshot
+compared only `(factor_id, text, trigger, horizon, evidence_ref)` for
+proposed factors and `(factor_id, severity, likelihood)` for scores —
+never `payload.argument`, never `rationale`. That snapshot reported turn 0
+AND turn 1 as "byte-identical," then reported turn 2's PROMPT as a
+mismatch — which would have been filed as a category-1 bug, except reading
+the actual turn-1 transcript text embedded in that "mismatched" prompt
+showed the two replays' turn-1 ARGUMENT and RATIONALE prose already
+differed in wording (structured severity/likelihood numbers matched;
+free text didn't) — the divergence was real at turn 1, the snapshot
+just wasn't looking at the field it was in. Fixed the snapshot to include
+every text field and re-ran: **turn 0 itself, the very first call, already
+differs** — different argument prose, and the two replays proposed
+factors covering different content (e.g. replay A's RF00 was MACD/
+momentum-based, replay B's RF00 was a Bollinger Band breach) — from a
+byte-identical prompt, at temperature=0.
+
+**Net: category 3, and it's not something that accumulates over a long
+panel — it's present at the first token generated.** This is conclusive
+given categories 1 and 2 are independently clear: `temperature=0` gives
+greedy decoding, not bitwise reproducibility, on this model's serving
+stack, confirmed rather than assumed from provider documentation.
+
+**Criterion 3, amended per the same review:** "the override mechanism
+executes correctly when it fires" is the supportable claim, observed once
+(AVGO stability-2). "The override fires when it should" has no evidence
+either way yet — recorded separately so the two don't collapse into one
+claim in a future summary.
+
+**Criterion 2, corrected:** "ledger entries carry scores from all three
+personas" is a proxy that a single full round also satisfies. The direct
+check — `len(risk_turns) == 9` and `max(round_num) == 3` — is now asserted
+in `run_pipeline_once` itself (structural, since `round_num` is
+Python-assigned from `turn_index`, never model output; a future change to
+the turn-count loop now fails loudly here rather than passing on a proxy).
+
+**Restated criterion 4, wired in but not yet re-measured on a fresh run:**
+`_report_aggregate_determinism` now reports, alongside the strict
+per-observable check, whether the ledger's AGGREGATE statistics (contested
+count, total severity mass, total likelihood mass) match across the two
+temperature=0 replays — the quantity a computed-from-aggregates verdict
+would actually depend on, as opposed to per-factor identity. On the one
+AVGO run measured before this function existed (computed by hand from the
+saved JSON): contested count held (2/2), severity mass held (51/51),
+likelihood mass held (31/31) — only contested-factor MEMBERSHIP moved
+(RF04 swapped for RF00). That is the favorable outcome for a
+compute-the-verdict-from-aggregates design.
+
+**But that measurement now needs a caveat the turn-0 finding forces**: if
+individual factor enumeration and argument prose already differ this much
+at the very first call, a 9-turn panel's aggregate stability — if it holds
+on a re-run — is something the THREE-ROUND ADJUDICATION PROCESS achieves
+despite substantial early variance, not evidence that variance is small to
+begin with. Worth re-measuring with `_report_aggregate_determinism` now
+that it exists, before trusting the one hand-computed data point.
+
+**Also unresolved**: whether AVGO's split (a clearly one-directional
+technical picture, MACD/price/RSI all pointing the same way) is a case a
+panel should have converged on and didn't, or whether every ticker shows
+this much panel noise regardless of how one-sided the underlying evidence
+is. That distinction decides whether the fix belongs in the scoring prompts
+(panel noise, general) or in a boundary-case abstention design (this input
+specifically was marginal). Not decided here — the next measurement is
+running this same localization against a ticker with an UNAMBIGUOUS
+technical picture (not just directionally clear like AVGO, but extreme) and
+checking whether turn-0 variance shrinks.

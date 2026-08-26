@@ -140,6 +140,20 @@ async def run_pipeline_once(
     trial_state["risk_terminated_by"] = "round_cap"
     trial_state["debate_terminated_by"] = "round_cap"
 
+    # Criterion 2, the direct check rather than the proxy: "every persona
+    # scored" (what the ledger's persona keys show) is also true after
+    # exactly ONE round — it does not by itself confirm three rounds ran.
+    # turn_index/round_num are Python-assigned by construction (never
+    # model output), so this is a structural assertion, not a measurement
+    # that could vary — but assert it explicitly rather than only arguing
+    # it, so a future change to the loop above fails loudly here.
+    assert len(turns) == RISK_MAX_TURNS == 9, (
+        f"expected exactly 9 risk turns (RISK_MAX_ROUNDS=3), got {len(turns)}"
+    )
+    assert max(t.round_num for t in turns) == 3, (
+        f"expected round_num to reach 3, got max {max(t.round_num for t in turns)}"
+    )
+
     ledger = build_risk_ledger(turns)
     debate_gaps, debate_evidence = nodes._debate_caveats(trial_state)
     risk_gaps, risk_evidence, _ = nodes._risk_caveats(trial_state)
@@ -179,6 +193,40 @@ def _jaccard(a: set, b: set) -> float:
     if not a and not b:
         return 1.0
     return len(a & b) / len(a | b)
+
+
+def _aggregate_stats(detail: dict) -> dict:
+    """The restated form of criterion 4: not "is every per-factor score
+    identical" (the strict check `_report_determinism` runs, and the one
+    that fails), but "do the ledger's AGGREGATE statistics — the thing a
+    computed verdict would actually be a function of — hold." Measured on
+    AVGO (2026-08-26): contested COUNT and total severity/likelihood mass
+    were identical across two temperature=0 replays even though contested
+    MEMBERSHIP and individual scores were not. If that holds up as a
+    pattern, a verdict computed from these aggregates (rather than emitted
+    by the Risk Judge directly) would be the stable quantity criterion 4
+    actually needs — this function exists to keep measuring it, not to
+    assert the conclusion."""
+    scores = detail["ledger_scores"]
+    return {
+        "contested_count": len(detail["contested"]),
+        "severity_mass": sum(v[0] for persona_scores in scores.values() for v in persona_scores.values()),
+        "likelihood_mass": sum(v[1] for persona_scores in scores.values() for v in persona_scores.values()),
+    }
+
+
+def _report_aggregate_determinism(results: list[dict]) -> None:
+    a, b = results
+    agg_a, agg_b = _aggregate_stats(a), _aggregate_stats(b)
+    print("\nDETERMINISM — restated (aggregate statistics, not per-factor identity):")
+    for key in agg_a:
+        match = agg_a[key] == agg_b[key]
+        print(f"  {key}: {'MATCH' if match else 'MISMATCH'} ({agg_a[key]} vs {agg_b[key]})")
+    overall = agg_a == agg_b
+    print(f"  AGGREGATE DETERMINISM: {'PASS' if overall else 'FAIL'} "
+          f"— this is NOT the criterion as specified (that's _report_determinism "
+          f"above); it's the measurement that decides whether a computed-from-"
+          f"aggregates verdict design is viable.")
 
 
 def _report_determinism(results: list[dict]) -> bool:
@@ -257,6 +305,7 @@ async def main(ticker: str, as_of: date) -> None:
         )
         det_results.append(detail)
     determinism_holds = _report_determinism(det_results)
+    _report_aggregate_determinism(det_results)
 
     print("\n=== 2. STABILITY: same debate, production temperature, 3 samples ===")
     stab_results = []
