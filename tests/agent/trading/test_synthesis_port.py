@@ -167,6 +167,38 @@ def test_resolve_refs_names_the_unresolved_id():
     assert port.resolve_refs(texts, claims, ledger_by_id) == ["RF99"]
 
 
+# The three below use HEX factor ids on purpose. `_content_id` (risk_port)
+# mints `RF` + a 4-char SHA-1 prefix in uppercase hex, so a real slate looks
+# like RF487E/RFC50B/RF6ECA — while every other fixture in this file (and in
+# test_risk_ledger/test_risk_port) still says RF00, the shape ids had before
+# the 2026-08-26 content-hash change. That gap is exactly how `RF\d+` in
+# _REF_PATTERN survived: the suite only ever fed it the ~15% of the id space
+# that happens to be all digits. Live NFLX memo, 2026-08-26: five factors
+# cited, four hex, and one rendered.
+
+def _hex_ledger():
+    """A ledger whose ids are shaped the way `_content_id` really makes them."""
+    return [_ledger()[0].model_copy(update={"factor_id": "RF487E"})]
+
+
+def test_extract_refs_finds_a_hex_factor_id():
+    refs = port.extract_refs("structural downtrend intact [RFC50B]")
+    assert refs == ["RFC50B"]
+
+
+def test_resolve_refs_flags_an_unresolved_hex_factor_id():
+    ledger_by_id = {e.factor_id: e for e in _hex_ledger()}
+    texts = ["cites a real one [RF487E] and an invented one [RFDEAD]"]
+    assert port.resolve_refs(texts, {}, ledger_by_id) == ["RFDEAD"]
+
+
+def test_render_evidence_includes_a_hex_id_factor():
+    ledger_by_id = {e.factor_id: e for e in _hex_ledger()}
+    lines = port._render_evidence(["the decisive risk is [RF487E]"], {}, ledger_by_id)
+    assert len(lines) == 1
+    assert lines[0].startswith("[RF487E]")
+
+
 # ---------------------------------------------------------------------------
 # Criterion 4 — reference integrity, through run_synthesis end to end.
 # Each unresolved-reference case below supplies research payloads that

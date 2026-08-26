@@ -83,7 +83,7 @@ class RiskJudgePayload(BaseModel):
     No numbers, no quotes, same rule as the Research Manager.
     """
 
-    risk_narrative: str = Field(description="<=200 words. Cite factors as [RF00].")
+    risk_narrative: str = Field(description="<=200 words. Cite factors as [RF1A2B].")
     reasoning: str = Field(
         description=(
             "<=250 words. The FINAL reasoning behind `verdict` — weigh the risk "
@@ -94,7 +94,7 @@ class RiskJudgePayload(BaseModel):
     watch_items: list[str] = Field(
         default_factory=list,
         max_length=5,
-        description="Observables that would change this read. Each must cite [RF00].",
+        description="Observables that would change this read. Each must cite [RF1A2B].",
     )
     verdict: IndividualVerdict = Field(description="THE final verdict. buy/sell/hold — no fourth option.")
 

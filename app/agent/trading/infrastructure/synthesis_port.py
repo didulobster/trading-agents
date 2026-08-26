@@ -242,7 +242,7 @@ def build_research_pack(state) -> str:
 def _render_ledger(ledger: list[RiskLedgerEntry]) -> str:
     if not ledger:
         return "RISK LEDGER: none — no risk panel ran."
-    lines = ["RISK LEDGER (cite factor ids exactly as shown, e.g. [RF00]):"]
+    lines = ["RISK LEDGER (cite factor ids exactly as shown, e.g. [RF1A2B]):"]
     for e in ledger:
         scores = ", ".join(
             f"{p}=severity{sev}/likelihood{lik}" for p, (sev, lik) in e.scores.items()
@@ -293,7 +293,25 @@ def build_risk_judge_pack(
 # shapes and this logic is otherwise identical for both.
 # ---------------------------------------------------------------------------
 
-_REF_PATTERN = re.compile(r"\[C:([\w.-]+)\]|\[(RF\d+)\]")
+# `RF\d+` was written when `factor_id` was `f"RF{i:02d}"`. `_content_id`
+# (risk_port.py) replaced that with a 4-char SHA-1 prefix in hex, uppercase,
+# with an optional numeric collision suffix — so a real id is `RF487E` far
+# more often than `RF3755`, and only the ~15% of ids that happen to be
+# all-digits ever matched. Found live (2026-08-26, Phase 9 Gate work) on a
+# real NFLX memo: five factors cited, four of them hex, and the rendered
+# Evidence section listed exactly one — the all-digit `RF3755`. The other
+# four were invisible to BOTH `_render_evidence` (so the reader gets a
+# citation with nothing behind it) and `resolve_refs` (so a hallucinated
+# factor id containing any of A-F passed post-hoc verification silently).
+#
+# Deliberately `RF[0-9A-Za-z]+` rather than a pattern that re-encodes the
+# current id shape: matching is only about FINDING citation-shaped tokens,
+# and `resolve_refs`/`_render_evidence` both decide validity by membership
+# in the real slate anyway. A looser matcher hands an unknown id to that
+# membership check — which reports it — where a tighter one drops it on the
+# floor. This bug was the tight version failing exactly that way, and the
+# whole test suite missed it because every fixture still used `RF00`.
+_REF_PATTERN = re.compile(r"\[C:([\w.-]+)\]|\[(RF[0-9A-Za-z]+)\]")
 
 
 def extract_refs(*texts: str) -> list[str]:
