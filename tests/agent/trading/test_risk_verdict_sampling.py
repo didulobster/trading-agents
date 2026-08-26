@@ -33,6 +33,7 @@ from app.agent.trading.domain.risk import (
     RiskTurnPayload,
 )
 from app.agent.trading.infrastructure.synthesis_port import (
+    MemoVerificationError,
     SynthesisFabricationError,
     SynthesisReferenceError,
 )
@@ -81,7 +82,9 @@ def _state(**over) -> dict:
     return state
 
 
-def _memo(ticker: str, verdict: Verdict | str, *, tag: str, data_gaps=None) -> DecisionMemo:
+def _memo(
+    ticker: str, verdict: Verdict | str, *, tag: str, data_gaps=None, reasoning="stub reasoning"
+) -> DecisionMemo:
     return DecisionMemo(
         ticker=ticker,
         bull_case=f"bull [{tag}]",
@@ -89,7 +92,7 @@ def _memo(ticker: str, verdict: Verdict | str, *, tag: str, data_gaps=None) -> D
         research_thesis="stub thesis",
         risk_debate_summary="stub risk narrative",
         technical_signal="NOT RUN",
-        reasoning="stub reasoning",
+        reasoning=reasoning,
         watch_items=[],
         verdict=verdict,
         confidence=0.5,
@@ -152,9 +155,9 @@ async def test_a_majority_verdict_is_taken_from_a_sample_that_actually_agrees_wi
     while the verdict field said another."""
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.HOLD, tag="1"),
-        _memo("ACN", Verdict.SELL, tag="2"),
-        _memo("ACN", Verdict.HOLD, tag="3"),
+        _memo("ACN", Verdict.HOLD, tag="a"),
+        _memo("ACN", Verdict.SELL, tag="b"),
+        _memo("ACN", Verdict.HOLD, tag="c"),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
@@ -163,7 +166,7 @@ async def test_a_majority_verdict_is_taken_from_a_sample_that_actually_agrees_wi
     assert memo.verdict_samples == ["hold", "sell", "hold"]
     # sample 1 said hold too, and is first in generation order — it's the
     # one whose narrative should have been kept
-    assert memo.bull_case == "bull [1]"
+    assert memo.bull_case == "bull [a]"
     assert any("majority hold" in g for g in memo.data_gaps)
 
 
@@ -175,9 +178,9 @@ async def test_three_way_split_is_reported_as_unresolved_not_as_one_samples_gues
     `Verdict.UNRESOLVED` exists."""
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.BUY, tag="1"),
-        _memo("ACN", Verdict.SELL, tag="2"),
-        _memo("ACN", Verdict.HOLD, tag="3"),
+        _memo("ACN", Verdict.BUY, tag="a"),
+        _memo("ACN", Verdict.SELL, tag="b"),
+        _memo("ACN", Verdict.HOLD, tag="c"),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
@@ -191,9 +194,9 @@ async def test_three_way_split_is_reported_as_unresolved_not_as_one_samples_gues
 async def test_unanimous_verdict_is_reported_as_a_majority_with_no_special_casing(monkeypatch):
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.SELL, tag="1"),
-        _memo("ACN", Verdict.SELL, tag="2"),
-        _memo("ACN", Verdict.SELL, tag="3"),
+        _memo("ACN", Verdict.SELL, tag="a"),
+        _memo("ACN", Verdict.SELL, tag="b"),
+        _memo("ACN", Verdict.SELL, tag="c"),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
@@ -213,7 +216,7 @@ async def test_sampling_runs_exactly_risk_verdict_samples_total_trials(monkeypat
     async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
         nonlocal call_count
         call_count += 1
-        return _memo("ACN", Verdict.HOLD, tag=str(call_count))
+        return _memo("ACN", Verdict.HOLD, tag="abc"[call_count - 1])
 
     monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
 
@@ -238,9 +241,9 @@ async def test_a_guard_dropped_sample_is_excluded_from_the_vote_not_a_crash(monk
     dropped."""
     _stub_extra_panel_samples(monkeypatch)
     calls = iter([
-        _memo("ACN", Verdict.HOLD, tag="1"),
+        _memo("ACN", Verdict.HOLD, tag="a"),
         SynthesisFabricationError("unbacked number(s) in reasoning: ['5']"),
-        _memo("ACN", Verdict.HOLD, tag="3"),
+        _memo("ACN", Verdict.HOLD, tag="c"),
     ])
 
     async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
@@ -266,8 +269,8 @@ async def test_a_dropped_reference_error_sample_is_also_excluded_not_fatal(monke
     fabrication guard — same drop-and-continue treatment, not a crash."""
     _stub_extra_panel_samples(monkeypatch)
     calls = iter([
-        _memo("ACN", Verdict.SELL, tag="1"),
-        _memo("ACN", Verdict.SELL, tag="2"),
+        _memo("ACN", Verdict.SELL, tag="a"),
+        _memo("ACN", Verdict.SELL, tag="b"),
         SynthesisReferenceError("still cites unresolved reference(s): ['RF99']"),
     ])
 
@@ -298,4 +301,39 @@ async def test_all_samples_dropped_by_the_guard_raises_one_clear_aggregate_error
     monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
 
     with pytest.raises(SynthesisFabricationError, match="all 3 risk-verdict samples"):
+        await nodes.synthesizer_node(_state())
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: synthesizer_node runs an independent post-hoc check over the
+# memo it's about to return, distinct from the per-call guards inside
+# run_synthesis (which these tests bypass entirely via the monkeypatched
+# fake). A memo that slips a fabricated number past the (faked) generation
+# path must still be caught here.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_no_panel_memo_that_fails_post_hoc_verification_raises(monkeypatch):
+    async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
+        return _memo("ACN", Verdict.HOLD, tag="only", reasoning="Margin could reach 91.4%.")
+
+    monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
+
+    with pytest.raises(MemoVerificationError, match="91.4"):
+        await nodes.synthesizer_node(_state(risk_turns=[]))
+
+
+@pytest.mark.anyio
+async def test_the_chosen_samples_verification_failure_raises_even_with_a_majority(monkeypatch):
+    """All three samples agree (hold), so voting alone would happily return
+    sample 1 — but sample 1 itself carries a fabricated number, and the
+    post-hoc check runs against the SAME trial the chosen memo came from."""
+    _stub_extra_panel_samples(monkeypatch)
+    _stub_synthesis_sequence(monkeypatch, [
+        _memo("ACN", Verdict.HOLD, tag="a", reasoning="Margin could reach 91.4%."),
+        _memo("ACN", Verdict.HOLD, tag="b"),
+        _memo("ACN", Verdict.HOLD, tag="c"),
+    ])
+
+    with pytest.raises(MemoVerificationError, match="91.4"):
         await nodes.synthesizer_node(_state())

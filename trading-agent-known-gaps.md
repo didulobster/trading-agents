@@ -1435,3 +1435,74 @@ mechanism, not the live behavior end to end. The next live verification
 run against any ticker is the natural place to confirm a dropped trial
 in practice, rather than paying for a dedicated run here just to reproduce
 a ~1-in-8 event.
+
+## Phase 7: post-hoc memo verification (2026-08-26)
+
+Closes the gap items 6 and 12 (above, "Phase 6 gap closure" section) named
+explicitly: "`citation_verifier`/`memo_verifier` over the rendered memo is
+explicitly Phase 7 (Phase 6 plan §11), not attempted here... the
+reference-resolution and numeric guards in `synthesis_port.py` are the
+only checks between a fabricated memo claim and the reader." Those guards
+run DURING generation, on each call's own payload fields
+(`run_research_manager`'s `thesis`, `run_risk_judge`'s `risk_narrative`/
+`reasoning`) — nothing previously re-checked the memo `synthesizer_node`
+actually returns, after majority-of-N voting picked a winner and Python
+appended `data_gaps`/`verdict_samples` on top.
+
+**Not implemented as originally scoped.** A Phase 7 guide drafted before
+this session read the current code assumed routing the memo through
+`app/application/citation_verifier.py`/`memo_verifier.py` (built for the
+EDGAR RAG agent). Reading `debate_port.py`'s own module docstring first
+(the guard's design rationale) found that would reintroduce a bug this
+project already fixed: `citation_verifier` matches numbers by tolerance
+band, and over a corpus this dense, "bands overlap and cover most of the
+number line" — a fabricated figure lands inside somebody's band and the
+guard "returns `[]` forever while reading as clean." That is exactly why
+`_flag_debate_numbers` uses exact containment instead. Wiring the EDGAR
+verifiers in would have been a regression dressed as a feature completion.
+
+**What was actually built**: `verify_decision_memo` (new,
+`synthesis_port.py`) re-runs the SAME containment methodology
+(`_numeric_corpus`/`_numeric_guard`) over the memo's full assembled
+narrative (`bull_case`, `bear_case`, `research_thesis`,
+`risk_debate_summary`, `reasoning`, `watch_items` — deliberately not
+`data_gaps`/`evidence`, which are Python-authored metadata that legitimately
+quote already-known-unbacked numbers) — one additional check, not a
+parallel implementation. `synthesizer_node` calls it right before
+returning, in both the no-panel and sampled paths, against the SAME
+trial's `(state, ledger)` the chosen memo actually came from (independent
+risk-panel samples have independent factor ids — verifying against the
+wrong trial's ledger would misreport a real citation as unresolved). A
+failure raises the new `MemoVerificationError`, distinct from
+`SynthesisFabricationError`/`SynthesisReferenceError`: those catch a bad
+call before its output is used, this catches a bad ASSEMBLED artifact —
+built from calls that each passed their own guard — which is a more
+serious signal (an assembly-step bug, not an ordinary model fabrication).
+
+Also added: a `confidence_band` (LOW/MEDIUM/HIGH) display label in
+`decision_memo_port.py`, next to the existing raw float — cosmetic, no
+domain-model or checkpoint-allowlist change. The original guide's
+lookahead/contamination-date check was demoted to explicitly out of scope:
+`technical_node` already bounds its price fetch at `as_of_date` and
+fundamentals come from historically-dated EDGAR filings, so a downstream
+corpus-date audit would be defense-in-depth on an already-closed hole, not
+a new gap.
+
+**Tests**: 8 new — 5 in `test_synthesis_port.py` covering
+`verify_decision_memo` directly (clean memo passes; a number spliced into
+an already-guard-passed memo is caught; an unresolvable reference spliced
+in is caught; the check works standalone on a hand-built `DecisionMemo`,
+not just piggybacking on a flag the generation path already computed;
+`data_gaps`/`evidence` are confirmed excluded from the scan), 2 in
+`test_risk_verdict_sampling.py` proving the `synthesizer_node` wiring
+raises `MemoVerificationError` in both the no-panel and sampled paths
+(including when the FAILING sample is the one voting would have chosen as
+the majority), and 1 in `test_vault_reports.py` for the confidence band.
+Full suite: 468 passed (was 460).
+
+**Not done here**: no live run against a real ticker — the corpus/guard
+reuse means this exercises exactly the same matching logic the per-call
+guards already validate live, so a dedicated live run would mostly be
+re-confirming that machinery rather than this wiring; the next live run
+against any watchlist ticker is the natural place to see it exercised for
+real, same reasoning as the FIG entry above.

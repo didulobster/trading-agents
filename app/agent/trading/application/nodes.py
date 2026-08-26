@@ -30,9 +30,11 @@ from app.agent.trading.infrastructure.news_digest_port import build_digest
 from app.agent.trading.infrastructure.price_data_port import get_price_history
 from app.agent.trading.application.technical_indicators import compute_indicators
 from app.agent.trading.infrastructure.synthesis_port import (
+    MemoVerificationError,
     SynthesisFabricationError,
     SynthesisReferenceError,
     run_synthesis,
+    verify_decision_memo,
 )
 from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators, save_technical_report
 
@@ -439,6 +441,24 @@ async def _sample_additional_risk_panel(state: TradingState) -> list:
     return turns
 
 
+def _verify_or_raise(memo, state, ledger, debate_turns) -> None:
+    """Phase 7: independent re-check of the memo synthesizer_node is about
+    to return, distinct from the per-call guards that already ran during
+    generation (SynthesisFabricationError/SynthesisReferenceError catch a
+    bad call before its output is used; this catches a bad ASSEMBLED
+    artifact). A failure here means a bug slipped past guards that each
+    looked clean on their own — fail loud rather than ship it."""
+    result = verify_decision_memo(memo, state, ledger, debate_turns)
+    if not result.passed:
+        raise MemoVerificationError(
+            f"the assembled memo for {state['ticker']} failed post-hoc "
+            f"verification — unbacked number(s): {result.unbacked_numbers}, "
+            f"unresolved reference(s): {result.unresolved_references}. Every "
+            f"per-call guard passed, so this is an assembly-step bug, not an "
+            f"ordinary fabrication."
+        )
+
+
 async def synthesizer_node(state: TradingState) -> dict:
     print(f"[synthesizer] running for {state['ticker']}")
     as_of = state.get("as_of_date")
@@ -471,6 +491,8 @@ async def synthesizer_node(state: TradingState) -> dict:
     )
     base_evidence = news_evidence + debate_evidence + risk_evidence
 
+    debate_turns = state.get("debate_turns") or []
+
     if not ledger:
         # No risk panel ran (e.g. `--only technical`) — nothing to sample,
         # same single-call behavior as before this change. `verdict_samples`
@@ -479,6 +501,7 @@ async def synthesizer_node(state: TradingState) -> dict:
         memo = await run_synthesis(
             state, ledger=ledger, base_gaps=base_gaps, base_evidence=base_evidence, as_of=as_of
         )
+        _verify_or_raise(memo, state, ledger, debate_turns)
         return {"decision_memo": memo}
 
     # Each of the RISK_VERDICT_SAMPLES trials is an independent (panel,
@@ -493,6 +516,12 @@ async def synthesizer_node(state: TradingState) -> dict:
     # vote instead of aborting the run; only if EVERY trial is dropped does
     # this raise, since at that point there is genuinely no memo to return.
     memos: list = []
+    # Parallel to `memos`: the exact (state, ledger) each entry was
+    # generated from. Under majority-of-N sampling every trial ran its own
+    # independent risk panel with its own factor ids, so verifying the
+    # chosen memo against a DIFFERENT trial's ledger would misreport real
+    # citations as unresolved — the context has to travel with its memo.
+    contexts: list[tuple[dict, list]] = []
     dropped: list[str] = []
     client = AsyncAnthropic()
     for i in range(RISK_VERDICT_SAMPLES):
@@ -507,16 +536,19 @@ async def synthesizer_node(state: TradingState) -> dict:
             sample_state = {**state, "risk_turns": sample_turns}
             sample_client = client
         try:
-            memos.append(await run_synthesis(
+            memo = await run_synthesis(
                 sample_state, ledger=sample_ledger, base_gaps=base_gaps,
                 base_evidence=base_evidence, as_of=as_of, client=sample_client,
-            ))
+            )
         except (SynthesisFabricationError, SynthesisReferenceError) as exc:
             print(
                 f"[synthesizer] sample {i + 1}/{RISK_VERDICT_SAMPLES} dropped by "
                 f"the citation/fabrication guard: {exc}"
             )
             dropped.append(str(exc))
+            continue
+        memos.append(memo)
+        contexts.append((sample_state, sample_ledger))
 
     if not memos:
         raise SynthesisFabricationError(
@@ -534,14 +566,26 @@ async def synthesizer_node(state: TradingState) -> dict:
         # never inconsistent with each other (a memo arguing `sell` should
         # never be labeled `hold` because sample 1 happened to say `hold`
         # while 2 and 3 said `sell`).
-        final = next(m for m in memos if m.verdict.value == top_verdict)
+        final_idx = next(i for i, m in enumerate(memos) if m.verdict.value == top_verdict)
         split_note = f"risk verdict sampled N={len(memos)}: {verdicts} — majority {top_verdict}"
     else:
-        final = memos[0].model_copy(update={"verdict": Verdict.UNRESOLVED})
+        final_idx = 0
         split_note = (
             f"risk verdict sampled N={len(memos)}: {verdicts} — no majority, "
             f"reported as UNRESOLVED rather than picking one sample's answer"
         )
+
+    final = memos[final_idx]
+    final_state, final_ledger = contexts[final_idx]
+    if not has_majority:
+        final = final.model_copy(update={"verdict": Verdict.UNRESOLVED})
+
+    # Verify against the SAME trial the chosen memo came from, before any
+    # Python-authored gaps/samples are appended below — those are metadata
+    # about the memo, not narrative claims, and verifying them would just
+    # re-report numbers the pipeline already knows are unbacked (that's why
+    # they're gaps in the first place).
+    _verify_or_raise(final, final_state, final_ledger, debate_turns)
 
     extra_gaps = [split_note]
     if dropped:
