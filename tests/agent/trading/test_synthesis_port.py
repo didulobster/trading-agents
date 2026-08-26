@@ -478,6 +478,53 @@ def test_memo_verification_error_is_not_caught_by_the_per_call_guard_exceptions(
             pytest.fail("MemoVerificationError was caught by the per-call guard except clause")
 
 
+def test_an_unbacked_number_confined_to_watch_items_passes_verification():
+    """Live regression (ASML, 2026-08-26): watch_items is a GAP-ONLY field
+    at generation time (run_risk_judge flags an unbacked watch_items number
+    into data_gaps rather than blocking on it — same test file, watch_items
+    test above), so the assembled memo is legitimately allowed to carry one.
+    The first version of verify_decision_memo scanned watch_items as if it
+    were load-bearing and raised MemoVerificationError on exactly this case
+    — a stricter standard than generation time itself applies, which is the
+    assembly-step bug this function exists to catch, not a fabrication."""
+    from app.agent.trading.domain.decision_memo import DecisionMemo
+
+    memo = DecisionMemo(
+        ticker="ACN", bull_case="clean", bear_case="clean",
+        research_thesis="clean", risk_debate_summary="clean",
+        technical_signal="clean", reasoning="clean",
+        watch_items=["Volume surge above 0.80x of 20-day average would change this."],
+        verdict=Verdict.HOLD, confidence=0.5, data_as_of_date=date(2026, 8, 19),
+        data_gaps=["1 number(s) in the Risk Judge's watch items did not appear "
+                   "in any source and may be fabricated: 0.80"],
+        assumptions=[], evidence=[],
+    )
+
+    result = port.verify_decision_memo(memo, _state(), _ledger(), _debate_turns())
+
+    assert result.passed
+
+
+def test_an_unbacked_number_confined_to_bull_or_bear_case_passes_verification():
+    """Same principle as the watch_items case above, for the Research
+    Manager's own gap-only fields (bull_case/bear_case) — see
+    test_an_unbacked_number_in_bull_case_is_a_gap_not_a_block."""
+    from app.agent.trading.domain.decision_memo import DecisionMemo
+
+    memo = DecisionMemo(
+        ticker="ACN", bull_case="Upside could reach $7,777 million.",
+        bear_case="clean", research_thesis="clean", risk_debate_summary="clean",
+        technical_signal="clean", reasoning="clean", watch_items=[],
+        verdict=Verdict.HOLD, confidence=0.5, data_as_of_date=date(2026, 8, 19),
+        data_gaps=["number 7777 did not appear in any source and may be fabricated"],
+        assumptions=[], evidence=[],
+    )
+
+    result = port.verify_decision_memo(memo, _state(), _ledger(), _debate_turns())
+
+    assert result.passed
+
+
 def test_verification_does_not_scan_data_gaps_or_evidence():
     """data_gaps deliberately quotes already-flagged unbacked numbers (that
     IS why they're gaps); evidence is Python-rendered from resolved
