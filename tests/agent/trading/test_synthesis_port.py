@@ -292,6 +292,23 @@ async def test_the_risk_judges_verdict_is_the_memos_only_verdict():
     assert not hasattr(memo, "research_preliminary_verdict")
 
 
+def test_the_risk_judge_tool_schema_never_offers_unresolved():
+    """`Verdict.UNRESOLVED` (added 2026-08-26 alongside majority-of-N
+    sampling in application/nodes.py) is a Python-computed aggregate over
+    several Risk Judge calls — no single call should ever be ABLE to pick
+    it. `RiskJudgePayload.verdict` uses the narrower `IndividualVerdict`
+    type specifically so the tool schema sent to the model enforces this
+    structurally, not by prompt instruction alone. Reading the actual
+    schema `_risk_judge_tool()` sends, not just the Python type, since a
+    stale `.model_json_schema()` cache or a schema-generation quirk would
+    be exactly the kind of gap a type-only assertion misses."""
+    schema = port._risk_judge_tool()["input_schema"]
+    verdict_enum = schema["properties"]["verdict"]["enum"]
+
+    assert "unresolved" not in verdict_enum
+    assert set(verdict_enum) == {"buy", "sell", "hold"}
+
+
 @pytest.mark.anyio
 async def test_research_manager_never_sees_the_risk_ledger():
     """build_research_pack must not leak [RFnn] ids into what the Research

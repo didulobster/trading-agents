@@ -8,6 +8,35 @@ class Verdict(str, Enum):
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
+    # Added 2026-08-26 (code review, post-fix AVGO+ASML re-measurement):
+    # NEVER emitted by a single Risk Judge call — see `IndividualVerdict`
+    # below, which is what the tool schema actually offers the model.
+    # `UNRESOLVED` is computed in Python by `application/nodes.py`'s
+    # majority-of-N sampling: N independent (panel, Research Manager, Risk
+    # Judge) trials are run over the same fixed debate, and the memo's
+    # verdict is the majority of their individual verdicts, or UNRESOLVED
+    # when there is no majority. This exists because post-fix determinism
+    # measurement showed the split is real, not an identity artifact: two
+    # tickers (AVGO, ASML), both re-measured after slate-identity and
+    # threshold-brittleness fixes, still split verdict direction at
+    # temperature=0 and at production temperature. See
+    # trading-agent-known-gaps.md.
+    UNRESOLVED = "unresolved"
+
+
+class IndividualVerdict(str, Enum):
+    """The three choices ONE Risk Judge call may pick — deliberately
+    narrower than `Verdict`. `RiskJudgePayload.verdict` uses this type
+    (not `Verdict`) so the tool schema sent to the model never lists
+    `unresolved` as an option: no single call decides non-resolution, only
+    the aggregate over several does. Same string values as `Verdict`'s
+    first three members, so `Verdict(payload.verdict.value)` converts
+    losslessly wherever a resolved individual verdict needs to become the
+    memo's."""
+
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
 
 
 class ResearchManagerPayload(BaseModel):
@@ -44,20 +73,20 @@ class ResearchManagerPayload(BaseModel):
 
 class RiskJudgePayload(BaseModel):
     """EXACTLY what the Risk Judge LLM returns. It reviews the risk-panel
-    ledger AND the Research Manager's preliminary verdict, and its own
-    `verdict` is the pipeline's FINAL answer — empowered to override the
-    Research Manager's lean when the risk debate warrants it. Cites `[RFnn]`
-    for risk factors; may also cite `[C:claim_id]` in `reasoning` when
-    explaining agreement or override against the underlying debate. No
-    numbers, no quotes, same rule as the Research Manager.
+    ledger AND the Research Manager's bull/bear thesis, and its own
+    `verdict` is the pipeline's sole and FINAL answer — there is no prior
+    verdict to affirm or override (see `ResearchManagerPayload`'s
+    docstring). Cites `[RFnn]` for risk factors; may also cite
+    `[C:claim_id]` in `reasoning` when drawing on the underlying debate.
+    No numbers, no quotes, same rule as the Research Manager.
     """
 
     risk_narrative: str = Field(description="<=200 words. Cite factors as [RF00].")
     reasoning: str = Field(
         description=(
-            "<=250 words. The FINAL reasoning behind `verdict` — state plainly "
-            "whether you are affirming or overriding the Research Manager's "
-            "preliminary_verdict, and why. Every load-bearing sentence cited."
+            "<=250 words. The FINAL reasoning behind `verdict` — weigh the risk "
+            "ledger against the Research Manager's thesis and state plainly why "
+            "this verdict follows. Every load-bearing sentence cited."
         )
     )
     watch_items: list[str] = Field(
@@ -65,7 +94,7 @@ class RiskJudgePayload(BaseModel):
         max_length=5,
         description="Observables that would change this read. Each must cite [RF00].",
     )
-    verdict: Verdict = Field(description="THE final verdict. buy/sell/hold — no fourth option.")
+    verdict: IndividualVerdict = Field(description="THE final verdict. buy/sell/hold — no fourth option.")
 
 
 class DecisionMemo(BaseModel):
@@ -91,6 +120,15 @@ class DecisionMemo(BaseModel):
     # exclusion rules out.
     watch_items: list[str] = []
     verdict: Verdict
+    # The raw per-sample verdicts `verdict` was computed from — e.g.
+    # ["hold", "sell", "hold"] — empty when the risk panel didn't run at
+    # all (no ledger to sample) rather than when sampling ran and produced
+    # only one entry; a single-element list would be a bug, not a real
+    # state, since sampling always runs N>=2 when it runs. Added alongside
+    # `Verdict.UNRESOLVED` so a reader sees the actual split behind an
+    # UNRESOLVED (or a majority) verdict, not a bare label — see
+    # `application/nodes.py`'s majority-of-N sampling.
+    verdict_samples: list[str] = []
     confidence: float
     data_as_of_date: date
     data_gaps: list[str] = []

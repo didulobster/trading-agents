@@ -1083,15 +1083,42 @@ independently — see the caveat below on what that costs the analysis):
   to exist. `DecisionMemo.research_preliminary_verdict` and the
   override/affirm banner are gone with it — the Risk Judge's verdict is
   now the memo's only verdict.
-- NOT implemented: production temperature is still unset (adaptive
-  thinking on), not forced to 0. Real trade-off, not a defer-by-default:
-  `{"type": "adaptive"}` thinking was added in Phase 5 specifically because
-  `{"type": "disabled"}` produced malformed tool calls on 2 of 2 live
-  turns, and adaptive thinking requires the API's default temperature —
-  setting `temperature=0` in production would disable it, trading back
-  into a documented failure mode to buy a determinism property not yet
-  shown to need it at that layer. Left as an open decision, not resolved
-  here.
+- CLOSED (2026-08-26, code review): production `temperature=0` — decided
+  no, on measurement, not deferred on a trade-off. This was originally
+  framed as weighing a determinism gain against `reasoning_config`'s
+  documented cost (an explicit temperature disables thinking outright —
+  see `debate_port.reasoning_config`). That framing was wrong on both
+  sides:
+  - **The gain is zero.** Every determinism trial on AVGO and ASML ran at
+    `temperature=0`, and both split verdict at that setting (AVGO
+    hold/sell, ASML sell/hold) — see the post-fix sections above/below.
+    There is no determinism benefit to trade the cost against.
+  - **The cost, at least for the schemas this pass touches, is not
+    supported by the evidence available.** Grepped `reasoning_config`
+    directly: an explicit temperature (as every determinism trial passes)
+    disables `thinking` unconditionally for that call — already correctly
+    documented, not a bug. That means the 4 temperature=0 trials run for
+    this investigation (2 AVGO, 2 ASML) — 9 risk-panel turns + Research
+    Manager + Risk Judge each, 44 calls total — all ran with thinking
+    disabled. Grepped both run logs (`/tmp/postfix_avgo.log`,
+    `/tmp/postfix_asml.log`) for the retry-on-schema-violation message
+    risk_port.py prints (`[risk] {persona} turn {n}: schema violation, one
+    retry`): zero matches in either. 44 thinking-disabled calls on the
+    `RiskTurnPayload`/`ResearchManagerPayload`/`RiskJudgePayload` schemas,
+    zero malformed tool calls — against the Phase 5 finding of 2 malformed
+    calls out of 2, on `DebateTurnPayload` specifically. This is not a
+    retraction of the Phase 5 finding — the debate turns themselves are
+    generated ONCE per trial at production settings (adaptive thinking on)
+    and held fixed, so `DebateTurnPayload` was never resampled at
+    temperature=0 by this investigation, and that original finding stands
+    for that schema until it is. But the finding does not generalize to
+    the risk-panel/synthesis schemas the way the original "adaptive
+    thinking must stay on everywhere" framing assumed, and the framing
+    above should not be read that way again.
+  Net: no benefit measured, and the specific cost the trade-off invoked
+  does not show up where it would need to. `temperature=0` is not being
+  set in production because there is nothing to gain by setting it, full
+  stop — not because of an unresolved trade-off.
 
 **Re-measured on AVGO post-fix — the identity bug is gone, and a different,
 more fundamental fact is now visible underneath it:**
@@ -1183,3 +1210,139 @@ something has to draw that line from continuous, noisy severity/likelihood
 scores. Recorded here as the more precise localization of the remaining
 non-determinism — not a new action item, since no clear alternative (e.g.
 hysteresis banding between rounds) has been evaluated yet.
+
+## Phase 6 exit criteria: closing production temperature, localizing the
+## split, and shipping majority-of-N sampling (2026-08-26, code review)
+
+Follow-up to the two sections above, executing the reviewer's five-step
+sequence in full.
+
+**1. Grepped the thinking config on the determinism path — one Phase 5
+belief needed amending, one didn't.** `reasoning_config` (`debate_port.py`)
+disables `thinking` unconditionally whenever an explicit temperature is
+passed — already correctly documented, not a bug. That means the 4
+temperature=0 trials run across the AVGO+ASML investigation (2 each) — 9
+risk-panel turns + Research Manager + Risk Judge per trial, 44 calls total —
+all ran with thinking DISABLED. Grepped both run logs
+(`/tmp/postfix_avgo.log`, `/tmp/postfix_asml.log`) for risk_port.py's
+schema-violation retry message: zero matches. 44 thinking-disabled calls on
+`RiskTurnPayload`/`ResearchManagerPayload`/`RiskJudgePayload`, zero
+malformed tool calls — against Phase 5's 2-of-2 finding on
+`DebateTurnPayload`. Not a retraction of that finding (debate turns are
+generated once per trial at production settings, adaptive thinking on, and
+were never resampled at temperature=0 here) — but it does not generalize to
+the risk-panel/synthesis schemas the way the original framing assumed.
+
+**2. Production `temperature=0`: closed as no, on measurement.** The prior
+entry framed this as a trade-off (determinism gain vs. a documented
+thinking-disabled cost). Both sides of that framing were wrong: the gain is
+zero (both tickers split verdict AT temperature=0, not just at production
+temperature), and the specific cost invoked (malformed tool calls) does not
+show up in the 44 thinking-disabled calls actually measured on these
+schemas. `temperature=0` is not being set in production because there is
+nothing to gain by setting it — not because of an unresolved trade-off.
+Superseded the "NOT implemented... open decision" wording in the section
+above with this closed one.
+
+**3. Fixed-ledger Risk Judge repeat (AVGO, N=3, real cost $0.0201 for the 3
+Judge calls) — localizes the split to the panel, not the Judge.**
+`scripts/fixed_ledger_judge_repeat.py` (new): generates ONE real ledger +
+ONE Research Manager output, freezes both, then calls only the Risk Judge
+3 times at production temperature against byte-identical input. Result:
+`['sell', 'sell', 'sell']` — unanimous. Combined with the earlier direct
+evidence (AVGO's two temperature=0 determinism replays produced DIFFERENT
+ledgers before the Judge ever saw them), this says the verdict split
+measured on both tickers is explained by panel/ledger variance, not Judge
+variance — so sampling has to re-run the whole (panel, Research Manager,
+Risk Judge) trial, not just resample the Judge's call. (Weak power in the
+agreeing direction on N=3 noted and accepted — see the MSFT caveat below.)
+
+**4. Majority-of-N sampling implemented in production
+(`application/nodes.py`, `RISK_VERDICT_SAMPLES = 3`).**
+`synthesizer_node` now: runs the graph-checkpointed risk panel + synthesis
+as sample 1 (unchanged cost — this was always going to run); if the ledger
+came back empty (no risk panel ran, e.g. `--only technical`), returns that
+single sample unchanged, exactly as before this change; otherwise generates
+2 MORE independent (panel, Research Manager, Risk Judge) trials over the
+same fixed debate — via a new `_sample_additional_risk_panel`, which
+deliberately drives `risk_nodes._risk_turn` (not `risk_port.run_risk_turn`
+directly) so it goes through the same module-attribute seam the existing
+graph tests already monkeypatch, and does NOT checkpoint these extra
+samples per-turn (they live and die inside the one synthesizer node call —
+same resumability granularity `run_synthesis` already had). Takes the
+majority verdict across all 3 samples; on a majority, reuses the full memo
+from the first sample whose OWN verdict agrees (so narrative and verdict
+label are never inconsistent); on no majority, uses sample 1's memo with
+`verdict` overridden to `Verdict.UNRESOLVED`. Either way, `data_gaps` gets
+an explicit line naming the actual sample split.
+
+*Cost, measured not extrapolated*: real 9-turn panel cost from `docs/
+cost-log.jsonl`, most recent full AVGO trial: $0.0867 (below the earlier
+$0.105 extrapolation). One full trial (panel + RM + 1 Judge call): $0.1076.
+`RISK_BUDGET_USD` ($0.35, per-panel) and `SYNTHESIS_BUDGET_USD` ($0.30,
+per-RM+Judge-pair) are PER-TRIAL budgets, not aggregate across samples —
+neither needed raising, since each individual trial stays far under its own
+cap regardless of how many trials run. The real, new cost is operational:
+every live run that reaches the risk panel now pays for 3 trials instead of
+1 — roughly +$0.2 to +$0.3 per run for the risk+synthesis stage, a
+deliberate trade for the sampling this fix requires, not a bug.
+
+**5. `Verdict.UNRESOLVED` added, but never reachable from a single LLM
+call.** `RiskJudgePayload.verdict` now types on a NEW, narrower
+`IndividualVerdict` enum (buy/sell/hold only) instead of the full `Verdict`
+— so the tool schema sent to the model literally never lists `unresolved`
+as an option (asserted directly against `_risk_judge_tool()`'s JSON schema,
+not just the Python type). `Verdict.UNRESOLVED` exists only as
+`synthesizer_node`'s aggregate output over N samples with no majority.
+`decision_memo_port._format_memo_markdown` renders the actual sample split
+next to the verdict (`**Verdict:** SELL (majority of 3 samples: hold, sell,
+sell)`) rather than a bare label, and drops the old "Risk Judge, sole
+decision maker" wording whenever sampling ran (kept, unchanged, for the
+no-risk-panel case, where a single Judge call genuinely is the sole
+decision).
+
+**Also fixed in the same pass**: `RiskJudgePayload`'s docstring and its
+`reasoning` field's tool-schema description still told the model to "state
+plainly whether you are affirming or overriding the Research Manager's
+preliminary_verdict" — a live dangling reference into a deleted field, left
+over from the identity-fix pass earlier in this file. Corrected to describe
+weighing the ledger against the Research Manager's thesis instead.
+
+**Tests**: 8 new (`tests/agent/trading/test_risk_verdict_sampling.py` — 5,
+covering no-panel/majority/no-majority/unanimous/exactly-N-samples;
+`test_synthesis_port.py` — 1, the tool-schema assertion above;
+`test_vault_reports.py` — 2, the renderer's two branches). Full suite: 455
+passed (was 447).
+
+**Live verification (MSFT, `--only technical`, fresh thread-id to force
+real execution rather than resuming a checkpoint) — confirms the wiring,
+and surfaces a real reliability consequence of tripling the call count.**
+The run reached and executed the sampling loop's second `run_synthesis`
+call for real (debate ran, sample 1 succeeded, sample 2 started) before
+crashing with `SynthesisFabricationError: ... unbacked number(s) in
+risk_narrative/reasoning: ['4']`. This is NOT a new bug — the numeric-
+fabrication guard is a pre-existing, deliberately strict "cite, don't
+compute" check (see the closed items above documenting it catching a
+genuinely-computed `4.54` as a correct positive, not a false one), and a
+single triggered call already crashed the whole `synthesizer_node` before
+this change too. What IS new: sampling triples the number of Risk Judge
+calls per live run, which roughly triples the probability that ANY ONE of
+them trips this guard somewhere and takes down the entire run with no memo
+produced at all (not even the successful sample(s) already paid for).
+**Left as-is, not patched**: converting a raised
+`SynthesisFabricationError` into a soft per-sample failure (drop the
+sample, continue with fewer votes; retry; etc.) is a real design decision
+about the guard's existing hard-stop posture, not a bug fix — flagged here
+for a decision, not made unilaterally.
+
+**MSFT caveat, stated in advance rather than after the fact**: N=3 has weak
+power in the AGREEING direction — three samples splitting is a strong
+signal, three agreeing is not strong evidence of stability, since MSFT
+agreed 10/10 pre-Phase-6 and that was correctly not read as a stability
+pass (see earlier known-gaps entries on the degenerate `hold`-only
+distribution). Expect `UNRESOLVED` to catch gross instability and miss
+marginal cases. If most live runs come back `UNRESOLVED`, that is the
+pipeline reporting that the risk panel cannot resolve directions at this
+model tier — the fix then is a model change or a closed taxonomy, not more
+sampling. Worth deciding in advance so a wall of `UNRESOLVED` reads as
+signal, not as a bug.

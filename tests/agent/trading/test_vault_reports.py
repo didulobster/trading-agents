@@ -220,3 +220,23 @@ def test_verdict_line_names_the_risk_judge_as_sole_decision_maker():
     assert "Verdict (Risk Judge, sole decision maker):** SELL" in md
     assert "OVERRIDDEN" not in md
     assert "affirmed" not in md
+
+
+def test_a_sampled_verdict_shows_the_split_not_a_bare_label():
+    """Added 2026-08-26 alongside majority-of-N sampling: when
+    `verdict_samples` is populated, the verdict was never any ONE Risk
+    Judge call's alone, so the old "sole decision maker" line would
+    misattribute it. A reader should see the actual samples the verdict
+    was computed from."""
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.SELL, verdict_samples=["hold", "sell", "sell"])
+    )
+    assert "Risk Judge, sole decision maker" not in md
+    assert "**Verdict:** SELL (majority of 3 samples: hold, sell, sell)" in md
+
+
+def test_an_unresolved_verdict_names_itself_as_no_majority():
+    md = _format_memo_markdown(
+        _memo(verdict=Verdict.UNRESOLVED, verdict_samples=["buy", "sell", "hold"])
+    )
+    assert "**Verdict:** UNRESOLVED (no majority of 3 samples: buy, sell, hold)" in md

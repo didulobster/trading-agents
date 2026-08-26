@@ -61,6 +61,7 @@ from app.agent.trading.domain.decision_memo import (
     DecisionMemo,
     ResearchManagerPayload,
     RiskJudgePayload,
+    Verdict,
 )
 from app.agent.trading.domain.risk import RiskLedgerEntry, RiskTurn
 
@@ -713,7 +714,13 @@ async def run_synthesis(
         ),
         reasoning=risk_judgment.reasoning,
         watch_items=risk_judgment.watch_items,
-        verdict=risk_judgment.verdict,
+        # `risk_judgment.verdict` is an `IndividualVerdict` (buy/sell/hold
+        # only, see that type's docstring) — this function always produces
+        # ONE sample's memo. `Verdict.UNRESOLVED` is never assigned here;
+        # it is computed by `application/nodes.py`'s majority-of-N sampling
+        # from several calls to this function, one of which it then reuses
+        # or overrides. Same string values, so the conversion is lossless.
+        verdict=Verdict(risk_judgment.verdict.value),
         confidence=confidence,
         data_as_of_date=as_of,
         data_gaps=data_gaps,

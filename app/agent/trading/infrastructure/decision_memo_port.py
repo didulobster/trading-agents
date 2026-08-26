@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from app.agent.researcher import _save_output
-from app.agent.trading.domain.decision_memo import DecisionMemo
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
 
 # Fields the pipeline has not implemented yet still carry the literal
 # "STUB" from the synthesizer. Rendering that verbatim under a confident
@@ -22,11 +22,31 @@ def _render(value: str) -> str:
     return value
 
 
+def _render_verdict_line(memo: DecisionMemo) -> str:
+    """`verdict_samples` is empty when no risk panel ran to sample (the
+    Risk Judge's single call is genuinely the sole decision then) and
+    populated whenever `application/nodes.py`'s majority-of-N sampling
+    ran — in which case the verdict is Python's aggregate over several
+    Judge calls, not any one of them alone, and the label should say so
+    rather than keep crediting a single call. See `Verdict.UNRESOLVED`'s
+    docstring for why sampling exists at all."""
+    if not memo.verdict_samples:
+        return (
+            f"**Verdict (Risk Judge, sole decision maker):** "
+            f"{memo.verdict.value.upper()}"
+        )
+    samples = ", ".join(memo.verdict_samples)
+    basis = "no majority" if memo.verdict == Verdict.UNRESOLVED else "majority"
+    return (
+        f"**Verdict:** {memo.verdict.value.upper()} "
+        f"({basis} of {len(memo.verdict_samples)} samples: {samples})"
+    )
+
+
 def _format_memo_markdown(memo: DecisionMemo) -> str:
     lines = [
         f"# {memo.ticker} — Decision Memo",
-        f"**Verdict (Risk Judge, sole decision maker):** {memo.verdict.value.upper()}  ·  "
-        f"**Confidence:** {memo.confidence:.2f}",
+        f"{_render_verdict_line(memo)}  ·  **Confidence:** {memo.confidence:.2f}",
         f"**Data as of:** {memo.data_as_of_date}",
         "",
     ]
