@@ -185,23 +185,35 @@ def _report_determinism(results: list[dict]) -> bool:
     """Every observable must match exactly across the two temperature=0
     trials. Each dimension is checked and reported independently — a
     verdict match riding on top of a ledger-score or contested-set mismatch
-    is a determinism FAILURE, not a pass with an asterisk."""
+    is a determinism FAILURE, not a pass with an asterisk.
+
+    `checks` names the human-readable dimension; `detail_key` names the
+    ACTUAL key in the `run_pipeline_once` detail dict it reads from —
+    kept as an explicit mapping (not assumed equal to the check name)
+    after a KeyError here (found live, 2026-08-26, AVGO run: "contested_set"
+    vs the detail dict's "contested") took down the whole script AFTER the
+    determinism section had already found a real mismatch to report,
+    losing the stability section for that run entirely. A reporting bug
+    that crashes mid-report is worse than a wrong report — it drops
+    everything after the crash, not just the one bad line.
+    """
     a, b = results
-    checks = {
-        "verdict": a["verdict"] == b["verdict"],
-        "ledger_scores": a["ledger_scores"] == b["ledger_scores"],
-        "contested_set": a["contested"] == b["contested"],
-        "resolved_refs": a["resolved_refs"] == b["resolved_refs"],
-    }
+    checks = [
+        ("verdict", "verdict", a["verdict"] == b["verdict"]),
+        ("ledger_scores", "ledger_scores", a["ledger_scores"] == b["ledger_scores"]),
+        ("contested_set", "contested", a["contested"] == b["contested"]),
+        ("resolved_refs", "resolved_refs", a["resolved_refs"] == b["resolved_refs"]),
+    ]
     print("\nDETERMINISM — per-observable:")
-    for name, ok in checks.items():
+    for name, detail_key, ok in checks:
         print(f"  {name}: {'MATCH' if ok else 'MISMATCH'}")
         if not ok:
-            print(f"    trial 1: {a[name] if name != 'verdict' else a['verdict']}")
-            print(f"    trial 2: {b[name] if name != 'verdict' else b['verdict']}")
-    overall = all(checks.values())
+            print(f"    trial 1: {a[detail_key]}")
+            print(f"    trial 2: {b[detail_key]}")
+    overall = all(ok for _, _, ok in checks)
+    matched = sum(ok for _, _, ok in checks)
     print(f"DETERMINISM: {'PASS' if overall else 'FAIL'} "
-          f"({sum(checks.values())}/{len(checks)} observables matched)")
+          f"({matched}/{len(checks)} observables matched)")
     return overall
 
 
