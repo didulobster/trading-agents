@@ -1256,3 +1256,38 @@ async def test_the_fallback_is_a_noop_when_temperature_was_never_sent():
             client, model="claude-sonnet-5", max_tokens=100,
             messages=[{"role": "user", "content": "hi"}],
         )
+
+
+# ---------------------------------------------------------------------------
+# Gate B (Phase 8 plan §1): the cached prefix must be byte-stable
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_prefix_byte_stable_across_consecutive_same_side_turns():
+    """The cache breakpoint sits at the end of the evidence-pack block in
+    `system_blocks` (see run_debate_turn) — everything up to and including
+    it is the cached prefix, and bull/bear keep SEPARATE caches (the stance
+    text differs), so the fair "two consecutive turns" comparison is two
+    turns from the SAME side, not adjacent turns in the bull/bear
+    alternation. One differing byte anywhere in this prefix is a full
+    cache miss at full price on every later turn — this test is the
+    regression lock for that, not just documentation of intent.
+
+    The evidence pack is built from the analyst reports alone (debate_turns
+    is rendered separately, into `messages`, not `system_blocks`), so it
+    must not change between a debate's turn 0 and its turn 2 even though
+    the transcript passed alongside it has grown.
+    """
+    client = _FakeClient([_payload(), _payload()])
+
+    await port.run_debate_turn(_state(), "bull", 0, client=client)
+
+    prior_turns = [_turn(0, "bull", ["margin-hold"]), _turn(1, "bear", ["margin-soft"])]
+    await port.run_debate_turn(_state(debate_turns=prior_turns), "bull", 2, client=client)
+
+    first_system, second_system = (c["system"] for c in client.messages.calls)
+    assert first_system == second_system, (
+        "the bull system prompt + evidence pack differs between turn 0 and "
+        "turn 2 of the SAME (unchanged) analyst state — this is a cache "
+        "miss on every turn, not just a cost regression"
+    )

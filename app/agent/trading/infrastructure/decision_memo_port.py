@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from app.agent.researcher import _save_output
+from app.agent.trading.domain.budget import RunTermination, total_spend
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
 
 # Fields the pipeline has not implemented yet still carry the literal
@@ -175,4 +176,55 @@ def save_failed_decision_memo(
         memo.ticker.upper(),
         "decision_failed",
         provenance=provenance,
+    )
+
+
+def _format_aborted_run_markdown(state, terminated_by: RunTermination) -> str:
+    """No DecisionMemo to render — a budget/deadline abort can fire before
+    any analyst report exists, and DecisionMemo's required fields (verdict,
+    confidence, ...) assume a completed run. This is deliberately a
+    different, looser shape: which stages the run reached before it stopped,
+    and why, never a verdict-shaped stand-in for one it never reached."""
+    events = state.get("cost_events") or []
+    budget = state.get("budget")
+    stages = [
+        ("fundamentals", state.get("fundamentals_report") is not None),
+        ("technical", state.get("technical_report") is not None),
+        ("news/sentiment", state.get("news_digest") is not None),
+        ("debate", len(state.get("debate_turns") or []) > 0),
+        ("risk panel", len(state.get("risk_turns") or []) > 0),
+        ("decision memo", state.get("decision_memo") is not None),
+    ]
+    lines = [
+        f"> [!ABORTED] RUN ABORTED — {terminated_by.value.upper()}",
+        ">",
+        "> This run stopped before producing a verdict. No memo was "
+        "synthesized — do not treat the absence of one section below as a "
+        "finding about that stage, since a later stage never ran to "
+        "produce it.",
+        "",
+        f"# {state.get('ticker', '?')} — Aborted Run",
+        "",
+        f"**Terminated by:** {terminated_by.value}",
+        f"**Spend at abort:** ${total_spend(events):.4f}"
+        + (f" (budget ${budget.max_usd:.2f})" if budget else ""),
+        f"**LLM calls logged:** {len(events)}",
+        "",
+        "## Stages reached",
+        "",
+    ]
+    for name, reached in stages:
+        lines.append(f"- [{'x' if reached else ' '}] {name}")
+    return "\n".join(lines) + "\n"
+
+
+def save_aborted_run_memo(state, terminated_by: RunTermination) -> Path:
+    """Written from graceful_abort_node — the run-level counterpart to
+    save_failed_decision_memo above. Same reason: a run that stopped without
+    a verdict is a debugging/audit artifact, not nothing."""
+    ticker = state.get("ticker") or "UNKNOWN"
+    return _save_output(
+        _format_aborted_run_markdown(state, terminated_by),
+        ticker.upper(),
+        "decision_aborted",
     )

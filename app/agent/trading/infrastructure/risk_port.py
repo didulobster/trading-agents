@@ -37,6 +37,8 @@ from app.agent.researcher import (
 from app.agent.trading.application.risk_ledger import build_slate, contested_ids
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.debate import DebateTurn, canonical_claims
+from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.domain.risk import (
     PERSONAS,
     Persona,
@@ -176,6 +178,8 @@ equity position, run AFTER a bull/bear debate over the same evidence.
 You will be given an EVIDENCE PACK (the analyst reports and the debate
 transcript) and the risk panel's transcript so far.
 
+{EXTERNAL_TEXT_FRAMING}
+
 HARD RULES — checked in code after you answer:
 
 1. EVERY figure you write in `argument` or a score's `rationale` must appear
@@ -205,6 +209,7 @@ def _build_system(persona: Persona, phase: Phase) -> str:
     return (
         _SYSTEM_TEMPLATE.replace("{STANCE}", _STANCE_BY_PERSONA[persona])
         .replace("{PHASE}", _PHASE_INSTRUCTIONS[phase])
+        .replace("{EXTERNAL_TEXT_FRAMING}", EXTERNAL_TEXT_FRAMING)
     )
 
 
@@ -610,8 +615,11 @@ async def run_risk_turn(
 
     turn, truncated = _assemble(payload, turn_index, persona, slate)
 
+    node_name = f"{persona}_turn"
+    event_id = new_event_id(node_name, turn_index=turn_index)
     cost = log_cost(
-        ticker, f"trading-risk-{persona}-r{(turn_index // len(PERSONAS)) + 1}", usage, model=RISK_MODEL
+        ticker, f"trading-risk-{persona}-r{(turn_index // len(PERSONAS)) + 1}", usage,
+        model=RISK_MODEL, run_id=state.get("run_id"), event_id=event_id,
     )
     _assert_within_budget(ticker, turns, cost)
 
@@ -630,6 +638,7 @@ async def run_risk_turn(
     turn.input_tokens = usage.input_tokens
     turn.output_tokens = usage.output_tokens
     turn.estimated_cost_usd = cost
+    turn.cost_event = record_cost_event(event_id, node_name, usage, RISK_MODEL, cost)
 
     _maybe_crash(turn_index, "after")
     return turn

@@ -8,6 +8,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
+from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.domain.news_digest import (
     AGGREGATED_RELEVANCE,
@@ -15,6 +16,8 @@ from app.agent.trading.domain.news_digest import (
     NewsItem,
     SentimentSummary,
 )
+from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING, sanitize_external_text
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
 BATCH_SIZE = 15
 DIGEST_MAX_TOKENS = 1500
@@ -31,7 +34,9 @@ VALID_RELEVANCE = {"primary", "mentioned", "unrelated"}
 # vendor metadata by index. The model never emits a headline, a date, a
 # source, or a URL — same move that fixed sbc_pct_of_revenue: don't let the
 # model retype data it can copy wrong.
-SYSTEM_PROMPT = """You summarize financial news articles for an equity research pipeline.
+SYSTEM_PROMPT = f"""You summarize financial news articles for an equity research pipeline.
+
+{EXTERNAL_TEXT_FRAMING}
 
 The user message names one COMPANY UNDER ANALYSIS, then gives numbered articles
 marked [N]. The articles come from a vendor feed tagged with that company's
@@ -70,6 +75,28 @@ Other rules:
 - Return one object per input article. Never merge, skip, or invent articles.
 - Return a JSON array and nothing else. No prose, no markdown fences.
 """
+
+
+def _sanitize_articles(
+    articles: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Strips control/invisible characters, caps length, and flags
+    instruction-like patterns in the vendor's raw `headline`/`summary`
+    fields — the ONE place this happens, before either `_render_batch`
+    (the prompt) or `_join` (NewsItem construction, i.e. TradingState) ever
+    reads them. Everything downstream of this function sees only sanitized
+    text.
+    """
+    sanitized: list[dict[str, Any]] = []
+    flags: list[str] = []
+    for a in articles:
+        source = a.get("source", "unknown")
+        headline = sanitize_external_text(a.get("headline") or "", source=source)
+        body = sanitize_external_text(a.get("summary") or "", source=source)
+        for f in headline.flags + body.flags:
+            flags.append(f"{(a.get('headline') or '')[:60]!r}: {f}")
+        sanitized.append({**a, "headline": headline.body, "summary": body.body})
+    return sanitized, flags
 
 
 def _render_batch(articles: list[dict[str, Any]], ticker: str) -> str:
@@ -219,8 +246,8 @@ def _assert_within_budget(cost: float | None) -> None:
 
 
 async def build_digest(
-    articles: list[dict[str, Any]], ticker: str
-) -> tuple[list[NewsItem], list[str], float | None]:
+    articles: list[dict[str, Any]], ticker: str, run_id: str | None = None
+) -> tuple[list[NewsItem], list[str], float | None, CostEvent | None, list[str]]:
     """Batch the cleaned articles through Haiku and join by index.
 
     Batches run concurrently. At MAX_ARTICLES a run is 20 calls, and issuing
@@ -233,7 +260,9 @@ async def build_digest(
     per-run budget check doesn't have to reassemble per-batch lines.
     """
     if not articles:
-        return [], [], None
+        return [], [], None, None, []
+
+    articles, sanitizer_flags = _sanitize_articles(articles)
 
     client = AsyncAnthropic()
     usage = UsageSummary()
@@ -291,9 +320,11 @@ async def build_digest(
             f"refusing to return an empty digest that would read as no news"
         )
 
-    cost = log_cost(ticker, "trading-news", usage)
+    event_id = new_event_id("news")
+    cost = log_cost(ticker, "trading-news", usage, run_id=run_id, event_id=event_id)
     _assert_within_budget(cost)
-    return items, issues, cost
+    cost_event = record_cost_event(event_id, "news", usage, AGENT_MODEL, cost)
+    return items, issues, cost, cost_event, sanitizer_flags
 
 
 def _format_sentiment_markdown(

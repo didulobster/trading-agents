@@ -199,14 +199,14 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
             _fake_usage(),
         )
 
-    def fake_log_cost(ticker, mode, usage):
+    def fake_log_cost(ticker, mode, usage, *args, **kwargs):
         log_calls.append((ticker, mode, usage.input_tokens, usage.output_tokens))
         return 0.0123
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
     monkeypatch.setattr(news_digest_port, "log_cost", fake_log_cost)
 
-    items, issues, cost = await build_digest(articles, "ACN")
+    items, issues, cost, _cost_event, _flags = await build_digest(articles, "ACN")
 
     # a multiset, not a sequence: batches run concurrently, so the order they
     # start in is not a property worth pinning
@@ -238,9 +238,9 @@ async def test_item_order_follows_input_not_completion_order(monkeypatch):
         )
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
-    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a, **k: 0.01)
 
-    items, issues, _ = await build_digest(articles, "ACN")
+    items, issues, _, _cost_event, _flags = await build_digest(articles, "ACN")
 
     assert issues == []
     assert [i.headline for i in items] == [a["headline"] for a in articles]
@@ -263,9 +263,9 @@ async def test_one_unparseable_batch_costs_its_articles_not_the_run(monkeypatch)
         )
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
-    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a, **k: 0.01)
 
-    items, issues, cost = await build_digest(articles, "ACN")
+    items, issues, cost, _cost_event, _flags = await build_digest(articles, "ACN")
 
     assert len(items) == BATCH_SIZE          # the surviving batch is intact
     assert cost == 0.01
@@ -308,7 +308,7 @@ async def test_concurrency_is_bounded(monkeypatch):
         )
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
-    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a: 0.01)
+    monkeypatch.setattr(news_digest_port, "log_cost", lambda *a, **k: 0.01)
 
     await build_digest(articles, "ACN")
 
@@ -323,9 +323,10 @@ async def test_build_digest_empty_input_skips_llm_entirely(monkeypatch):
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", explode)
 
-    items, issues, cost = await build_digest([], "ACN")
+    items, issues, cost, cost_event, flags = await build_digest([], "ACN")
 
     assert items == [] and issues == [] and cost is None
+    assert cost_event is None and flags == []
 
 
 # ---------------------------------------------------------------------------

@@ -133,7 +133,10 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 # trace the preceding fundamentals run left behind — writing it would pair
 # the wrong evidence with the report. They supply their own provenance or
 # get none.
-_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision", "decision_failed", "debate", "risk"}
+_NO_SESSION_LOG_MODES = {
+    "technical", "sentiment", "decision", "decision_failed", "decision_aborted",
+    "debate", "risk",
+}
 
 
 # The vault filename stem for each mode, minus the ticker. "fundamentals" is
@@ -147,6 +150,7 @@ _MODE_STEMS = {
     "sentiment": "sentiment",
     "decision": "decision",
     "decision_failed": "decision-FAILED",
+    "decision_aborted": "decision-ABORTED",
     "debate": "debate",
     "risk": "risk",
 }
@@ -155,7 +159,10 @@ _MODE_STEMS = {
 # ticker. Everything the trading pipeline writes, which is what makes a
 # per-run folder worth having at all.
 _DATED_MODES = frozenset(
-    {"technical", "fundamentals", "sentiment", "decision", "decision_failed", "debate", "risk"}
+    {
+        "technical", "fundamentals", "sentiment", "decision", "decision_failed",
+        "decision_aborted", "debate", "risk",
+    }
 )
 
 # The instant one pipeline run started, set by `vault_run`; None outside one.
@@ -325,7 +332,13 @@ def _compute_cost(usage: UsageSummary, model: str = AGENT_MODEL) -> float | None
 
 
 def log_cost(
-    ticker: str, mode: str, usage: UsageSummary, model: str = AGENT_MODEL
+    ticker: str,
+    mode: str,
+    usage: UsageSummary,
+    model: str = AGENT_MODEL,
+    *,
+    run_id: str | None = None,
+    event_id: str | None = None,
 ) -> float | None:
     """Append one JSON line to docs/cost-log.jsonl. Returns the estimated
     cost (or None if pricing isn't configured), so callers can also surface
@@ -334,10 +347,21 @@ def log_cost(
     Pass `model` whenever the call being logged did not use AGENT_MODEL. Both
     the logged label and the price come from it — a hardcoded label on a
     differently-priced call produces a log that is wrong twice and looks
-    right."""
+    right.
+
+    `run_id`/`event_id` (Phase 8) are None for calls outside the trading
+    graph — the standalone researcher CLI has no run to group lines under.
+    Trading-pipeline callers pass both (see
+    trading/infrastructure/cost_log.py) so a run's lines can be grouped and
+    a resumed run's duplicate write can be deduped, both by `jq` over this
+    file alone. `kind` distinguishes these lines from the pre-Phase-8 lines
+    already in this file, which have neither field and are read as legacy."""
     cost = _compute_cost(usage, model)
     entry = {
+        "kind": "cost_event",
         "timestamp": datetime.now().isoformat(),
+        "run_id": run_id,
+        "event_id": event_id,
         "ticker": ticker,
         "mode": mode,
         "model": model,

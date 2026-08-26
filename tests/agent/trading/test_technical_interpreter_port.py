@@ -263,7 +263,7 @@ def test_normal_interpretation_produces_no_flags(monkeypatch):
         "supporting the move."
     ))
 
-    interpretation, flagged, _claims, _ = asyncio.run(
+    interpretation, flagged, _claims, _, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
@@ -280,7 +280,7 @@ def test_injected_fabricated_number_is_flagged_through_interpret(monkeypatch):
         "of 812 suggests rich valuation."
     ))
 
-    _, flagged, _claims, _ = asyncio.run(
+    _, flagged, _claims, _, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
@@ -298,7 +298,7 @@ def test_bearish_interpretation_produces_no_flags(monkeypatch):
         "in the lower half of the 318.73-352.11 Bollinger band."
     ))
 
-    _, flagged, _claims, _ = asyncio.run(interpret_indicators("V", BEARISH_INDICATORS))
+    _, flagged, _claims, _, _ = asyncio.run(interpret_indicators("V", BEARISH_INDICATORS))
 
     assert flagged == []
 
@@ -314,7 +314,7 @@ def test_injected_fabricated_period_slips_through_mocked_response(monkeypatch):
         "The 55-day moving average confirms the trend, with RSI around 62."
     ))
 
-    _, flagged, _claims, _ = asyncio.run(
+    _, flagged, _claims, _, _ = asyncio.run(
         interpret_indicators("AVGO", FULL_PRECISION_INDICATORS)
     )
 
