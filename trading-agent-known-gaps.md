@@ -590,14 +590,18 @@ section is the closure.
   replaced by two sequential calls: `run_research_manager` (sees the debate
   only, never the risk ledger, produces a `preliminary_verdict`) and
   `run_risk_judge` (sees the ledger AND the Research Manager's own output,
-  issues the FINAL `verdict` — empowered to override). Both pinned to
-  `claude-sonnet-5` by default (`RESEARCH_MANAGER_MODEL`/`RISK_JUDGE_MODEL`),
-  independent of `LLM_CLAUDE_MODEL` (Haiku 4.5 in this project), matching
-  the spec naming the model explicitly for these two roles specifically.
-  `DecisionMemo` gained `research_thesis`/`research_preliminary_verdict` so
-  an override is visible in the memo itself, not folded invisibly into one
-  paragraph — `decision_memo_port.py` now prints "OVERRIDDEN by the Risk
-  Judge" or "affirmed" right under the verdict line.
+  issues the FINAL `verdict` — empowered to override). `DecisionMemo`
+  gained `research_thesis`/`research_preliminary_verdict` so an override is
+  visible in the memo itself, not folded invisibly into one paragraph —
+  `decision_memo_port.py` now prints "OVERRIDDEN by the Risk Judge" or
+  "affirmed" right under the verdict line.
+- `RESEARCH_MANAGER_MODEL`/`RISK_JUDGE_MODEL` follow the project-wide
+  `LLM_CLAUDE_MODEL` (Haiku 4.5), same as every other port in this
+  pipeline — NOT pinned to Sonnet, despite the spec text naming it. First
+  built pinned to `claude-sonnet-5`, then switched back after item 1 below
+  was found: Sonnet 5's `temperature` deprecation undercuts exactly the
+  determinism guarantee these two calls exist to support. Item 2's table is
+  the re-verified Haiku run.
 
 1. **[Found live, fixed] `claude-sonnet-5` has DEPRECATED the `temperature`
    parameter — it 400s ("temperature is deprecated for this model"), not
@@ -626,7 +630,12 @@ section is the closure.
    roles the spec cares about most.
 
 2. **Measured (MSFT, `--as-of 2026-08-24`, one fixed 6-turn debate, 5
-   pipeline replays via `scripts/risk_determinism_check.py`):**
+   pipeline replays via `scripts/risk_determinism_check.py`), first on
+   Sonnet, then re-run after the Haiku switch-back:**
+
+   **Sonnet run** (Research Manager/Risk Judge fell back off `temperature`
+   per item 1 — degraded condition, both trial types at the same fixed
+   default for those two calls):
 
    | trial | risk-panel temp | verdict | research lean | overridden | ledger | contested | confidence |
    |---|---|---|---|---|---|---|---|
@@ -636,21 +645,37 @@ section is the closure.
    | stability-2 | production | hold | hold | no | 5 | 3 | 0.36 |
    | stability-3 | production | hold | hold | no | 5 | 1 | 0.49 |
 
-   **DETERMINISM: PASS.** **STABILITY: PASS** — 5/5 `hold`, direction
-   unanimous. The Risk Judge never overrode the Research Manager on any
-   trial in this run; ledger size and contested-factor count varied
-   turn-to-turn (5-6 factors, 0-3 contested) even though the verdict did
-   not — the risk PANEL's own content is not claimed deterministic, only
-   the final verdict it feeds into.
+   **Haiku run** (`temperature` genuinely honored end to end — the
+   determinism trials are now a real controlled condition for the Research
+   Manager and Risk Judge too, not just the risk panel):
 
-   Total cost for the 5-trial verification: **$0.83** (Sonnet Research
-   Manager + Risk Judge, Haiku risk panel and debate) — a one-off
-   verification cost, not a per-run production cost.
+   | trial | risk-panel temp | verdict | research lean | overridden | ledger | contested | confidence |
+   |---|---|---|---|---|---|---|---|
+   | determinism-1 | 0.0 | hold | hold | no | 5 | 3 | 0.42 |
+   | determinism-2 | 0.0 | hold | hold | no | 5 | 4 | 0.36 |
+   | stability-1 | production | hold | hold | no | 6 | 2 | 0.47 |
+   | stability-2 | production | hold | hold | no | 5 | 2 | 0.45 |
+   | stability-3 | production | hold | hold | no | 5 | 4 | 0.36 |
 
-3. **One data point, not a statistical guarantee**, same caveat Phase 5's
-   own five-run debate sweep carried and said explicitly (Phase 5 section,
-   opening note): 5/5 agreement is consistent with a real failure rate as
-   high as ~30-40% at typical confidence levels. Re-running this against a
-   second ticker, and especially against an input where the risk panel
-   itself lands closer to a genuine 50/50 split, would be the next check
-   worth running before treating "PASS" here as more than it is.
+   **DETERMINISM: PASS on both runs. STABILITY: PASS on both runs** — 10/10
+   `hold` across both models, direction unanimous. The Risk Judge never
+   overrode the Research Manager on any trial in either run; ledger size
+   and contested-factor count varied turn-to-turn (5-6 factors, 0-4
+   contested) even though the verdict did not — the risk PANEL's own
+   content is not claimed deterministic, only the final verdict it feeds
+   into.
+
+   Cost: **$0.83** for the Sonnet run, **$0.63** for the Haiku re-run
+   (Haiku's lower per-token rate, not fewer calls) — one-off verification
+   costs, not a per-run production cost.
+
+3. **One ticker, not a statistical guarantee**, same caveat Phase 5's own
+   five-run debate sweep carried and said explicitly (Phase 5 section,
+   opening note): 10/10 agreement across two model configurations on the
+   SAME fixed debate transcript is reassuring but is not ten independent
+   data points — the debate itself was never varied, so this cannot rule
+   out that MSFT's transcript here simply argues clearly enough that no
+   reasonable risk read moves the verdict. Re-running this against a second
+   ticker, and especially against an input where the risk panel itself
+   lands closer to a genuine 50/50 split, would be the next check worth
+   running before treating "PASS" here as more than it is.
