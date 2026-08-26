@@ -1599,3 +1599,75 @@ found:**
 2. Fabrication laundering across nodes — not observed this battery, still
    open in principle; unchanged from prior entries.
 3. Substring collision — closed, confirmed not a bug (above).
+
+## Phase 8 — Cost & Robustness Hardening (logged 2026-08-26)
+
+Run-level budget/deadline guard, a `CostEvent` ledger threaded through
+every LLM call, external-text sanitization for the news-injection threat,
+and (follow-up fix) a risk-panel cache-prefix bug caught by the same
+per-stage cost breakdown this phase introduced. PR #48 + #49, both merged.
+
+**Live-verified: criteria 2, 3, 5, 6, 8 all pass outright.** Cost
+self-consistency hand-recomputed from raw tokens against the pricing table
+(catches a wrong multiplier `_compute_cost`-trusting tests cannot); cache-
+read ratio independently recomputed via `jq`, non-hypothetical, 0.17→0.64
+across runs; budget and deadline breaches both terminate gracefully
+(`terminated_by` set, partial artifact, exit 0, no traceback); `grep` +
+`git log` confirm zero Phase 8 changes to `debate_router.py`/
+`risk_router.py` — MAX_ROUNDS remains the only debate-content lever.
+
+**Criterion 1 (5-ticker budget battery): 2/5 done.** AVGO $0.6648 (202 news
+articles, over the $0.60 target), ACN $0.5253 (30 articles, under it).
+News volume, not caching, is the swing factor — both runs show identical
+`n_events=41` and ~63–64% cache-read ratio. The $0.75 hard cap has solid
+headroom either way (70%/89% used). Not closed — 3 more tickers needed for
+a full read.
+
+**Criterion 4 (injection canary): mechanical half only.** The sanitizer
+fires on the canary fixture and not the control through the real
+`build_digest` path, at zero LLM cost (`tests/agent/trading/
+test_injection_canary.py`). The live 3×3 canary/control battery (verdict
+parity across 6 real runs) has not been run.
+
+**Criterion 7 (resume doesn't double-bill): real finding, not a clean
+pass.** Ran the actual mechanism (`DEBATE_CRASH_AT_TURN=2
+DEBATE_CRASH_WHEN=after`, real `os._exit(1)`, then resumed). The feared
+Phase 5 bug — `operator.add` re-applying an already-committed delta twice —
+does NOT occur: 6 contiguous debate turns, no duplicate `event_id`s
+anywhere. But a DIFFERENT, real gap surfaced: `log_cost` writes to disk
+synchronously, before the node returns, so the crashed turn's $0.00743 was
+genuinely billed and logged to disk — then the resumed retry billed AGAIN
+for real under a fresh `event_id` ($0.007675). `state["cost_events"]` only
+ever saw the retry, so `run_summary.total_usd` UNDER-reported true spend by
+exactly the crashed call's cost ($0.288298 disk vs. $0.280868 reported).
+Not a double-bill; an under-count — arguably worse for a budget cap, since
+the live guard (`check_run_guards`) only ever sees what `cost_events`
+reports.
+
+**Fixed the reporting half, documented the rest as bounded.**
+`cost_log.log_run_summary` now reconciles against the disk log's own
+per-run sum and reports whichever is larger, with a new
+`cost_ledger_gap_usd` field making the reconciliation visible rather than
+silently correcting it (same flag-not-assert posture as `data_gaps`/
+`guard_flags`). 3 new tests lock this in
+(`tests/agent/trading/test_cost_log.py`). Deliberately did NOT make the
+live `check_run_guards` router read the disk log — it stays a pure
+function of state on purpose (testable at zero cost, no I/O on the hot
+path before every LLM call), so it keeps the same blind spot mid-flight;
+`application/guards.py`'s docstring now says so explicitly. Bounded by how
+many node-level retries a run experiences, which is rare in practice — not
+a design invitation to grow.
+
+**Also found and fixed, unrelated to the exit-criteria battery:** the risk
+panel's `_build_system(persona, phase)` baked round-dependent phase
+instructions into the CACHED system block, so round 1 and round 2 always
+produced a different cache prefix per persona — a guaranteed cache miss on
+every phase transition. Moved phase instructions into the per-turn user
+message instead (same place `SLATE`/`CONTESTED ids` already live).
+Live-measured before/after on the same ticker/scope: risk-panel-stage cost
+-12.4%, run total -6.2%, cache-read ratio 0.4784→0.5659. No prompt content
+lost, no quality trade-off.
+
+Still open: criterion 1 (3 more tickers), criterion 4's live battery,
+and re-verifying criteria 5/6 haven't regressed under the cache-prefix fix
+(unaffected code paths, but not re-run live post-fix).
