@@ -1140,3 +1140,46 @@ text all now match, which only that fix could produce). The field-reorder,
 continuous-confidence, and RM-verdict-deletion fixes' individual
 contributions to the residual verdict-flip are NOT separately isolated by
 this measurement — recorded honestly rather than claimed.
+
+**Re-measured on ASML post-fix (2026-08-26) — the pattern holds, and it
+localizes further:**
+
+```
+IDENTITY DIAGNOSTIC: same ids, same order, same text — 5/5 factors matched.
+DIAGNOSIS: C (threshold brittleness) — one factor's scores drifted by <=1
+point per persona and crossed the contested cutoff on that drift alone.
+
+verdict:        MISMATCH  (sell vs hold)
+ledger_scores:  MISMATCH  (drift on 3 of 5 factors, each <=1 point/persona)
+contested_set:  MISMATCH  (2 ids vs 3 ids — RF9EF6 flips in/out)
+resolved_refs:  MISMATCH
+DETERMINISM: FAIL (0/4)
+
+Stability (3 production samples): verdict direction FAIL (['hold','sell','hold'])
+  confidence spread 0.06, contested-set Jaccard (min pairwise) 0.00
+```
+
+Two tickers now, both re-measured with all four fixes in place, both still
+split on verdict direction at temperature=0 and at production temperature.
+That is the condition specified above for treating the split as real rather
+than an artifact of one ticker's numbers.
+
+**What's new here, beyond confirming AVGO**: ASML's diagnosis is mechanism
+C, not "none" — and tracing where `contested` is actually read shows the
+"DISPLAY ONLY" comment added alongside the `normalized_spread` fix
+(`app/agent/trading/domain/risk.py`) is not accurate. `compute_confidence`
+was moved onto the continuous `normalized_spread`, as intended — but
+`contested_ids()` (`app/agent/trading/application/risk_ledger.py:108`)
+still reads the boolean `contested` field, and its output is `expected_ids`
+for the adjudicate/respond turns (`risk_port.py:567`) — i.e. it still
+decides which factors round 2 and round 3 are allowed to re-litigate. A
+factor that drifts across the spread>=2 cutoff between replays doesn't just
+get mis-labeled in a table; the two replays hand the persona a different
+set of ids to argue about in the next round, which is a real branch in
+the prompt, not cosmetic disagreement downstream of otherwise-identical
+turns. This is arguably not a fix-able bug in the usual sense: which
+factors get re-opened for round 2 is inherently a discrete decision, and
+something has to draw that line from continuous, noisy severity/likelihood
+scores. Recorded here as the more precise localization of the remaining
+non-determinism — not a new action item, since no clear alternative (e.g.
+hysteresis banding between rounds) has been evaluated yet.
