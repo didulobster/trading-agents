@@ -406,17 +406,34 @@ def verify_decision_memo(
     on purpose: `data_gaps` entries quote already-flagged unbacked numbers
     BY DESIGN (that's why they're gaps, not claims), and `evidence` is
     Python-rendered from resolved references, not model prose — scanning
-    either would just re-report what the pipeline already knows."""
+    either would just re-report what the pipeline already knows.
+
+    The NUMERIC scan is deliberately narrower than the REFERENCE scan, for
+    the same reason: `run_research_manager`/`run_risk_judge` already split
+    their own fields into blocking (`thesis`; `risk_narrative`+`reasoning`)
+    and gap-only (`bull_case`/`bear_case`; `watch_items`) — an unbacked
+    number in the gap-only fields was ALREADY let through on purpose and
+    recorded honestly in `data_gaps`. Live-caught (ASML, 2026-08-26): the
+    first version of this function scanned `watch_items` for numbers too,
+    uniformly with the blocking fields, and raised `MemoVerificationError`
+    on a `watch_items` figure the pipeline had already, correctly, decided
+    was a non-fatal gap — re-deriving a STRICTER standard than generation
+    time itself uses is exactly the kind of assembly-step inconsistency
+    this function exists to catch, and this was an instance of it, not a
+    fabrication. Reference resolution has no such split — `resolve_refs`
+    runs over every field at generation time regardless of block/gap
+    status, so the post-hoc check mirrors that uniformly instead."""
     corpus = _numeric_corpus(state, ledger, debate_turns)
-    narrative = "\n".join([
+    load_bearing = "\n".join([memo.research_thesis, memo.risk_debate_summary, memo.reasoning])
+    all_narrative = "\n".join([
         memo.bull_case, memo.bear_case, memo.research_thesis,
         memo.risk_debate_summary, memo.reasoning, *memo.watch_items,
     ])
-    numeric_flags, _ = _numeric_guard(narrative, "", corpus)
+    numeric_flags, _ = _numeric_guard(load_bearing, "", corpus)
 
     claims = canonical_claims(debate_turns)
     ledger_by_id = {e.factor_id: e for e in ledger}
-    unresolved = resolve_refs([narrative], claims, ledger_by_id)
+    unresolved = resolve_refs([all_narrative], claims, ledger_by_id)
 
     return MemoVerification(
         passed=not numeric_flags and not unresolved,

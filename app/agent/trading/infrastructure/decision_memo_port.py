@@ -136,3 +136,43 @@ def save_decision_memo(
         "decision",
         provenance=provenance,
     )
+
+
+def _format_failed_memo_markdown(memo: DecisionMemo, verification) -> str:
+    """`verification` is a `MemoVerification` (synthesis_port.py) — kept as
+    a loose type here rather than imported, to avoid decision_memo_port
+    (infrastructure) depending on synthesis_port (also infrastructure) for
+    what is really just two lists of strings."""
+    banner = [
+        "> [!FAILED] VERIFICATION FAILED — DO NOT ACT ON THIS MEMO",
+        ">",
+        "> The memo below failed Phase 7's post-hoc check. Every per-call "
+        "guard passed during generation, so this signals an ASSEMBLY-STEP "
+        "BUG, not an ordinary model fabrication — treat this as a pipeline "
+        "defect to investigate, not a tradeable memo.",
+        ">",
+    ]
+    if verification.unbacked_numbers:
+        banner.append(f"> **Unbacked number(s):** {', '.join(verification.unbacked_numbers)}")
+    if verification.unresolved_references:
+        banner.append(
+            f"> **Unresolved reference(s):** {', '.join(verification.unresolved_references)}"
+        )
+    banner += ["", "---", ""]
+    return "\n".join(banner) + _format_memo_markdown(memo)
+
+
+def save_failed_decision_memo(
+    memo: DecisionMemo, verification, provenance: str | None = None
+) -> Path:
+    """Written from INSIDE synthesizer_node, before it raises
+    MemoVerificationError — same pattern technical_node/fundamentals_node
+    already use to save their own output while the graph is still
+    executing. The memo that failed verification is the debugging
+    artifact; discarding it re-runs the pipeline blind."""
+    return _save_output(
+        _format_failed_memo_markdown(memo, verification),
+        memo.ticker.upper(),
+        "decision_failed",
+        provenance=provenance,
+    )

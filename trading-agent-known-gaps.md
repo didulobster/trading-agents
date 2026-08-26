@@ -1506,3 +1506,96 @@ guards already validate live, so a dedicated live run would mostly be
 re-confirming that machinery rather than this wiring; the next live run
 against any watchlist ticker is the natural place to see it exercised for
 real, same reasoning as the FIG entry above.
+
+## Phase 7 exit-criteria battery: closed (2026-08-26)
+
+Five verification runs across five tickers (MSFT, ACN, AVGO, ASML, NFLX;
+`--only technical` on all but MSFT to hold cost down — the debate/risk-
+panel/synthesis cycle can't be skipped via `--only`, so this saves the
+fundamentals+news cost, not the majority-of-N sampling cost). Total spend
+$2.24. All five passed on the code as it stands; one of them (ASML)
+genuinely failed on its first attempt and surfaced a real bug, fixed
+mid-battery — recorded here rather than quietly re-run past.
+
+**Live bug found and fixed: `verify_decision_memo` was stricter than the
+generation-time guards it's supposed to be re-checking.** ASML's first
+attempt raised `MemoVerificationError` on `0.80` in the Risk Judge's
+`watch_items`. That number had already been caught by `run_risk_judge`'s
+own in-generation guard and correctly recorded as a non-fatal `data_gaps`
+entry — `run_research_manager`/`run_risk_judge` both split their fields
+into BLOCKING (`thesis`; `risk_narrative` + `reasoning`) and GAP-ONLY
+(`bull_case`/`bear_case`; `watch_items`) on purpose, and `watch_items`
+numbers were never meant to be fatal. The first version of
+`verify_decision_memo` scanned all six narrative fields uniformly,
+re-deriving a stricter standard than generation time itself applies —
+exactly the "assembly-step inconsistency" class this function exists to
+catch, and a real instance of it. This is also the first live proof the
+failed-memo write (added earlier this session) does its job: the artifact
+was saved to `ASML-decision-FAILED.md` and traceable, which is how this
+got diagnosed instead of retried blind. Fixed by narrowing the numeric
+scan to exactly the three load-bearing fields; reference resolution is
+unchanged (it has no such block/gap split at generation time). 2 new
+regression tests, full suite 472 passed. A fresh ASML run under the fixed
+code (`trading-ASML-phase7-check-20260826-v2`) passed cleanly.
+
+**Bonus live confirmation, unplanned:** NFLX's run independently exercised
+the drop-and-continue fix from earlier in this session (see "the hard-stop
+decision, made" entry above) — one of its 3 majority-of-N trials tripped
+the citation guard during generation, was dropped rather than crashing the
+run, and the memo's `data_gaps` recorded it honestly ("1 of 3 risk-verdict
+sample(s) were dropped..."). First live trigger of that mechanism.
+
+**Manual arithmetic audit (criterion 2), runs 1 and 5 (MSFT, NFLX):**
+NFLX's technical-indicator citations (RSI, MACD, moving averages, the
+marginal Bollinger Band clearance, the volume ratio) all check out
+numerically and directionally against `NFLX-technical.md` — no findings.
+
+MSFT surfaced one real finding, of exactly the kind this criterion exists
+to catch and criterion 3 alone cannot: the memo's bull case states "net
+leverage declined to 0.18x" and separately "declined from 0.38x to
+0.31x," both cited as improving/conservative. The 0.31x figure is real
+and is the GROSS Debt/Operating Income ratio, which did decline (0.38x
+FY2025 → 0.31x FY2026). But 0.18x is NET Debt/OI, and net leverage
+actually ROSE, from 0.15x (FY2025) to 0.18x (FY2026) —
+`MSFT-fundamental.md` line 136 itself says "Leverage is **declining**
+(0.38x → 0.31x gross, 0.15x → 0.18x net)," asserting a decline for a
+ratio that its own two data points show increasing. The error originates
+in the Phase 2 fundamentals report, not in synthesis — the memo faithfully
+and correctly cites `0.18x` (the number is real, the citation resolves,
+no guard fires), and inherits the mischaracterization unchanged. This is
+`Known gap #1` below, "unit-category errors," happening for real: every
+mechanical check available today (containment matching, reference
+resolution) is powerless against a number that's genuinely present in the
+corpus but semantically backwards. All other MSFT figures spot-checked
+(operating income +21%, RPO +68%, OCF-vs-net-income gap $49.2B, cash
+decline $9.3B, OCF/capex coverage 1.6x, RPO/revenue 1.9x, gross leverage
+0.38x→0.31x) check out both numerically and directionally.
+
+**Substring collision (checklist close-out item): confirmed NOT a bug.**
+`_flag_debate_numbers("The company grew 14 percent...", "Revenue reached
+$14,500 million...")` correctly returns `['14']` — the greedy
+`[\d,]*` in `_DEBATE_NUMBER` consumes the whole token, so `"14"` never
+matches merely by being a substring of `"14,500"`. Whole-token matching,
+not bare substring containment.
+
+**Items 6 and 12 (Phase 6 gap-closure section, above): CLOSED.** Both
+named "nothing downstream re-verifies [debate/synthesis] output" as the
+gap; `verify_decision_memo` is that downstream re-verification, now live
+and running on every synthesizer_node return.
+
+**Criterion 1 ("5 consecutive first-attempt passes"), scored as satisfied
+by explicit user decision, not a mechanical reading of "consecutive":**
+strictly read, there is a genuine failure between run 3 (AVGO) and the
+final ASML pass — not a `--retry-on-verifier-fail` retry (that flag isn't
+implemented), but a fresh, independent first attempt under corrected code
+after a real bug was found and fixed mid-battery. Recorded exactly as it
+happened rather than reordered to look cleaner.
+
+**Known gaps carried forward, updated with what this battery actually
+found:**
+1. Unit-category / directional-mischaracterization errors — no longer
+   hypothetical, see the MSFT net-leverage finding above. Manual audit
+   remains the only gate.
+2. Fabrication laundering across nodes — not observed this battery, still
+   open in principle; unchanged from prior entries.
+3. Substring collision — closed, confirmed not a bug (above).
