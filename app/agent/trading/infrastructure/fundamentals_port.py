@@ -7,9 +7,10 @@ import os
 from datetime import date
 from pathlib import Path
 
-from app.agent.researcher import _save_output, log_cost, run_agent
+from app.agent.researcher import AGENT_MODEL, _save_output, log_cost, run_agent
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
 _CACHE_DIR = Path(__file__).resolve().parents[1] / ".fundamentals_cache"
 _USE_MOCK = os.getenv("MOCK_FUNDAMENTALS", "").strip() == "1"
@@ -19,7 +20,9 @@ def _cache_path(ticker: str) -> Path:
     return _CACHE_DIR / f"{ticker.upper()}.json"
 
 
-async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
+async def get_fundamentals_report(
+    ticker: str, run_id: str | None = None
+) -> FundamentalsReport:
     cached = _cache_path(ticker)
 
     if _USE_MOCK and cached.exists():
@@ -32,7 +35,8 @@ async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
     task = f"Today's date is {today.isoformat()}. Run the full research checklist for {ticker}."
     result, usage = await run_agent(task, ANALYST_SYSTEM_PROMPT)
 
-    cost = log_cost(ticker, "trading-fundamentals", usage)
+    event_id = new_event_id("fundamentals")
+    cost = log_cost(ticker, "trading-fundamentals", usage, run_id=run_id, event_id=event_id)
     vault_path = _save_output(result, ticker.upper(), "fundamentals", cost_usd=cost)
     print(f"[fundamentals] saved memo to {vault_path}")
 
@@ -44,6 +48,7 @@ async def get_fundamentals_report(ticker: str) -> FundamentalsReport:
         cache_read_tokens=usage.cache_read_tokens,
         output_tokens=usage.output_tokens,
         generated_at=today,
+        cost_event=record_cost_event(event_id, "fundamentals", usage, AGENT_MODEL, cost),
     )
 
     _CACHE_DIR.mkdir(exist_ok=True)

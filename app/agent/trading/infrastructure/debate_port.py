@@ -43,6 +43,8 @@ from app.agent.trading.domain.debate import (
     canonical_claims,
 )
 from app.agent.trading.domain.news_digest import AGGREGATED_RELEVANCE
+from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.infrastructure.technical_interpreter_port import (
     _PERIOD_LABEL,
     _flag_unmatched_numbers_against,
@@ -239,6 +241,8 @@ You are one side of a structured, adversarial equity research debate.
 You will be given an EVIDENCE PACK containing the analyst reports produced for
 this ticker, and the transcript of the debate so far. Argue from the pack.
 
+{EXTERNAL_TEXT_FRAMING}
+
 HARD RULES — these are checked in code after you answer:
 
 1. EVERY figure you write must appear VERBATIM in the evidence pack. Do not
@@ -282,8 +286,12 @@ argue the points where it does.
 
 Call `submit_argument` exactly once. Say nothing else."""
 
-BULL_SYSTEM = _SYSTEM_TEMPLATE.replace("{STANCE}", BULL_STANCE)
-BEAR_SYSTEM = _SYSTEM_TEMPLATE.replace("{STANCE}", BEAR_STANCE)
+BULL_SYSTEM = _SYSTEM_TEMPLATE.replace("{STANCE}", BULL_STANCE).replace(
+    "{EXTERNAL_TEXT_FRAMING}", EXTERNAL_TEXT_FRAMING
+)
+BEAR_SYSTEM = _SYSTEM_TEMPLATE.replace("{STANCE}", BEAR_STANCE).replace(
+    "{EXTERNAL_TEXT_FRAMING}", EXTERNAL_TEXT_FRAMING
+)
 
 _STANCE_BY_SIDE = {"bull": BULL_STANCE, "bear": BEAR_STANCE}
 _SYSTEM_BY_SIDE = {"bull": BULL_SYSTEM, "bear": BEAR_SYSTEM}
@@ -1001,11 +1009,15 @@ async def run_debate_turn(
     check_concession(payload, turns, side)
     check_rebuts(payload, turns, side)
 
+    node_name = f"{side}_turn"
+    event_id = new_event_id(node_name, turn_index=turn_index)
     cost = log_cost(
         ticker,
         f"trading-debate-{side}-r{(turn_index // 2) + 1}",
         usage,
         model=DEBATE_MODEL,
+        run_id=state.get("run_id"),
+        event_id=event_id,
     )
     _assert_within_budget(ticker, turns, cost)
 
@@ -1024,6 +1036,7 @@ async def run_debate_turn(
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         estimated_cost_usd=cost,
+        cost_event=record_cost_event(event_id, node_name, usage, DEBATE_MODEL, cost),
     )
 
     _maybe_crash(turn_index, "after")

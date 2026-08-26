@@ -57,6 +57,7 @@ from app.agent.researcher import (
     UsageSummary,
     log_cost,
 )
+from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, canonical_claims
 from app.agent.trading.domain.decision_memo import (
     DecisionMemo,
@@ -65,6 +66,8 @@ from app.agent.trading.domain.decision_memo import (
     Verdict,
 )
 from app.agent.trading.domain.risk import RiskLedgerEntry, RiskTurn
+from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
 # Follows the project-wide model from .env (LLM_CLAUDE_MODEL), same override
 # pattern as DEBATE_MODEL/RISK_MODEL — NOT pinned to Sonnet. The spec names
@@ -112,14 +115,33 @@ class SynthesisReferenceError(Exception):
     """A reference token names no real claim_id or factor_id, on the SECOND
     attempt (the model was already shown the unresolved ids once and asked
     to correct them). Raised rather than dropped — a silently-dropped
-    reference leaves a fluent sentence whose support has vanished."""
+    reference leaves a fluent sentence whose support has vanished.
+
+    `cost_events` (Phase 8, default []): whatever CostEvents were already
+    incurred before this raise. Empty when raised from inside
+    `_resolve_with_retry` — that path has never logged cost either (a
+    pre-existing gap, not one this phase introduces); populated by
+    `run_synthesis` when it re-raises a Risk Judge failure, so the Research
+    Manager's already-spent cost isn't lost with it.
+    """
+
+    def __init__(self, message: str, *, cost_events: list[CostEvent] | None = None):
+        super().__init__(message)
+        self.cost_events = cost_events or []
 
 
 class SynthesisFabricationError(Exception):
     """A number in a load-bearing field (Research Manager's `thesis`, Risk
     Judge's `risk_narrative`/`reasoning`) appears in no report, no debate
     claim, and no risk factor. Blocking, not flagging — see
-    `_numeric_guard`."""
+    `_numeric_guard`.
+
+    `cost_events`: see SynthesisReferenceError's docstring — same contract.
+    """
+
+    def __init__(self, message: str, *, cost_events: list[CostEvent] | None = None):
+        super().__init__(message)
+        self.cost_events = cost_events or []
 
 
 class MemoVerificationError(Exception):
@@ -137,12 +159,14 @@ class MemoVerificationError(Exception):
 # Prompts
 # ---------------------------------------------------------------------------
 
-RESEARCH_MANAGER_SYSTEM = """\
+RESEARCH_MANAGER_SYSTEM = f"""\
 You are the Research Manager for an equity research pipeline. You will be
 given the analyst reports and the bull/bear debate transcript for one
 ticker. Your job is to synthesize the DEBATE — you do not see any risk
 assessment; that happens after you, in a separate review you have no
 visibility into.
+
+{EXTERNAL_TEXT_FRAMING}
 
 HARD RULES — checked in code after you answer:
 
@@ -160,12 +184,14 @@ HARD RULES — checked in code after you answer:
 
 Call `submit_research_synthesis` exactly once. Say nothing else."""
 
-RISK_JUDGE_SYSTEM = """\
+RISK_JUDGE_SYSTEM = f"""\
 You are the Risk Judge for an equity research pipeline — the sole decision
 maker. You will be given the analyst reports, the bull/bear debate, the
 three-persona risk panel's ledger, AND the Research Manager's own synthesis
 of the debate (their bull_case, bear_case, and thesis — they do not issue a
 verdict; that is your job alone, informed by risk factors they never saw).
+
+{EXTERNAL_TEXT_FRAMING}
 
 HARD RULES — checked in code after you answer:
 
@@ -614,10 +640,11 @@ async def run_research_manager(
     claims: dict[str, DebateClaim],
     client: AsyncAnthropic | None = None,
     temperature: float | None = None,
-) -> tuple[ResearchManagerPayload, float | None, list[str]]:
+) -> tuple[ResearchManagerPayload, float | None, list[str], CostEvent]:
     """Synthesizes the bull/bear debate ONLY. Returns (payload, cost,
-    gap_flags) — `gap_flags` are unbacked numbers OUTSIDE `thesis` (bull_case/
-    bear_case), non-fatal, for the caller to fold into the memo's data_gaps.
+    gap_flags, cost_event) — `gap_flags` are unbacked numbers OUTSIDE
+    `thesis` (bull_case/bear_case), non-fatal, for the caller to fold into
+    the memo's data_gaps.
 
     `temperature`: None in production (adaptive thinking stays on). Set
     explicitly only by the determinism/stability check scripts — see
@@ -648,7 +675,12 @@ async def run_research_manager(
     # and a call that trips the guard still spent real tokens. Logging after
     # the guard's raise meant a blocked call's spend never reached
     # cost-log.jsonl — see trading-agent-known-gaps.md (FIG, 2026-08-26).
-    cost = log_cost(ticker, "trading-research-manager", usage, model=RESEARCH_MANAGER_MODEL)
+    event_id = new_event_id("research_manager")
+    cost = log_cost(
+        ticker, "trading-research-manager", usage,
+        model=RESEARCH_MANAGER_MODEL, run_id=state.get("run_id"), event_id=event_id,
+    )
+    cost_event = record_cost_event(event_id, "research_manager", usage, RESEARCH_MANAGER_MODEL, cost)
 
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     corpus = _numeric_corpus(state, [], debate_turns)
@@ -658,7 +690,8 @@ async def run_research_manager(
     if block_flags:
         raise SynthesisFabricationError(
             f"Research Manager synthesis for {ticker} has unbacked number(s) in "
-            f"`thesis`: {block_flags} — not present in any report or debate claim"
+            f"`thesis`: {block_flags} — not present in any report or debate claim",
+            cost_events=[cost_event],
         )
     if gap_flags:
         # Surfaced by the caller (run_synthesis) into the memo's data_gaps —
@@ -666,7 +699,7 @@ async def run_research_manager(
         # append to.
         print(f"[synthesis] research_manager: unbacked number(s) outside thesis: {gap_flags}")
 
-    return payload, cost, gap_flags
+    return payload, cost, gap_flags, cost_event
 
 
 # ---------------------------------------------------------------------------
@@ -681,9 +714,9 @@ async def run_risk_judge(
     research: ResearchManagerPayload,
     client: AsyncAnthropic | None = None,
     temperature: float | None = None,
-) -> tuple[RiskJudgePayload, float | None, list[str]]:
+) -> tuple[RiskJudgePayload, float | None, list[str], CostEvent]:
     """Synthesizes the risk ledger, reviews the Research Manager's output,
-    and issues the FINAL verdict. Returns (payload, cost, gap_flags).
+    and issues the FINAL verdict. Returns (payload, cost, gap_flags, cost_event).
 
     `temperature`: same contract as run_research_manager — None in
     production, explicit only for the determinism/stability checks.
@@ -711,7 +744,12 @@ async def run_risk_judge(
     # See the identical comment in run_research_manager: log the cost before
     # the fabrication guard can raise, since usage is already final and a
     # blocked call still spent real tokens.
-    cost = log_cost(ticker, "trading-risk-judge", usage, model=RISK_JUDGE_MODEL)
+    event_id = new_event_id("risk_judge")
+    cost = log_cost(
+        ticker, "trading-risk-judge", usage,
+        model=RISK_JUDGE_MODEL, run_id=state.get("run_id"), event_id=event_id,
+    )
+    cost_event = record_cost_event(event_id, "risk_judge", usage, RISK_JUDGE_MODEL, cost)
 
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     corpus = _numeric_corpus(state, ledger, debate_turns)
@@ -724,10 +762,11 @@ async def run_risk_judge(
         raise SynthesisFabricationError(
             f"Risk Judge synthesis for {ticker} has unbacked number(s) in "
             f"risk_narrative/reasoning: {block_flags} — not present in any report, "
-            f"debate claim, or risk factor"
+            f"debate claim, or risk factor",
+            cost_events=[cost_event],
         )
 
-    return payload, cost, gap_flags
+    return payload, cost, gap_flags, cost_event
 
 
 # ---------------------------------------------------------------------------
@@ -758,13 +797,21 @@ async def run_synthesis(
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     claims = canonical_claims(debate_turns)
 
-    research, research_cost, research_gaps = await run_research_manager(
+    research, research_cost, research_gaps, research_cost_event = await run_research_manager(
         state, claims=claims, client=client, temperature=research_temperature
     )
-    risk_judgment, risk_cost, risk_gaps = await run_risk_judge(
-        state, ledger=ledger, claims=claims, research=research,
-        client=client, temperature=risk_temperature,
-    )
+    try:
+        risk_judgment, risk_cost, risk_gaps, risk_cost_event = await run_risk_judge(
+            state, ledger=ledger, claims=claims, research=research,
+            client=client, temperature=risk_temperature,
+        )
+    except (SynthesisFabricationError, SynthesisReferenceError) as exc:
+        # The Research Manager's call already succeeded and its cost is
+        # already known here — merge it in before re-raising, or it is lost
+        # the moment this exception unwinds past this function. See both
+        # exception classes' docstrings.
+        exc.cost_events = [research_cost_event, *exc.cost_events]
+        raise
 
     total_cost = (research_cost or 0.0) + (risk_cost or 0.0)
     _assert_within_budget(ticker, total_cost)
@@ -820,4 +867,5 @@ async def run_synthesis(
         data_gaps=data_gaps,
         assumptions=[],
         evidence=evidence,
+        cost_events=[research_cost_event, risk_cost_event],
     )

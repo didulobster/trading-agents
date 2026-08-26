@@ -3,6 +3,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.agent.trading.domain.budget import CostEvent
+
 
 class Verdict(str, Enum):
     BUY = "buy"
@@ -134,3 +136,10 @@ class DecisionMemo(BaseModel):
     data_gaps: list[str] = []
     assumptions: list[str] = []
     evidence: list[str] = []
+    # The Research Manager's and Risk Judge's own CostEvents (Phase 8) —
+    # NOT the majority-of-N sampling's other trials' cost, which the
+    # synthesizer node collects separately and returns as its own state
+    # delta, since a dropped/non-winning trial's spend is real even though
+    # its memo never reaches this field. See application/nodes.py's
+    # synthesizer_node.
+    cost_events: list[CostEvent] = []

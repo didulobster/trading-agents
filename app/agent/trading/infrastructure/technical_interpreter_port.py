@@ -6,7 +6,9 @@ from pathlib import Path
 from anthropic import AsyncAnthropic
 
 from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
+from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
+from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
 TECHNICAL_INTERPRETER_SYSTEM_PROMPT = """\
 You are a technical analysis interpreter. You will be given a set of already-computed
@@ -103,8 +105,8 @@ def derive_relations(ind: TechnicalIndicators) -> list[str]:
 
 
 async def interpret_indicators(
-    ticker: str, indicators: TechnicalIndicators
-) -> tuple[str, list[str], list[str], float | None]:
+    ticker: str, indicators: TechnicalIndicators, run_id: str | None = None
+) -> tuple[str, list[str], list[str], float | None, CostEvent]:
     client = AsyncAnthropic()
     relations = "\n".join(f"- {r}" for r in derive_relations(indicators))
     prompt = (
@@ -128,11 +130,13 @@ async def interpret_indicators(
     usage.cache_write_tokens = u.cache_creation_input_tokens
     usage.cache_read_tokens = u.cache_read_input_tokens
     usage.output_tokens = u.output_tokens
-    cost = log_cost(ticker, "trading-technical", usage)
+    event_id = new_event_id("technical")
+    cost = log_cost(ticker, "trading-technical", usage, run_id=run_id, event_id=event_id)
+    cost_event = record_cost_event(event_id, "technical", usage, AGENT_MODEL, cost)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
     flagged_claims = flag_contradicted_claims(interpretation, indicators)
-    return interpretation, flagged, flagged_claims, cost
+    return interpretation, flagged, flagged_claims, cost, cost_event
 
 
 # A claim that something is above/below an N-day average. Non-greedy up to the
