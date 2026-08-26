@@ -133,7 +133,7 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 # trace the preceding fundamentals run left behind — writing it would pair
 # the wrong evidence with the report. They supply their own provenance or
 # get none.
-_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision", "debate", "risk"}
+_NO_SESSION_LOG_MODES = {"technical", "sentiment", "decision", "decision_failed", "debate", "risk"}
 
 
 # The vault filename stem for each mode, minus the ticker. "fundamentals" is
@@ -146,6 +146,7 @@ _MODE_STEMS = {
     "fundamentals": "fundamental",
     "sentiment": "sentiment",
     "decision": "decision",
+    "decision_failed": "decision-FAILED",
     "debate": "debate",
     "risk": "risk",
 }
@@ -153,7 +154,9 @@ _MODE_STEMS = {
 # Modes that file under MEMO_DIR/<ticker>/<date>/ rather than flat under the
 # ticker. Everything the trading pipeline writes, which is what makes a
 # per-run folder worth having at all.
-_DATED_MODES = frozenset({"technical", "fundamentals", "sentiment", "decision", "debate", "risk"})
+_DATED_MODES = frozenset(
+    {"technical", "fundamentals", "sentiment", "decision", "decision_failed", "debate", "risk"}
+)
 
 # The instant one pipeline run started, set by `vault_run`; None outside one.
 #

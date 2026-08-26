@@ -314,6 +314,11 @@ async def test_all_samples_dropped_by_the_guard_raises_one_clear_aggregate_error
 
 @pytest.mark.anyio
 async def test_no_panel_memo_that_fails_post_hoc_verification_raises(monkeypatch):
+    # save_failed_decision_memo does real file I/O (see
+    # test_vault_run_folder.py for that behavior) — stubbed here so this
+    # test stays focused on the raise/routing behavior.
+    monkeypatch.setattr(nodes, "save_failed_decision_memo", lambda *a, **k: "stub-path")
+
     async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
         return _memo("ACN", Verdict.HOLD, tag="only", reasoning="Margin could reach 91.4%.")
 
@@ -328,6 +333,7 @@ async def test_the_chosen_samples_verification_failure_raises_even_with_a_majori
     """All three samples agree (hold), so voting alone would happily return
     sample 1 — but sample 1 itself carries a fabricated number, and the
     post-hoc check runs against the SAME trial the chosen memo came from."""
+    monkeypatch.setattr(nodes, "save_failed_decision_memo", lambda *a, **k: "stub-path")
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
         _memo("ACN", Verdict.HOLD, tag="a", reasoning="Margin could reach 91.4%."),

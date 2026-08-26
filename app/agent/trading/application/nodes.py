@@ -36,6 +36,7 @@ from app.agent.trading.infrastructure.synthesis_port import (
     run_synthesis,
     verify_decision_memo,
 )
+from app.agent.trading.infrastructure.decision_memo_port import save_failed_decision_memo
 from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators, save_technical_report
 
 # Phase 6 exit-criteria fix (2026-08-26, code review): post-fix measurement
@@ -447,15 +448,21 @@ def _verify_or_raise(memo, state, ledger, debate_turns) -> None:
     generation (SynthesisFabricationError/SynthesisReferenceError catch a
     bad call before its output is used; this catches a bad ASSEMBLED
     artifact). A failure here means a bug slipped past guards that each
-    looked clean on their own — fail loud rather than ship it."""
+    looked clean on their own — fail loud, but write the memo first (same
+    pattern technical_node/fundamentals_node already use to save from
+    inside a still-executing graph): the failed memo is the debugging
+    artifact, and raising without saving it would re-run the pipeline
+    blind on the next attempt."""
     result = verify_decision_memo(memo, state, ledger, debate_turns)
     if not result.passed:
+        vault_path = save_failed_decision_memo(memo, result)
         raise MemoVerificationError(
             f"the assembled memo for {state['ticker']} failed post-hoc "
             f"verification — unbacked number(s): {result.unbacked_numbers}, "
             f"unresolved reference(s): {result.unresolved_references}. Every "
             f"per-call guard passed, so this is an assembly-step bug, not an "
-            f"ordinary fabrication."
+            f"ordinary fabrication. Failed memo saved to {vault_path} for "
+            f"debugging."
         )
 
 
@@ -580,13 +587,6 @@ async def synthesizer_node(state: TradingState) -> dict:
     if not has_majority:
         final = final.model_copy(update={"verdict": Verdict.UNRESOLVED})
 
-    # Verify against the SAME trial the chosen memo came from, before any
-    # Python-authored gaps/samples are appended below — those are metadata
-    # about the memo, not narrative claims, and verifying them would just
-    # re-report numbers the pipeline already knows are unbacked (that's why
-    # they're gaps in the first place).
-    _verify_or_raise(final, final_state, final_ledger, debate_turns)
-
     extra_gaps = [split_note]
     if dropped:
         extra_gaps.append(
@@ -600,4 +600,13 @@ async def synthesizer_node(state: TradingState) -> dict:
         "verdict_samples": verdicts,
         "data_gaps": final.data_gaps + extra_gaps,
     })
+
+    # Verify the memo actually being returned — i.e. after every model_copy
+    # above, not an intermediate — against the SAME trial it came from.
+    # verify_decision_memo itself excludes data_gaps/evidence from its scan
+    # (see its docstring), so this ordering has no effect on WHAT gets
+    # checked, only the hygiene of checking the actual final object rather
+    # than a pre-assembly one.
+    _verify_or_raise(final, final_state, final_ledger, debate_turns)
+
     return {"decision_memo": final}

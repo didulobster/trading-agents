@@ -460,6 +460,24 @@ def test_verification_works_standalone_not_only_after_run_synthesis():
     assert "63.2" in result.unbacked_numbers or "63.2%" in result.unbacked_numbers
 
 
+def test_memo_verification_error_is_not_caught_by_the_per_call_guard_exceptions():
+    """MemoVerificationError signals a different, more serious failure
+    class than SynthesisFabricationError/SynthesisReferenceError (an
+    assembly-step bug vs. an ordinary bad call) — it must not be an
+    instance of either, or a caller's `except SynthesisFabricationError`
+    (e.g. synthesizer_node's per-trial drop-and-continue) would silently
+    swallow it as if it were just another droppable trial failure."""
+    assert not issubclass(port.MemoVerificationError, port.SynthesisFabricationError)
+    assert not issubclass(port.MemoVerificationError, port.SynthesisReferenceError)
+
+    err = port.MemoVerificationError("assembled memo failed verification")
+    with pytest.raises(port.MemoVerificationError):
+        try:
+            raise err
+        except (port.SynthesisFabricationError, port.SynthesisReferenceError):
+            pytest.fail("MemoVerificationError was caught by the per-call guard except clause")
+
+
 def test_verification_does_not_scan_data_gaps_or_evidence():
     """data_gaps deliberately quotes already-flagged unbacked numbers (that
     IS why they're gaps); evidence is Python-rendered from resolved
