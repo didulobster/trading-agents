@@ -55,6 +55,48 @@ _VAULT_RE = re.compile(r"^\[vault\] run .*?: (.+)$", re.M)
 _RAW_MEMO_RE = re.compile(r"## Raw memo\s*\n+```json\n(.*?)\n```", re.S)
 
 
+def preflight() -> list[str]:
+    """Service preconditions, checked ONCE before the loop rather than
+    discovered six subprocess launches later.
+
+    The one that actually bit (2026-08-27, first battery attempt): the
+    research agent behind `fundamentals_node` does not talk to the database
+    directly — it calls tools over HTTP against the FastAPI app at
+    `app.agent.tools.API_BASE`. With the server down, all six runs died in
+    `check_corpus` with `httpx.ConnectError` before spending a cent. Every
+    prior battery in this repo used `MOCK_FUNDAMENTALS=1`, which returns
+    from a cache file before any tool call, so no earlier phase ever
+    needed the server and no earlier gate ever checked for it.
+
+    Cheap, and it fails the battery in a second with a sentence that names
+    the fix instead of six stack traces that name httpx.
+    """
+    problems = []
+
+    from app.agent.tools import API_BASE
+
+    try:
+        import httpx
+
+        httpx.get(f"{API_BASE}/corpus-status", params={"ticker": "MSFT"}, timeout=5.0)
+    except Exception as exc:  # noqa: BLE001 — any failure to reach it is the same answer
+        problems.append(
+            f"the research agent's API at {API_BASE} is unreachable ({type(exc).__name__}). "
+            f"fundamentals_node calls it for every tool; start it with:\n"
+            f"    uv run uvicorn app.main:app --host 127.0.0.1 --port 8000"
+        )
+
+    if os.getenv("MOCK_FUNDAMENTALS", "").strip() == "1":
+        problems.append(
+            "MOCK_FUNDAMENTALS=1 is set. The battery would load cached "
+            "fundamentals for the five tickers that have a cache file and run "
+            "the real agent only for the one that does not — five cached memos "
+            "and one live one is not a cross-ticker comparison. Unset it."
+        )
+
+    return problems
+
+
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 
@@ -202,6 +244,13 @@ def main() -> int:
         max_usd=args.max_usd,
         wall_clock_timeout_s=args.wall_clock_timeout_s,
     )
+
+    problems = preflight()
+    if problems:
+        print("PREFLIGHT FAILED — nothing was run:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 2
 
     for ticker in args.tickers:
         thread_id = f"trading-{ticker}-{battery_id}{args.suffix}"
