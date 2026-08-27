@@ -18,11 +18,14 @@ def _fresh():
     tools.reset_run_provenance()
 
 
-def test_k_is_env_overridable_so_reverting_is_config_not_code():
-    """The measurement says the saving costs real coverage. Whoever revisits
-    that decision should not need a code change to act on it."""
+def test_k_defaults_to_the_measured_value_not_the_cheaper_one():
+    """5 was tried and reverted: it saves ~$0.05/run and drops a filing
+    section nothing else retrieved on 59% of questions. The default has to
+    be the measured-correct value, not the cheap one — a default of 5 with
+    an env override to 8 would give every fresh checkout and CI run the
+    version the measurement rejected."""
     import os
-    assert "ASK_EDGAR_K" in os.environ or tools.ASK_EDGAR_K == 5
+    assert "ASK_EDGAR_K" in os.environ or tools.ASK_EDGAR_K == 8
 
 
 @pytest.mark.anyio
