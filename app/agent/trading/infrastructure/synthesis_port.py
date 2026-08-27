@@ -390,16 +390,43 @@ def compute_confidence(
 # Numeric guard
 # ---------------------------------------------------------------------------
 
-def _numeric_corpus(state, ledger: list[RiskLedgerEntry], debate_turns: list[DebateTurn]) -> str:
+def _grounded_corpus(state) -> str:
+    """The analyst reports, and NOTHING the debate or the risk panel wrote.
+
+    This is the only text in a run that traces to something outside the
+    models' own reasoning: fundamentals from EDGAR retrieval, technical from
+    computed indicators, news from the Finnhub feed. A figure that appears
+    here has a source. A figure that appears only downstream of here was
+    produced by a model, whatever else is true of it.
+    """
     from app.agent.trading.infrastructure.debate_port import report_texts
 
+    return "\n".join(report_texts(state).values())
+
+
+def _derived_corpus(state, ledger: list[RiskLedgerEntry], debate_turns: list[DebateTurn]) -> str:
+    """Everything the debate and the risk panel produced.
+
+    Kept SEPARATE from `_grounded_corpus` rather than concatenated with it,
+    because merging the two is what let a fabricated figure certify itself —
+    see `verify_decision_memo`.
+    """
     claims = canonical_claims(debate_turns)
-    parts = list(report_texts(state).values())
-    parts += [f"{c.text} {c.evidence_quote}" for c in claims.values()]
+    parts = [f"{c.text} {c.evidence_quote}" for c in claims.values()]
     parts += [f"{e.text} {e.trigger} {e.evidence_quote}" for e in ledger]
     risk_turns: list[RiskTurn] = state.get("risk_turns") or []
     parts += [s.rationale for t in risk_turns for s in t.payload.scores]
     return "\n".join(parts)
+
+
+def _numeric_corpus(state, ledger: list[RiskLedgerEntry], debate_turns: list[DebateTurn]) -> str:
+    """Grounded + derived, the corpus each GENERATION-time guard checks
+    against. Generation-time is the right place for the union: a debater
+    citing the previous turn's figure is doing its job, and so is a risk
+    persona scoring a factor another persona proposed. The union is only
+    wrong for the post-hoc memo check, which is the one place a number has
+    finished travelling and its ORIGIN is the question."""
+    return _grounded_corpus(state) + "\n" + _derived_corpus(state, ledger, debate_turns)
 
 
 def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[str], list[str]]:
@@ -433,6 +460,15 @@ class MemoVerification:
     passed: bool
     unbacked_numbers: list[str] = field(default_factory=list)
     unresolved_references: list[str] = field(default_factory=list)
+    # Figures with NO source: absent from the analyst reports, present only
+    # in text the debate or the risk panel wrote. Reported separately from
+    # `unbacked_numbers` (absent from everywhere) because the two need
+    # different reading. An unbacked number is a memo-assembly bug. A
+    # debate-originated one is a number the pipeline produced and then
+    # treated as evidence — which may be a sound derivation from grounded
+    # endpoints, or may be an invention. Only a human can tell those apart,
+    # so this reports rather than blocks. See `verify_decision_memo`.
+    debate_originated_numbers: list[str] = field(default_factory=list)
 
 
 def verify_decision_memo(
@@ -467,22 +503,39 @@ def verify_decision_memo(
     fabrication. Reference resolution has no such split — `resolve_refs`
     runs over every field at generation time regardless of block/gap
     status, so the post-hoc check mirrors that uniformly instead."""
-    corpus = _numeric_corpus(state, ledger, debate_turns)
+    grounded = _grounded_corpus(state)
+    derived = _derived_corpus(state, ledger, debate_turns)
     load_bearing = "\n".join([memo.research_thesis, memo.risk_debate_summary, memo.reasoning])
     all_narrative = "\n".join([
         memo.bull_case, memo.bear_case, memo.research_thesis,
         memo.risk_debate_summary, memo.reasoning, *memo.watch_items,
     ])
-    numeric_flags, _ = _numeric_guard(load_bearing, "", corpus)
+
+    # Two passes over the SAME text against DIFFERENT corpora, and the
+    # difference between them is the finding.
+    #
+    # Against grounded+derived: what the old single-corpus check reported —
+    # figures with no antecedent anywhere in the run.
+    # Against grounded alone: figures with no antecedent in any ANALYST
+    # REPORT. Subtract the first from the second and what remains is the
+    # set of numbers the pipeline invented somewhere between the analysts
+    # and the memo.
+    numeric_flags, _ = _numeric_guard(load_bearing, "", grounded + "\n" + derived)
+    ungrounded, _ = _numeric_guard(load_bearing, "", grounded)
+    originated = [n for n in ungrounded if n not in set(numeric_flags)]
 
     claims = canonical_claims(debate_turns)
     ledger_by_id = {e.factor_id: e for e in ledger}
     unresolved = resolve_refs([all_narrative], claims, ledger_by_id)
 
     return MemoVerification(
+        # `originated` deliberately does NOT gate — see the field comment on
+        # MemoVerification and the docstring above. Blocking on it would fail
+        # every memo that states a growth rate.
         passed=not numeric_flags and not unresolved,
         unbacked_numbers=numeric_flags,
         unresolved_references=unresolved,
+        debate_originated_numbers=originated,
     )
 
 

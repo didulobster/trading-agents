@@ -685,12 +685,41 @@ def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
     return list(dict.fromkeys(flagged))
 
 
+# Unit conversion is a power of 1000: a filing reports "$63,887" million or
+# "$14,462,836k", and prose says "$63.9B". Nothing else about the figure
+# changes.
+_SCALE_FACTORS = (1e3, 1e6, 1e9)
+
+
 def _is_rounding_of(raw: str, known: list[float]) -> bool:
-    """True when some pack value rounds to `raw` at `raw`'s own precision.
+    """True when some pack value rounds to `raw` at `raw`'s own precision,
+    at the same scale or a power-of-1000 away from it.
 
     Precision-scoped on purpose. A fixed tolerance widens the guard's blind
     spot as the pack grows; this one does not — "41.2" only ever clears
     against a value in [41.15, 41.25), whatever else is in the pack.
+
+    SCALE was added 2026-08-27 after the Phase 9 battery measured this
+    guard's precision on three live memos and found it inverted: every
+    "may be fabricated" figure it reported was correct and every one was a
+    millions-to-billions restatement it could not see — AVGO's 63.9
+    ($63,887M revenue), 35.8 ($35,819M), 5.7 ($5,747M SBC), NFLX's 10.1
+    ($10,149M OCF), ACN's 69.7 ($69,673M revenue). Meanwhile the one real
+    fabrication in that battery went unreported. A guard whose warnings are
+    reliably wrong is worse than no guard: it teaches the reader to skip
+    the category, and then the true positive arrives in a list nobody reads.
+
+    Scale clearing is deliberately restricted to figures carrying at least
+    one DECIMAL PLACE, and that restriction is the whole safety argument.
+    Dividing the pack by 1000 multiplies the number of values the guard will
+    clear against, which is exactly the density problem `_flag_debate_numbers`
+    exists to avoid — but only for coarse figures. A bare integer like "70"
+    would clear against any pack value in [69500, 70500), a bucket 1000 wide,
+    and "70" is precisely the shape of the fabricated figure this battery
+    caught. A converted figure keeps its significant digits ("$63.9B", never
+    "$64B") because keeping them is the point of converting; so requiring a
+    decimal admits the real restatements and admits none of the round
+    inventions. "63.9" still only ever clears against [63850, 63950).
     """
     try:
         value = float(raw.replace(",", ""))
@@ -698,7 +727,15 @@ def _is_rounding_of(raw: str, known: list[float]) -> bool:
         return False
     fraction = raw.split(".")
     places = len(fraction[1]) if len(fraction) == 2 else 0
-    return any(round(kv, places) == value for kv in known)
+    if any(round(kv, places) == value for kv in known):
+        return True
+    if places == 0:
+        return False   # see the docstring: no scale clearing for bare integers
+    return any(
+        round(kv / factor, places) == value
+        for kv in known
+        for factor in _SCALE_FACTORS
+    )
 
 
 # Formatting, not content: quote characters and whitespace. Everything with

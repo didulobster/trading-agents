@@ -1908,42 +1908,70 @@ PR #50's disk reconciliation lives — never executes when the process dies.
 The reconciliation covers crash-*resume*, not crash-*exit*. The battery
 manifest under-reported true spend by exactly FIG's $0.4998.
 
-### Class A: a fabricated figure carried to the verdict (AVGO)
+### CORRECTED: there was no Class A. The auditor's method was the defect.
 
-AVGO's memo names its decisive factor as "Broadcom's announced **$70–100B
-AI financing debt**" — "Leverage breach [RF58B7] is the primary trigger."
+**This section previously reported a Class A fabricated figure on AVGO and
+that report was wrong.** Correcting it in place rather than leaving it to be
+read as current: AVGO's "$70–100B AI financing debt" is **correctly
+sourced**. The news digest carries six items saying so, e.g.:
 
-- **`70` appears in no analyst report**: 0 hits in the news digest, 0 in the
-  fundamentals report. It was invented in debate turn 1, adopted by the risk
-  panel, then by the memo.
-- **`$100B` is real but is AI *revenue*, not debt** — source headline:
-  "Broadcom: $100 Billion In AI Revenue Is A Lot To Ask… AI revenue could
-  reach $100B by 2027 as company explores AI financing options."
-- The memo further asserts the financing is "funded by new debt issuance,
-  **not** off-balance-sheet securitization." The only source says the
-  opposite — "Broadcom builds massive **off-balance-sheet** AI financing
-  machine" — and `securitiz*` appears in **no** source document at all.
+- "Broadcom debt deal expected to reach upwards of **$70 billion**, sources say"
+- "Broadcom in talks to raise **$70-80 billion in debt** for chip financing deal"
+- "Broadcom seeks up to **$100 billion in debt financing** for AI chip deals"
+- "Broadcom pursuing up to **$100 billion debt deal** to fund Anthropic"
 
-### Why the verifier passed it — Decision 2's argument, now demonstrated
+The memo's phrase is a faithful summary of those. The related claim that it
+"contradicts its own source" on off-balance-sheet financing was also wrong:
+the digest carries **both** framings ("off-balance-sheet financing machine"
+*and* four separate "debt" headlines), so the memo picked the
+better-supported of two readings genuinely present in its evidence.
 
-`verify_decision_memo` returned clean on this memo. `_numeric_corpus`
-includes debate claims and ledger entries, so a number fabricated **in the
-debate** is already "somewhere upstream" by the time the memo cites it —
-which is the whole of what exact containment tests. **A figure invented in
-the debate is self-certifying by the time it reaches the memo.** Phase 5's
-`21.9%` argued this from a derived figure; this is the same hole with an
-outright invention going through it, on the sentence that decides the
-verdict.
+**Cause of the false finding, because it is the reusable lesson.** The
+search used to establish absence was `grep -oE ".{50}\b70\b.{50}"`. That
+requires fifty characters of trailing context *on the same line*; the
+headline line ended sooner, so grep matched nothing, and "no output" was
+read as "not present". A confident three-part finding was then built on
+that silence. The same trailing-context bug sat in the greps used to check
+`$100 billion` and `off-balance-sheet`, which is why all three legs failed
+together and none contradicted the others.
 
-**And the guard's warnings are anti-correlated with the truth.** AVGO's
-`data_gaps` flagged 16 mentions of 8 figures as "may be fabricated":
-`63.9` ($63,887M revenue), `35.8` ($35,819M), `2.2` (6.1% × $35,819M SBC),
-`5.7` ($5,747M SBC), `78%` (63,887/35,819−1) — every one correct, mostly
-millions→billions conversions exact containment cannot see. NFLX flagged
-`10.1` ($10,149M OCF, correct); ACN flagged `69.7` ($69,673M revenue,
-correct). **Three memos: 8+ false positives, 0 true positives, and the one
-real fabrication unflagged.** A guard whose warnings are reliably wrong is
-worse than no guard, because it trains the reader to discount the category.
+Two consequences worth keeping:
+
+1. **Criterion 5 (zero Class A/B/E) PASSES** on the three memos audited.
+2. **An absence claim needs a positive control.** "grep found nothing" is
+   evidence about the grep until a search known to match something has been
+   run against the same file. The corpus-tiering verifier below, run over
+   the same memo, reported `78%` and `5.4` as debate-originated and did NOT
+   report `70` or `100` — the tool had it right while the auditor did not.
+
+### The containment gap is real, but this battery did not demonstrate it
+
+Decision 2's structural argument stands on its own and is unaffected by the
+above: `_numeric_corpus` merged the analyst reports with debate claims and
+ledger entries, so a figure invented in the debate is "somewhere upstream"
+by the time the memo cites it, which is the whole of what exact containment
+tests. Phase 5's `21.9%` remains the evidence for it. **This battery did
+not add a live instance** — the one candidate was the auditor's error.
+
+What this battery *did* measure, and it is a real defect, is the guard's
+**precision**. Across three memos every "may be fabricated" figure it
+reported was correct, and every one was a millions-to-billions restatement
+it structurally could not see:
+
+| flagged | actually | memo |
+|---|---|---|
+| 63.9 | $63,887M revenue | AVGO |
+| 35.8 | $35,819M FY2023 revenue | AVGO |
+| 2.2 | 6.1% × $35,819M SBC | AVGO |
+| 5.7 | $5,747M FY2024 SBC | AVGO |
+| 78% | 63,887/35,819 − 1 | AVGO |
+| 10.1 | $10,149M operating cash flow | NFLX |
+| 69.7 | $69,673M revenue | ACN |
+
+Seven false positives, zero true positives. A guard whose warnings are
+reliably wrong is worse than no guard: it teaches the reader to skip the
+category, and a true positive would then arrive in a list nobody reads.
+Fixed — see the fix section at the end of this file.
 
 ### C/D tally: ceiling exceeded at three memos
 
@@ -1951,7 +1979,7 @@ worse than no guard, because it trains the reader to discount the category.
 |---|---|---|---|---|---|
 | ACN | 0 | 0 | 1 | 1 | 2 |
 | NFLX | 0 | 0 | 0 | 1 | 1 |
-| AVGO | 1 | 0 | 0 | 2 | 2 |
+| AVGO | 0 | 0 | 0 | 2 | 2 |
 
 Ceiling is ≤1/memo and ≤3/battery. ACN and AVGO breach per-memo; the
 battery breaches at **5 over three memos**, where the ceiling was set for
@@ -1975,12 +2003,13 @@ Also: unverified quote spans scale badly with memo complexity — ACN 4
 claims, NFLX 6, **AVGO 24**. The pipeline flags these itself and they are
 not counted above, but AVGO's 24 is most of that debate's citations.
 
-### §8 triage: both stop conditions fire, and rule 2 governs
+### §8 triage: the ceiling rule governs
 
-A Class A defect says "fix, re-run all six, re-audit". An exceeded C/D
-ceiling says "**stop the phase**; the finding is that the gap's rate is
-higher than Phase 7 evidence supported, and the right next move is
-characterizing the gap, not patching six memos." The second governs.
+With the Class A withdrawn, only one stop condition fires — but it is the
+governing one either way. An exceeded C/D ceiling says "**stop the phase**;
+the finding is that the gap's rate is higher than Phase 7 evidence
+supported, and the right next move is characterizing the gap, not patching
+six memos."
 
 Phase 7 saw **one** confirmed C-class instance across five memos. This saw
 **five C/D across three**, plus a Class A. The most likely explanation, and

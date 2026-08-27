@@ -457,6 +457,78 @@ async def test_a_number_spliced_into_the_assembled_memo_fails_verification():
     assert "91.4" in result.unbacked_numbers
 
 
+# ---------------------------------------------------------------------------
+# Corpus tiering (2026-08-27). `_numeric_corpus` used to merge the analyst
+# reports with the debate's own claims and the risk ledger, so a figure the
+# DEBATE invented was already "somewhere upstream" by the time the memo
+# cited it -- which is the whole of what exact containment tests. The
+# post-hoc check now runs twice, against grounded-only and against
+# grounded+derived, and the difference is the finding.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_a_figure_only_the_debate_states_is_reported_as_debate_originated():
+    """The number has an antecedent (the debate said it), so it is NOT
+    unbacked -- but no analyst report contains it, so its only source is a
+    model. That distinction is invisible against a merged corpus."""
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+    turns = _debate_turns()
+    invented = turns[0].model_copy(deep=True)
+    invented.payload.claims[0].text += " Financing could reach 88.6 billion."
+    corrupted = memo.model_copy(update={
+        "reasoning": memo.reasoning + " Financing could reach 88.6 billion."
+    })
+
+    result = port.verify_decision_memo(
+        corrupted, _state(debate_turns=[invented, *turns[1:]]), _ledger(),
+        [invented, *turns[1:]],
+    )
+
+    assert "88.6" in result.debate_originated_numbers
+    assert "88.6" not in result.unbacked_numbers
+
+
+@pytest.mark.anyio
+async def test_debate_originated_numbers_do_not_gate():
+    """Reported, never blocking. A memo that states any growth rate carries
+    derived figures the reports do not contain verbatim; gating on those
+    would fail nearly every real memo. Live check, three Phase 9 memos: the
+    only debate-originated figures were AVGO's 78% (63,887/35,819-1) and
+    5.4 (7,570-2,185), both sound derivations from grounded endpoints."""
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+    turns = _debate_turns()
+    invented = turns[0].model_copy(deep=True)
+    invented.payload.claims[0].text += " Growth of 88.6 percent."
+    corrupted = memo.model_copy(update={
+        "reasoning": memo.reasoning + " Growth of 88.6 percent."
+    })
+
+    result = port.verify_decision_memo(
+        corrupted, _state(debate_turns=[invented, *turns[1:]]), _ledger(),
+        [invented, *turns[1:]],
+    )
+
+    assert result.debate_originated_numbers
+    assert result.passed
+
+
+@pytest.mark.anyio
+async def test_a_figure_the_analyst_report_states_is_neither_flag():
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+    # 34.1% is in the fundamentals summary -- see _state().
+    corrupted = memo.model_copy(update={
+        "reasoning": memo.reasoning + " Operating margin stands at 34.1%."
+    })
+
+    result = port.verify_decision_memo(corrupted, _state(), _ledger(), _debate_turns())
+
+    assert "34.1" not in result.unbacked_numbers
+    assert "34.1" not in result.debate_originated_numbers
+
+
 @pytest.mark.anyio
 async def test_an_unresolvable_reference_spliced_into_the_assembled_memo_fails_verification():
     coro, _ = _run([_research_payload(), _risk_payload()])
@@ -646,3 +718,22 @@ def test_research_manager_and_risk_judge_follow_the_project_wide_model_by_defaul
 
     assert port.RESEARCH_MANAGER_MODEL == AGENT_MODEL
     assert port.RISK_JUDGE_MODEL == AGENT_MODEL
+
+
+@pytest.mark.anyio
+async def test_verify_or_raise_returns_the_verification_for_the_caller():
+    """It used to return None. `synthesizer_node` now reads
+    `debate_originated_numbers` off the result to append a data gap, so a
+    silent None here would be an AttributeError on every clean run -- the
+    kind of break that only shows up in production because the passing path
+    is the one nobody asserts on."""
+    from app.agent.trading.application import nodes
+
+    coro, _ = _run([_research_payload(), _risk_payload()])
+    memo = await coro
+
+    result = nodes._verify_or_raise(memo, _state(), _ledger(), _debate_turns())
+
+    assert result is not None
+    assert result.passed
+    assert isinstance(result.debate_originated_numbers, list)

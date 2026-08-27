@@ -494,7 +494,7 @@ async def _sample_additional_risk_panel(state: TradingState) -> tuple[list, list
     return turns, cost_events
 
 
-def _verify_or_raise(memo, state, ledger, debate_turns) -> None:
+def _verify_or_raise(memo, state, ledger, debate_turns):
     """Phase 7: independent re-check of the memo synthesizer_node is about
     to return, distinct from the per-call guards that already ran during
     generation (SynthesisFabricationError/SynthesisReferenceError catch a
@@ -516,6 +516,7 @@ def _verify_or_raise(memo, state, ledger, debate_turns) -> None:
             f"ordinary fabrication. Failed memo saved to {vault_path} for "
             f"debugging."
         )
+    return result
 
 
 async def synthesizer_node(state: TradingState) -> dict:
@@ -677,6 +678,23 @@ async def synthesizer_node(state: TradingState) -> dict:
     # (see its docstring), so this ordering has no effect on WHAT gets
     # checked, only the hygiene of checking the actual final object rather
     # than a pre-assembly one.
-    _verify_or_raise(final, final_state, final_ledger, debate_turns)
+    verification = _verify_or_raise(final, final_state, final_ledger, debate_turns)
+
+    # Surfaced as a gap rather than a failure, and only on a memo that
+    # already passed. These figures have an antecedent — the debate or the
+    # risk panel stated them — but no ANALYST REPORT contains them, so
+    # their only source is a model. Most are sound derivations from
+    # grounded endpoints (a growth rate, a difference); some are not, and
+    # containment cannot tell those apart. Gating would fail nearly every
+    # memo that states a growth rate, and staying silent is what let the
+    # distinction go unnoticed until Phase 9 went looking for it.
+    if verification.debate_originated_numbers:
+        final = final.model_copy(update={"data_gaps": final.data_gaps + [
+            f"{len(verification.debate_originated_numbers)} figure(s) in the "
+            f"memo's load-bearing reasoning appear nowhere in any analyst "
+            f"report — the debate or risk panel originated them, so they are "
+            f"derivations or assertions, not cited evidence: "
+            + ", ".join(verification.debate_originated_numbers)
+        ]})
 
     return {"decision_memo": final, "cost_events": all_cost_events}

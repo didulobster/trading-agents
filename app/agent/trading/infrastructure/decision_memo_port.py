@@ -159,6 +159,13 @@ def _format_failed_memo_markdown(memo: DecisionMemo, verification) -> str:
         banner.append(
             f"> **Unresolved reference(s):** {', '.join(verification.unresolved_references)}"
         )
+    # Not a cause of the failure — these never gate — but a reader debugging
+    # a failed assembly wants to know which figures had no analyst source.
+    if getattr(verification, "debate_originated_numbers", None):
+        banner.append(
+            f"> **No analyst source (debate-originated):** "
+            f"{', '.join(verification.debate_originated_numbers)}"
+        )
     banner += ["", "---", ""]
     return "\n".join(banner) + _format_memo_markdown(memo)
 
