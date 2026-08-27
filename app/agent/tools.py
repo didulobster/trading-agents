@@ -40,6 +40,26 @@ HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
 # unbounded cost per run. Raise it with ASK_EDGAR_MAX_CALLS if a ticker's
 # analysis is being cut short in a way that matters.
 ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
+# Chunks retrieved per ask_edgar call, and ~77% of a call's input cost:
+# each chunk averages ~610 tokens, so 8 -> 5 would save ~1,800 tokens/call,
+# ~$0.05 per fundamentals run at 30 calls.
+#
+# 5 WAS TRIED AND REVERTED (2026-08-27). Run
+# `scripts/probe_retrieval_rank_decay.py` before touching this -- it replays
+# the real questions from a battery. Over 102 of them:
+#
+#     rank 1 mean similarity 0.6799 ... rank 8 mean similarity 0.6451
+#     rank 1 -> rank 8 decay 5.1%       rank 5 -> rank 6 drop 0.5%
+#     ranks 6-8 supply a section_path absent from ranks 1-5: 59% of questions
+#
+# There is no cliff at 5. The tail is nearly as relevant as the head, and on
+# a majority of questions it carries filing sections nothing else retrieved
+# -- which is what a cross-section forensic checklist exists to read. The
+# five cents is real; so is the coverage, and the coverage is worth more.
+#
+# Sent explicitly rather than leaning on the /ask endpoint's own default, so
+# the agent's retrieval width cannot silently track an unrelated API default.
+ASK_EDGAR_K = int(os.getenv("ASK_EDGAR_K", "8"))
 # How many calls out from the cap the agent starts being told to wrap up.
 _ASK_EDGAR_WARN_AT = 5
 _ASK_EDGAR_CALLS = 0
@@ -432,6 +452,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 json={
                     "question": inputs["question"],
                     "tickers": inputs.get("tickers"),
+                    "k": ASK_EDGAR_K,
                 },
             )
             if resp.status_code != 200:
