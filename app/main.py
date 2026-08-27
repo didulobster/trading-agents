@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 from typing import Literal
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+
+from app.domain.token_usage import USAGE_HEADER, TokenUsage
 from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,8 +132,28 @@ class LatestFilingsRequest(BaseModel):
     since_year: int | None = None
 
 # ---- Endpoint ----
+def _report_usage(response: Response, *usages: TokenUsage) -> None:
+    """Tell the caller what this request spent, in a header.
+
+    A header and not a body field: the research agent copies tool-result
+    bodies verbatim into its provenance corpus, and every numeric guard in
+    the trading pipeline does exact containment against that corpus. Four
+    token counts added to each retrieval body would be four new numbers that
+    could then "back" a figure in a memo. The header leaves the
+    agent-visible bytes exactly as they were.
+
+    The caller does the logging, not this server: only it knows the run_id,
+    and only its TradingState feeds `check_run_guards`. See
+    domain/token_usage.py.
+    """
+    total = TokenUsage()
+    for usage in usages:
+        total = total + usage
+    response.headers[USAGE_HEADER] = total.model_dump_json()
+
+
 @app.post("/ask",  response_model=AskResponse)
-async def ask(req: AskRequest) -> AskResponse:
+async def ask(req: AskRequest, response: Response) -> AskResponse:
     if not req.question.strip():
         raise HTTPException(400, "question must not be empty")
 
@@ -152,11 +174,13 @@ async def ask(req: AskRequest) -> AskResponse:
         section_path_contains=req.section_path_contains,
     )
 
-    chunks, _decomposition = await retrieval.retrieve_full(req.question, k=req.k, filters=filters)
+    chunks, decomposition = await retrieval.retrieve_full(req.question, k=req.k, filters=filters)
     result = await answer_question(
         question=req.question, 
         chunks=chunks,
         model=claude_model)
+    # BOTH calls: the decomposer's rewrite is billed just like the answer.
+    _report_usage(response, result.usage, decomposition.usage)
 
     report = verify_answer(
         result.answer,
@@ -184,7 +208,7 @@ async def ask(req: AskRequest) -> AskResponse:
 
 
 @app.post("/extract", response_model=FinancialMetrics)
-async def extract(req: ExtractRequest) -> FinancialMetrics:
+async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     embedder = EmbeddingService()
     chunk_repo = ChunkRepository()
     decomposer = QueryDecomposer()
@@ -201,6 +225,12 @@ async def extract(req: ExtractRequest) -> FinancialMetrics:
     window_end = req.filed_date + timedelta(days=30)
     chunks = await gather_extraction_chunks(retrieval, req.ticker, window_start, window_end)
     extracted = await extractor.extract(chunks, req.ticker, req.fiscal_period, req.filing_type, req.filed_date)
+    # `gather_extraction_chunks` runs retrieval, which may invoke the
+    # decomposer; that path does not surface a DecompositionResult here, so
+    # only the extraction call is reported. Under-reporting by the
+    # decomposer's share is the conservative direction and is noted rather
+    # than silently accepted -- see trading-agent-known-gaps.md.
+    _report_usage(response, extractor.last_usage)
     from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
     row = MetricsRow(
         ticker=req.ticker,

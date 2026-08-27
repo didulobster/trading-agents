@@ -1,5 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
+
+from app.domain.token_usage import TokenUsage
 import os
 import re
 from anthropic import AsyncAnthropic
@@ -88,6 +90,9 @@ class DecompositionResult:
     original_query: str
     was_decomposed: bool
     sub_queries: list[str]   # if not decomposed, contains [original_query]
+    # Zero on the regex-only path, which is the common case: `needs_rewrite`
+    # returning None means no LLM call happened at all.
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 class QueryDecomposer:
     """
@@ -154,12 +159,17 @@ class QueryDecomposer:
             and not line.strip().lower().startswith("original")
         ]
 
+        # The call was billed whether or not it produced usable variants, so
+        # the fallback path below carries the usage too.
+        usage = TokenUsage.from_response(resp.usage)
+
         if not sub_queries:
             logger.warning("Rewriting returned no variants; falling back to original")
             return DecompositionResult(
                 original_query=query,
                 was_decomposed=False,
                 sub_queries=[query],
+                usage=usage,
             )
 
         logger.info("Rewrote into %d sub-queries: %s", len(sub_queries), sub_queries)
@@ -167,4 +177,5 @@ class QueryDecomposer:
             original_query=query,
             was_decomposed=True,
             sub_queries=sub_queries,
+            usage=usage,
         ) 

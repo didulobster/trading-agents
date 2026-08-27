@@ -3,14 +3,20 @@ Tool schemas and dispatch for the research agent.
 """
 
 import ast
+import logging
 import operator
 import re
 import sys
 
 import httpx
+from pydantic import ValidationError
+
+from app.domain.token_usage import USAGE_HEADER, TokenUsage
 
 
 # Base URL of your running FastAPI server. Override when you wire step 2.
+logger = logging.getLogger(__name__)
+
 API_BASE = "http://localhost:8000"
 HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
 
@@ -327,7 +333,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
             )
             if resp.status_code != 200:
                 return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
-            
+            _record_delegated_usage(resp)
+
             data = resp.json()
             citations = "\n".join(
                 f"  [{c['citation']}] sim={c['similarity']:.3f}"
@@ -347,6 +354,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
             resp = await http.post(f"{API_BASE}/extract", json=inputs)
             if resp.status_code != 200:
                 return f"Error from /extract_metrics: {resp.status_code} — {resp.text[:500]}"
+            _record_delegated_usage(resp)
             return resp.text
 
         if name == "check_latest_filings":
@@ -530,12 +538,47 @@ _CALC_RESULTS: list[float] = []
 _REJECTED_CALC_ATTEMPTS: list[dict] = []
 _SESSION_LOG: list[str] = []
 
+_DELEGATED_USAGE = TokenUsage()
+
+
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
+    global _DELEGATED_USAGE
     _RETRIEVED_TEXT.clear()
     _CALC_RESULTS.clear()
     _REJECTED_CALC_ATTEMPTS.clear()
     _SESSION_LOG.clear()
+    _DELEGATED_USAGE = TokenUsage()
+
+
+def _record_delegated_usage(resp) -> None:
+    """Accumulate what the API says a tool call cost.
+
+    The agent's tools are HTTP calls to the FastAPI app, and several of them
+    (`ask_edgar`, `extract_metrics`) run their own Claude calls server-side.
+    Until 2026-08-27 that spend reached nothing: not the cost log, not
+    `TradingState.cost_events`, and so not `check_run_guards` -- measured at
+    ~28% of a real fundamentals run, enough for AVGO to exceed its $1.10 cap
+    unnoticed. The server reports; the caller accounts, because only the
+    caller knows the run_id.
+
+    A missing or malformed header is treated as zero rather than an error:
+    an older server, or one of the endpoints that spends nothing, should not
+    break a run over accounting.
+    """
+    global _DELEGATED_USAGE
+    raw = resp.headers.get(USAGE_HEADER)
+    if not raw:
+        return
+    try:
+        _DELEGATED_USAGE = _DELEGATED_USAGE + TokenUsage.model_validate_json(raw)
+    except ValidationError:
+        logger.warning("ignoring malformed %s header: %r", USAGE_HEADER, raw[:120])
+
+
+def get_delegated_usage() -> TokenUsage:
+    """Total server-side spend since the last `reset_run_provenance()`."""
+    return _DELEGATED_USAGE
 
 def record_log_line(text: str) -> None:
     """Append a line to the run's session log — the full terminal trace
