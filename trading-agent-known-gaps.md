@@ -2086,3 +2086,94 @@ observed defect rate for reasons unrelated to the pipeline changing.
 **Phase 9 is not closeable as specified.** Criteria 5 and 6 both fail on a
 half-sized battery. Finishing FIG/ASML/MSFT would add evidence but cannot
 un-fail them.
+
+## Fundamentals cost audit (2026-08-27) — 28% of real spend is unlogged
+
+Offline audit of why `fundamentals_node` costs $0.19–0.45. No API calls;
+cost-log lines plus the agents' own provenance traces. It found one
+correctness bug and several efficiency gaps, in that order of importance.
+
+### 1. The budget guard is blind to roughly a third of the run
+
+`ask_edgar`, `extract_metrics` and the query decomposer all make **real
+Claude calls**, and none of them is logged. The research agent reaches its
+tools over HTTP against the FastAPI app; `/ask` calls `answer_question(...)`
+and `/extract` calls the metrics extractor, both LLM calls, and
+`QueryDecomposer.__init__` builds its own `AsyncAnthropic` client. **The
+string `log_cost` does not appear anywhere in `app/main.py`.**
+
+So `docs/cost-log.jsonl`, `RunBudget`, `--max-usd` and every cost figure in
+this project see only the agent's own loop, not the work it delegates.
+
+Estimated at Haiku 4.5 rates (k=8 chunks, mean chunk 2,429 chars):
+
+| run | fundamentals logged | unlogged | run logged | **run real** |
+|---|---|---|---|---|
+| NFLX | $0.2549 | $0.2173 | $0.7560 | **$0.9733** |
+| AVGO | $0.3706 | $0.3759 | $1.0372 | **$1.4131** |
+| ACN | $0.2616 | $0.3759 | $0.6945 | **$1.0704** |
+
+**AVGO breached its $1.10 cap by ~28% and nothing noticed**, because the
+overage was entirely in calls the guard cannot see. The 3-run battery cost
+**~$3.46, not the $2.99** previously recorded — 28% invisible.
+
+This has never been caught because every prior battery ran
+`MOCK_FUNDAMENTALS=1`, which returns before any tool call. Phase 8's cost
+numbers are unaffected and remain accurate *for mock runs*; they were never
+measurements of this path.
+
+### 2. Where the logged $0.25 actually goes
+
+NFLX fundamentals, reconciled to the cent against the cost-log line:
+
+| component | cost | share |
+|---|---|---|
+| cache_read (988,257 tok) | $0.0988 | 38.8% |
+| output (17,122 tok) | $0.0856 | 33.6% |
+| cache_write (55,620 tok) | $0.0695 | 27.3% |
+| input (935 tok) | $0.0009 | 0.4% |
+
+**Caching is working correctly** — this is not a caching bug. The cost is
+inherent to a 45-turn loop re-reading a context that grows 9,741 → 33,280
+tokens. Cache reads are already at the 10x discount; without caching this
+line would be ~$0.44 on its own.
+
+### 3. Two of three runs exhaust the turn cap and write the memo under duress
+
+NFLX and AVGO both ran **45/45 turns** and ended on
+`[MAX_TURNS reached — forcing memo from gathered data]`. ACN finished in 36.
+So the expensive runs pay the maximum *and* deliver a truncated checklist —
+cost and quality fail together, which matches the earlier note that a cold
+MSFT run finished `INSUFFICIENT_EVIDENCE`.
+
+### 4. Efficiency gaps, in order of size
+
+- **`ask_edgar` volume is the swing factor.** NFLX 22 calls, AVGO and ACN
+  **40** each. At ~$0.0077 unlogged per call plus a full context
+  round-trip, this alone is why AVGO is the most expensive run in the
+  battery. Nothing caps or dedupes these.
+- **The system prompt is ~7,900 tokens**, re-read every turn: 45 × 9,741 ≈
+  438K cache-read tokens ≈ **$0.044**, which is 44% of the cache-read bill
+  and 17% of the whole logged fundamentals cost, for static text.
+- **Redundant `calculate` calls.** 21–23 per run, each costing a full
+  context round-trip (~22K cache-read tokens, ~$0.0022) to do arithmetic.
+  NFLX ran `10149273 - 688220` **three times** and
+  `(9461053 - 6921826) / 6921826 * 100` twice. The provenance requirement
+  justifies the tool existing; it does not justify running the identical
+  expression three times.
+- **`check_latest_filings` returns all 44 filings**, including 38 8-Ks the
+  checklist never uses (~1,700 tokens). That sits in context for the
+  remaining ~43 turns ≈ 73K cache-read tokens ≈ $0.007 of pure carry.
+
+### Recommended order
+
+1. **Log the server-side calls.** This is a correctness bug in the budget
+   guard, not an optimisation — a run can currently exceed its cap by any
+   margin without tripping it. Everything else is secondary.
+2. Cap or dedupe `ask_edgar`; 40 calls against a 12-item checklist is the
+   single biggest lever.
+3. Memoize `calculate` on the normalized expression.
+4. Filter `check_latest_filings` to the form types the caller asked for.
+5. Revisit `LOOP_MAX_TURNS=45` given 2 of 3 runs exhaust it — raising it
+   costs more, lowering it truncates more; the right fix is probably fewer
+   `ask_edgar` round-trips rather than either.
