@@ -1883,3 +1883,116 @@ audit (criteria 5–6), which is the actual deliverable. Also note `.env`
 carries `RISK_CRASH_AT_TURN=45` — inert at `RISK_MAX_ROUNDS=3` (max turn
 index 8), but it is fault-injection config sitting in the battery's
 environment and should be unset before the runs rather than reasoned about.
+
+## Phase 9 battery: halted 3/6, and the audit found a Class A (2026-08-27)
+
+Battery `p9-20260826`, `as_of=2026-08-26`, `--max-usd 1.10`, git `9e308cb`.
+Three runs completed (NFLX, AVGO, ACN) before the Anthropic account ran out
+of credits mid-FIG. True spend **$2.9874**. Full detail in
+`docs/validation/p9-20260826/findings.md` (gitignored); the load-bearing
+findings are here.
+
+Results: NFLX `hold` conf 0.89 ($0.7560), AVGO `unresolved` conf 0.89
+($1.0372), ACN `hold` conf 0.93 ($0.6945). FIG died at the synthesizer
+having already spent $0.4998; ASML and MSFT died on their first
+fundamentals call at $0.
+
+**The $0.75 cap finding is confirmed live.** Under the old default, NFLX
+($0.7560) and AVGO ($1.0372) would both have aborted; only ACN ($0.6945)
+would have passed. Two of three real runs breach a cap that five
+mock-fundamentals runs had certified as comfortable.
+
+**A crashed run's cost is invisible to the manifest.** FIG spent $0.4998
+and reported `total_usd=None`, because `log_run_summary` — which is where
+PR #50's disk reconciliation lives — never executes when the process dies.
+The reconciliation covers crash-*resume*, not crash-*exit*. The battery
+manifest under-reported true spend by exactly FIG's $0.4998.
+
+### Class A: a fabricated figure carried to the verdict (AVGO)
+
+AVGO's memo names its decisive factor as "Broadcom's announced **$70–100B
+AI financing debt**" — "Leverage breach [RF58B7] is the primary trigger."
+
+- **`70` appears in no analyst report**: 0 hits in the news digest, 0 in the
+  fundamentals report. It was invented in debate turn 1, adopted by the risk
+  panel, then by the memo.
+- **`$100B` is real but is AI *revenue*, not debt** — source headline:
+  "Broadcom: $100 Billion In AI Revenue Is A Lot To Ask… AI revenue could
+  reach $100B by 2027 as company explores AI financing options."
+- The memo further asserts the financing is "funded by new debt issuance,
+  **not** off-balance-sheet securitization." The only source says the
+  opposite — "Broadcom builds massive **off-balance-sheet** AI financing
+  machine" — and `securitiz*` appears in **no** source document at all.
+
+### Why the verifier passed it — Decision 2's argument, now demonstrated
+
+`verify_decision_memo` returned clean on this memo. `_numeric_corpus`
+includes debate claims and ledger entries, so a number fabricated **in the
+debate** is already "somewhere upstream" by the time the memo cites it —
+which is the whole of what exact containment tests. **A figure invented in
+the debate is self-certifying by the time it reaches the memo.** Phase 5's
+`21.9%` argued this from a derived figure; this is the same hole with an
+outright invention going through it, on the sentence that decides the
+verdict.
+
+**And the guard's warnings are anti-correlated with the truth.** AVGO's
+`data_gaps` flagged 16 mentions of 8 figures as "may be fabricated":
+`63.9` ($63,887M revenue), `35.8` ($35,819M), `2.2` (6.1% × $35,819M SBC),
+`5.7` ($5,747M SBC), `78%` (63,887/35,819−1) — every one correct, mostly
+millions→billions conversions exact containment cannot see. NFLX flagged
+`10.1` ($10,149M OCF, correct); ACN flagged `69.7` ($69,673M revenue,
+correct). **Three memos: 8+ false positives, 0 true positives, and the one
+real fabrication unflagged.** A guard whose warnings are reliably wrong is
+worse than no guard, because it trains the reader to discount the category.
+
+### C/D tally: ceiling exceeded at three memos
+
+| memo | A | B | C | D | C+D |
+|---|---|---|---|---|---|
+| ACN | 0 | 0 | 1 | 1 | 2 |
+| NFLX | 0 | 0 | 0 | 1 | 1 |
+| AVGO | 1 | 0 | 0 | 2 | 2 |
+
+Ceiling is ≤1/memo and ≤3/battery. ACN and AVGO breach per-memo; the
+battery breaches at **5 over three memos**, where the ceiling was set for
+six.
+
+The two most material:
+
+- **NFLX, wrong unit.** "leverage fell **41 basis points** gross and **34
+  basis points** net" against a corpus that says "a **0.41-turn**
+  improvement" (1.50x→1.09x) and "a **0.34-turn** improvement"
+  (0.75x→0.41x). Turns are not basis points: as written the reader sees
+  0.41%, the real move is a 27% reduction in gross leverage. Two orders of
+  magnitude, on the memo's lead positive claim — and the *same memo* states
+  it correctly in `risk_debate_summary` ("1.09x gross and 0.41x net").
+- **ACN, trigger already satisfied.** Watch item: "Stock price closes below
+  200-day moving average (201.73) for five consecutive trading days,
+  confirming intermediate downtrend entry." Last close is **181.38** —
+  already far below. The memo's own `technical_signal` says so.
+
+Also: unverified quote spans scale badly with memo complexity — ACN 4
+claims, NFLX 6, **AVGO 24**. The pipeline flags these itself and they are
+not counted above, but AVGO's 24 is most of that debate's citations.
+
+### §8 triage: both stop conditions fire, and rule 2 governs
+
+A Class A defect says "fix, re-run all six, re-audit". An exceeded C/D
+ceiling says "**stop the phase**; the finding is that the gap's rate is
+higher than Phase 7 evidence supported, and the right next move is
+characterizing the gap, not patching six memos." The second governs.
+
+Phase 7 saw **one** confirmed C-class instance across five memos. This saw
+**five C/D across three**, plus a Class A. The most likely explanation, and
+it is an inference: Phase 7 averaged $0.448/run, which is not consistent
+with paying for real fundamentals (~$0.85/run measured here). Its cost
+lines predate `run_id` so it cannot be confirmed per-run, but only one
+`trading-fundamentals` call is on record for 2026-08-26 against a
+five-ticker battery, and one of those five (NFLX) is independently known to
+have run `--only technical`. Phase 7 very likely audited memos carrying far
+less live numeric content than these three — which would depress its
+observed defect rate for reasons unrelated to the pipeline changing.
+
+**Phase 9 is not closeable as specified.** Criteria 5 and 6 both fail on a
+half-sized battery. Finishing FIG/ASML/MSFT would add evidence but cannot
+un-fail them.
