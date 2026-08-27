@@ -2267,3 +2267,55 @@ MSFT run finished `INSUFFICIENT_EVIDENCE`.
 5. Revisit `LOOP_MAX_TURNS=45` given 2 of 3 runs exhaust it — raising it
    costs more, lowering it truncates more; the right fix is probably fewer
    `ask_edgar` round-trips rather than either.
+
+
+## Delegated cost logging: non-zero path verified live (2026-08-27)
+
+The fix in PR #56 shipped with a stated gap — the header round-trip was
+confirmed live only on the ZERO path (an empty-retrieval question, which
+returns before any LLM call), because the account ran out of credits and
+every real `/ask` returned 400. `TokenUsage.from_response` was unit-tested
+instead. That gap is now closed.
+
+One real `ask_edgar` call, against merged `main`:
+
+```
+x-llm-usage: {"input_tokens":6317,"output_tokens":50,
+              "cache_write_tokens":0,"cache_read_tokens":0}
+```
+
+and the client accumulator, driven through the real `_dispatch`, returned
+exactly those numbers. The `ask_edgar` counter incremented to 1 of 30, and
+the tool output the agent sees carries no token counts — confirming the
+header design does what it was chosen for.
+
+Cost of the call: **$0.00657** (6,317 in x $1/MTok + 50 out x $5/MTok).
+
+**Two calls were made, not the one that was approved.** A `curl` to inspect
+the raw header, then the Python path to exercise the client. The second
+would have proven both; the first was redundant in hindsight. Total
+**$0.0131**. Recorded because the point of the approval rule is that
+overspend is visible, not because the amount matters.
+
+### What this does and does not verify
+
+Verified live: the server emits real usage; the client parses and
+accumulates it; the call counter increments; the agent-visible body is
+unchanged.
+
+**Not** verified live: the rest of the chain — `fundamentals_port` calling
+`log_cost`, the `trading-fundamentals-tools` line reaching
+`docs/cost-log.jsonl`, the `CostEvent` reaching `TradingState.cost_events`,
+and `check_run_guards` seeing it. That path is unit-tested and its
+components are long-proven, but end-to-end confirmation needs a full
+fundamentals run (~$0.47). Stated rather than implied.
+
+### One correction to the audit's arithmetic
+
+The audit estimated ~5,158 input and ~500 output per `ask_edgar` call. The
+measured call was 6,317 in (+22%) and 50 out (-90%), netting **$0.0066
+against the estimated $0.0077**. Do not over-update from this: it was the
+simplest possible factual question ("what was revenue"), and output length
+is what varies most with question complexity. The audit's ~28%-unlogged
+conclusion is unaffected in direction, and its per-call figure should still
+be read as an estimate.
