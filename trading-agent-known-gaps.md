@@ -2029,18 +2029,108 @@ on a rounded figure is coarse by construction. Documented in
 `_is_rounding_of`; precision is what `debate_originated_numbers` adds, by
 asking a different question rather than a looser one.
 
+### ACN and NFLX re-audited the same way (2026-08-27)
+
+Same method: corpora materialized from the checkpoint, positive control on
+every absence claim, no API calls. Fixed verifier on both:
+`unbacked=[]`, `debate_originated=[]`, passed.
+
+**Every figure in both memos traces to the grounded corpus.** NFLX: 37% FCF
+growth ($9.5B, corpus 36.68%), 280bps margin to 29.5%, 18%→8% accrual gap,
+57% capex growth, $82.7B WBD, 1.09x/0.41x leverage, 28% operating income,
+$832M gap, 16% revenue growth. ACN: $10.9B FCF ($10,874M), 7.4% revenue,
+$6.3B net cash, 13.3% RPO growth to $34B, $1.5B M&A, $11.5B OCF ($11,474M),
+the full segment margin table (Americas 15%/16%/−100bp/+8.0%, EMEA
+13%/12%/+100bp/+8.1%, Asia Pacific 18%/18%/flat), RSI 60.62, volume 0.76x,
+200-day 201.73. No fabrications, no arithmetic errors.
+
+**Both prior findings confirmed, and both are stronger than the first pass
+recorded.**
+
+*NFLX, Class D — turns reported as basis points.* The grounded corpus uses
+"basis points" in exactly three places and every one is a genuine
+percentage-point measure: operating margin (280bps to 29.5%) and SBC (31bps,
+12bps, the 300bps threshold). Leverage is expressed exclusively in turns:
+"Leverage fell from 1.50x to 1.09x, **a 0.41-turn improvement**" and "Net
+leverage fell from 0.75x to 0.41x, **a 0.34-turn improvement**". The memo
+writes "leverage fell 41 basis points gross and 34 basis points net". The
+source document demonstrably knows the difference — it uses bps correctly
+for margins on the same page — which makes this a translation error at the
+memo, not an inherited one. A 0.41-turn move on a 1.50x base is a **27%
+reduction**; as "41 basis points" it reads as 0.41 percentage points.
+
+*ACN, Class C — a watch-item trigger that is already satisfied.* The
+grounded technical block states it in the plainest available terms:
+`- last close (181.38) is BELOW the 200-day average (201.73)`. The memo's
+watch item is "Stock price closes below 200-day moving average (201.73) for
+five consecutive trading days, **confirming intermediate downtrend entry**".
+The condition it proposes to watch for is the condition the evidence
+records as already true.
+
+*ACN, Class D — upgraded from "borderline".* The first pass called this
+marginal because only the FY2024 net figure was visible. The grounded corpus
+carries both FY2025 figures adjacently: `**Gross leverage: 0.50x**` and
+`**Net leverage: (0.62)x** (net debt position inverted; company has net
+cash)`. The memo writes "net cash of $6.3B and leverage of 0.50x" — pairing
+the word "net" with the cash figure and the *gross* ratio unlabelled beside
+it, when the actual net leverage is **negative**. This is known gap #1's
+exact shape, not an approximation of it.
+
+**Also recorded, not counted: ACN quotes the 10-K with a silent elision.**
+Source: "…forfeiture of profits, **suspension of payments, fines, and**
+suspension or debarment **from federal government contracting**." Memo:
+"…forfeiture of profits, suspension or debarment." Inside quotation marks,
+no ellipsis, which `RiskFactor.evidence_quote`'s own schema forbids
+("never spliced or elided"). Left uncounted because stretching Class D from
+number labels to quotation mechanics mid-audit is what §6.3 exists to
+prevent — but it is a real quotation-integrity defect.
+
+### The defect signature is units and ratio labels, not fabrication
+
+The count is the weaker half of this result. **Three of the four defects are
+the same failure mode**, one per memo, with no exceptions:
+
+| memo | the error | what it should have said |
+|---|---|---|
+| NFLX | "41 basis points" / "34 basis points" | 0.41 turns / 0.34 turns |
+| ACN | "leverage of 0.50x" beside "net cash" | *gross* leverage 0.50x; net is (0.62)x |
+| AVGO | "$2.80x", "$2.61x" | 2.80x, 2.61x — no currency on a ratio |
+
+Every memo in the battery mishandled the unit or the qualifier of a ratio,
+and none of them fabricated, miscomputed, or misdated anything. That is a
+far more actionable finding than "4 defects over 3 memos": it says the gap
+is not evidence-handling but **notation** — and notation is fixable with a
+targeted guard (ratios carry units; gross/net must be labelled where the
+source distinguishes them) rather than with more adversarial review.
+
+It also confirms known gap #1 is systemic rather than occasional. Phase 7
+inferred it from one MSFT instance and treated it as a suspected pattern;
+this battery finds it in **3 of 3** memos.
+
+The fourth defect (ACN's already-satisfied trigger) is a different mode and
+a single instance.
+
 ### C/D tally: ceiling exceeded at three memos
 
 | memo | A | B | C | D | C+D |
 |---|---|---|---|---|---|
-| ACN | 0 | 0 | 1 | 1 | 2 |
-| NFLX | 0 | 0 | 0 | 1 | 1 |
-| AVGO (re-audited) | 0 | 0 | 0 | 1 | 1 |
+All three re-audited under the corrected method:
 
-Battery C/D total: **4**, against a ceiling of 3 set for six memos. ACN
-still breaches the per-memo ≤1. Criterion 6 still fails, but by less than
-the first pass claimed, and ACN and NFLX have not been re-audited under the
-corrected method — only AVGO has.
+| memo | A | B | C | D | C+D |
+|---|---|---|---|---|---|
+| ACN | 0 | 0 | 1 | 1 | **2** |
+| NFLX | 0 | 0 | 0 | 1 | **1** |
+| AVGO | 0 | 0 | 0 | 1 | **1** |
+| **total** | **0** | **0** | **1** | **3** | **4** |
+
+**Criterion 5 (zero Class A/B/E): PASSES.** No fabricated figure, no
+relational-arithmetic error, no lookahead, in any of the three.
+
+**Criterion 6: FAILS.** ACN breaches the per-memo ≤1. The battery is at 4
+against a ceiling of 3 that was set for six memos — at this rate a full
+six would land near 8. The failure is robust to the correction, but its
+character has changed completely: not a fabrication problem, a notation
+one.
 
 Ceiling is ≤1/memo and ≤3/battery. ACN and AVGO breach per-memo; the
 battery breaches at **5 over three memos**, where the ceiling was set for
