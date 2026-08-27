@@ -1291,3 +1291,47 @@ async def test_prefix_byte_stable_across_consecutive_same_side_turns():
         "turn 2 of the SAME (unchanged) analyst state — this is a cache "
         "miss on every turn, not just a cost regression"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scale-aware clearing (2026-08-27). Measured on three live Phase 9 memos:
+# every "may be fabricated" figure the guard reported was correct, and every
+# one was a millions-to-billions restatement it could not see. Seven false
+# positives, zero true positives -- a guard whose warnings are reliably
+# wrong teaches the reader to skip the category.
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from app.agent.trading.infrastructure.debate_port import _is_rounding_of
+
+
+@pytest.mark.parametrize("raw, pack_value", [
+    ("63.9", 63887.0),    # AVGO revenue, $63,887M -> "$63.9B"
+    ("35.8", 35819.0),    # AVGO FY2023 revenue
+    ("5.7", 5747.0),      # AVGO FY2024 SBC
+    ("10.1", 10149.0),    # NFLX operating cash flow
+    ("69.7", 69673.0),    # ACN revenue
+])
+def test_a_millions_to_billions_restatement_clears(raw, pack_value):
+    assert _is_rounding_of(raw, [pack_value])
+
+
+def test_same_scale_rounding_still_clears():
+    assert _is_rounding_of("41.2", [41.2033])
+
+
+@pytest.mark.parametrize("raw", ["70", "100", "64"])
+def test_a_bare_integer_never_clears_by_scale(raw):
+    """The safety argument for scale clearing. Dividing the pack by 1000
+    widens what the guard will clear against, and for an integer that window
+    is 1000 values wide -- "70" would clear against anything in
+    [69500, 70500). A real unit conversion keeps its significant digits
+    ("$63.9B", never "$64B"), because keeping them is the point of
+    converting, so requiring a decimal admits the restatements and admits
+    none of the round inventions."""
+    assert not _is_rounding_of(raw, [69673.0, 63887.0, 100400.0])
+
+
+def test_a_near_miss_at_the_same_precision_still_fails():
+    assert not _is_rounding_of("63.8", [63887.0])

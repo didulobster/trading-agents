@@ -1721,3 +1721,368 @@ already flagged as verdict-unstable, which this battery did not use.
 closed (5/5). 4 closed with (a) inconclusive due to ticker choice, (b)/(c)
 clean. 7 closed with a real finding and a shipped fix (see the entry
 above) rather than a clean pass on the first attempt.
+
+## Phase 9 gates: closed, battery held (2026-08-26)
+
+Gates A–D done, harness built and tested, **no live battery run** — the
+battery was explicitly held pending a spend decision. Everything below is
+pre-battery evidence.
+
+**Gate A failed on NFLX, as predicted, and is now fixed.**
+`scripts/gate_a_corpus_probe.py` probes `RetrievalService` directly rather
+than the agent's `ask_edgar` tool, so a zero is unambiguously an empty
+corpus and not a downed FastAPI app or a model declining to answer.
+
+| ticker | probe hits (k=5, ×4 probes) | filings | chunks | latest filed |
+|---|---|---|---|---|
+| AVGO | 5,5,5,5 | 6 | 737 | 2026-06-09 |
+| ACN | 5,5,5,5 | 6 | 640 | 2026-06-18 |
+| NFLX | **0,0,0,0** → 5,5,5,5 after ingest | 0 → 6 | 0 → 514 | — → 2026-07-17 |
+| FIG | 5,5,5,5 | 4 | 785 | 2026-08-05 |
+| ASML | 5,5,5,5 | 6 | 1591 | 2026-02-25 |
+| MSFT | 5,5,5,5 | 8 | 684 | 2026-07-29 |
+
+NFLX had never exercised the fundamentals path. Its only prior run (vault
+`NFLX/20260826/2026-0826-165512`, the Phase 7 battery's fifth ticker) was
+`--only technical`, so the empty corpus had never been reachable. Ingested
+3× 10-K + 3× 10-Q to match the shape the other five carry.
+
+**FIG's expected THIN reading does not appear at the retrieval layer.** 4
+filings against AVGO's 6, but 5/5 hits on every probe. A short filing
+history shows up in what the corpus *holds*, not in whether a query finds
+something. So the open question — "a thin corpus should surface as lower
+confidence and more `data_gaps`" — has to be checked against FIG's memo,
+not against this probe. Carried into the battery as an audit item.
+
+### New finding: the citation pattern went blind on ~85% of risk factors
+
+`_REF_PATTERN` in `synthesis_port.py` was `RF\d+`, written when `factor_id`
+was `f"RF{i:02d}"`. The 2026-08-26 code review replaced that with
+`_content_id` — `RF` plus a 4-char SHA-1 prefix in **uppercase hex** — and
+the pattern was never moved with it. Only the ~15% of the id space that
+happens to be all-digits ever matched.
+
+Two consumers of `extract_refs` went blind:
+
+- `_render_evidence` drops the citation, so a memo prints `[RFC50B]` in its
+  Reasoning with no matching line in its Evidence section.
+- `resolve_refs` never sees the id, so a hallucinated factor id containing
+  any of A–F passes `verify_decision_memo`'s unresolved-reference check.
+  **That is a hole in the Phase 7 post-hoc verifier itself**, and it means
+  Phase 7's criterion 4 was weaker than its record implies.
+
+Confirmed on a real memo, not in review: the NFLX run above cites RF487E,
+RFC50B, RF3755, RF6ECA and RF901B, and its Evidence section renders exactly
+one — RF3755, the only all-digit id of the five.
+
+The whole suite missed it because every fixture in `test_synthesis_port`,
+`test_risk_ledger` and `test_risk_port` still uses `RF00`, the pre-hash
+shape: the tests only ever fed the pattern the part of the id space that
+worked. Fixed with three hex-id regression tests.
+
+### Two Phase 9 criteria restated, because the plan's versions are unsound here
+
+**Criterion 4 ("re-run `verify_decision_memo` over the six memos as a
+batch") cannot be done, and doing it would be worse than not.** The
+function must be given the SAME trial the memo came from — under
+majority-of-N sampling each trial runs its own risk panel with its own
+content-hashed factor ids, and the winning memo is frequently not from the
+trial whose panel survives in the checkpoint. Verifying against a different
+trial's ledger reports real citations as unresolved: a false failure, not a
+check. What the pipeline already does is stronger — `synthesizer_node`
+calls the verifier on the final memo against its own trial and *raises*,
+saving a `*-decision_failed.md`. So a `*-decision.md` on disk is proof of a
+pass, and the criterion is checked by the absence of the failed artifact.
+
+**Criterion 7 ("no evidence item has a source date after `as_of_date`") has
+no per-item date to check.** `DecisionMemo.evidence` is `list[str]`,
+rendered by `_render_evidence` from resolved references; neither
+`DebateClaim` nor `RiskLedgerEntry` carries a source date. The gate asserts
+what is checkable — one shared `data_as_of_date` equal to the battery's —
+and reports later-year prose mentions as audit *leads*, not as a verdict.
+
+### Cost basis: the plan's $0.45/run is contradicted by the cost log
+
+The Phase 9 plan derives $0.45/run from Phase 7's $2.24 ÷ 5. The Phase 8
+battery measured five full runs directly: $0.5210–$0.6648, **mean
+$0.5712**, 370–422 s each. The plan's 9-run programme is therefore ~$5.15,
+not $4.04.
+
+Criterion 9's `$4.00` battery ceiling is **kept as written** by explicit
+decision. Recorded here so a breach is interpretable rather than
+mysterious: at the measured mean the 6-run battery lands at ~$3.43, but at
+Phase 8's worst observed run ($0.6648, the 202-article AVGO run) it reaches
+$3.99 — on the line. If criterion 9 fails, the finding is that per-run cost
+drifted above what Phase 7 implied, **not** that any individual run
+breached the $0.75 hard cap the code enforces. News volume is the swing
+factor (Phase 8 entry above), so a high-article-count ticker is where a
+breach would come from.
+
+### The $0.75 hard cap would abort every run of this battery
+
+Following the cost basis above one step further turns it from a planning
+note into a blocker. **The five Phase 8 runs that set the $0.5712 mean never
+ran fundamentals.** They used `MOCK_FUNDAMENTALS=1`, which loads
+`app/agent/trading/.fundamentals_cache/<TICKER>.json` and returns before
+any LLM call. Verified directly: not one `"mode": "trading-fundamentals"`
+line appears in the cost log under any of the five run ids
+(`phase8-battery-{msft,v,asml}-1`, `phase8-exit-criteria-run-{1,acn-1}`).
+Their per-stage breakdown is technical + news + debate + risk + synthesis
+and nothing else.
+
+Real fundamentals cost, measured over the 36 logged calls (recent ones,
+warm corpus, current code): **$0.19–$0.45, ~$0.28 typical**, peak $0.4504.
+
+So a Phase 9 run — which *must* exercise real fundamentals, or it is not
+validating the memo a reader would act on — costs roughly:
+
+    $0.5712  (measured, fundamentals-free)
+  + $0.28    (fundamentals, typical)
+  = ~$0.85/run,  range ~$0.73 to ~$1.02
+
+**That is above the $0.75 hard per-run cap.** At the default `--max-usd`,
+most or all six runs abort with `budget_exceeded` before a memo exists, and
+criterion 2 fails 0/6 — not because anything is broken, but because the cap
+was calibrated against runs that skipped the single most expensive node.
+Criterion 9's $4.00 battery ceiling implies ~$5.1 for six real runs on the
+same arithmetic.
+
+Two consequences worth stating plainly:
+
+1. **Phase 8's criterion 1 ("per-run cost within target across 5 runs") was
+   closed on runs that never ran fundamentals.** The $0.60 target and $0.75
+   cap have therefore never been measured against a full-pipeline run. That
+   does not invalidate what Phase 8 measured — the news-volume finding
+   holds, and the guards themselves were breach-tested for real — but the
+   *numbers* those thresholds were set against are not full-run numbers.
+2. **A `MOCK_FUNDAMENTALS=1` battery would not be homogeneous**, which is
+   the one thing a cross-ticker comparison needs. There is no
+   `NFLX.json` cache file; the other five exist. NFLX would fall through to
+   the real agent (~$0.28+, and on a corpus ingested only today it is the
+   run most likely to hit `LOOP_MAX_TURNS=45`) while the other five load
+   from disk at $0. Five cached memos and one live one is not a battery.
+
+Nothing here is decided. Recorded so the decision is made before the spend
+rather than discovered at run two: raise `--max-usd` to something a real
+run fits in (~$1.10 leaves headroom over the $1.02 worst case), and
+re-baseline criterion 9, or accept a mock-fundamentals battery and drop the
+claim that it validates the fundamentals path.
+
+### Gates B–D
+
+- **B** — `run_p9_battery.py` records git SHA + dirty flag, all seven
+  model-selecting env vars, and pinned package versions into the manifest
+  automatically. By env var, not by a "Haiku nodes / Sonnet nodes" tiering,
+  which the code does not know and so cannot be checked on a rerun.
+- **C** — one `as_of_date`, passed once at the CLI boundary.
+- **D** — `thread_id LIKE 'trading-%-p9-%'` returns 0 rows. Clean.
+
+**Not yet done:** the battery itself (§3), the automated gate against real
+output (§4), the six worksheets, the §7 stability re-runs, and the manual
+audit (criteria 5–6), which is the actual deliverable. Also note `.env`
+carries `RISK_CRASH_AT_TURN=45` — inert at `RISK_MAX_ROUNDS=3` (max turn
+index 8), but it is fault-injection config sitting in the battery's
+environment and should be unset before the runs rather than reasoned about.
+
+## Phase 9 battery: halted 3/6, and the audit found a Class A (2026-08-27)
+
+Battery `p9-20260826`, `as_of=2026-08-26`, `--max-usd 1.10`, git `9e308cb`.
+Three runs completed (NFLX, AVGO, ACN) before the Anthropic account ran out
+of credits mid-FIG. True spend **$2.9874**. Full detail in
+`docs/validation/p9-20260826/findings.md` (gitignored); the load-bearing
+findings are here.
+
+Results: NFLX `hold` conf 0.89 ($0.7560), AVGO `unresolved` conf 0.89
+($1.0372), ACN `hold` conf 0.93 ($0.6945). FIG died at the synthesizer
+having already spent $0.4998; ASML and MSFT died on their first
+fundamentals call at $0.
+
+**The $0.75 cap finding is confirmed live.** Under the old default, NFLX
+($0.7560) and AVGO ($1.0372) would both have aborted; only ACN ($0.6945)
+would have passed. Two of three real runs breach a cap that five
+mock-fundamentals runs had certified as comfortable.
+
+**A crashed run's cost is invisible to the manifest.** FIG spent $0.4998
+and reported `total_usd=None`, because `log_run_summary` — which is where
+PR #50's disk reconciliation lives — never executes when the process dies.
+The reconciliation covers crash-*resume*, not crash-*exit*. The battery
+manifest under-reported true spend by exactly FIG's $0.4998.
+
+### CORRECTED: there was no Class A. The auditor's method was the defect.
+
+**This section previously reported a Class A fabricated figure on AVGO and
+that report was wrong.** Correcting it in place rather than leaving it to be
+read as current: AVGO's "$70–100B AI financing debt" is **correctly
+sourced**. The news digest carries six items saying so, e.g.:
+
+- "Broadcom debt deal expected to reach upwards of **$70 billion**, sources say"
+- "Broadcom in talks to raise **$70-80 billion in debt** for chip financing deal"
+- "Broadcom seeks up to **$100 billion in debt financing** for AI chip deals"
+- "Broadcom pursuing up to **$100 billion debt deal** to fund Anthropic"
+
+The memo's phrase is a faithful summary of those. The related claim that it
+"contradicts its own source" on off-balance-sheet financing was also wrong:
+the digest carries **both** framings ("off-balance-sheet financing machine"
+*and* four separate "debt" headlines), so the memo picked the
+better-supported of two readings genuinely present in its evidence.
+
+**Cause of the false finding, because it is the reusable lesson.** The
+search used to establish absence was `grep -oE ".{50}\b70\b.{50}"`. That
+requires fifty characters of trailing context *on the same line*; the
+headline line ended sooner, so grep matched nothing, and "no output" was
+read as "not present". A confident three-part finding was then built on
+that silence. The same trailing-context bug sat in the greps used to check
+`$100 billion` and `off-balance-sheet`, which is why all three legs failed
+together and none contradicted the others.
+
+Two consequences worth keeping:
+
+1. **Criterion 5 (zero Class A/B/E) PASSES** on the three memos audited.
+2. **An absence claim needs a positive control.** "grep found nothing" is
+   evidence about the grep until a search known to match something has been
+   run against the same file. The corpus-tiering verifier below, run over
+   the same memo, reported `78%` and `5.4` as debate-originated and did NOT
+   report `70` or `100` — the tool had it right while the auditor did not.
+
+### The containment gap is real, but this battery did not demonstrate it
+
+Decision 2's structural argument stands on its own and is unaffected by the
+above: `_numeric_corpus` merged the analyst reports with debate claims and
+ledger entries, so a figure invented in the debate is "somewhere upstream"
+by the time the memo cites it, which is the whole of what exact containment
+tests. Phase 5's `21.9%` remains the evidence for it. **This battery did
+not add a live instance** — the one candidate was the auditor's error.
+
+What this battery *did* measure, and it is a real defect, is the guard's
+**precision**. Across three memos every "may be fabricated" figure it
+reported was correct, and every one was a millions-to-billions restatement
+it structurally could not see:
+
+| flagged | actually | memo |
+|---|---|---|
+| 63.9 | $63,887M revenue | AVGO |
+| 35.8 | $35,819M FY2023 revenue | AVGO |
+| 2.2 | 6.1% × $35,819M SBC | AVGO |
+| 5.7 | $5,747M FY2024 SBC | AVGO |
+| 78% | 63,887/35,819 − 1 | AVGO |
+| 10.1 | $10,149M operating cash flow | NFLX |
+| 69.7 | $69,673M revenue | ACN |
+
+Seven false positives, zero true positives. A guard whose warnings are
+reliably wrong is worse than no guard: it teaches the reader to skip the
+category, and a true positive would then arrive in a list nobody reads.
+Fixed — see the fix section at the end of this file.
+
+### AVGO re-audited against the fixed verifier (2026-08-27)
+
+Re-run with the false positives gone and a positive control on every
+absence claim. Method changed: the grounded and derived corpora were
+materialized from the checkpoint to disk and searched directly, rather than
+searching the vault's rendered Markdown — the rendering is not what the
+verifier sees, and the gap between the two is where the false Class A came
+from.
+
+Verifier output on the memo, no API calls: `unbacked=[]`,
+`debate_originated=['78%', '5.4']`, passed.
+
+Every figure in the memo's load-bearing prose, checked:
+
+| figure | status |
+|---|---|
+| $70–100B AI financing debt | **grounded** — six news items, see the correction above |
+| $25.5B / $13.5B operating income, $12B increase | grounded |
+| $0.8B amortization decline ($17.3B → $16.5B) | grounded |
+| $7.6B SBC | grounded ($7,570M) |
+| $17.2B FCF, $63.9B revenue | grounded |
+| 2.80x gross, 2.61x net leverage | grounded |
+| $2.2B pre-VMware SBC | derived, correct (6.1% × $35,819M = $2,185M) |
+| $5.4B SBC increase | derived, correct ($7,570M − $2,185M) — flagged debate-originated |
+| 78% revenue increase | derived, correct (63,887/35,819 − 1) — flagged debate-originated |
+| "above 4.0x" post-financing | forward projection, not a citation; arithmetic supports it and is conservative (2.80x × $25.5B ≈ $71.4B debt; +$70B ≈ 5.5x) |
+| $5–6B earnings erosion | rounded band on the $5.4B SBC increase |
+
+**Revised AVGO tally: A=0, B=0, C=0, D=1.** The one remaining defect is
+minor: `risk_debate_summary` writes "**$**2.80x" and "**$**2.61x" —
+currency signs on leverage multiples. Correct numbers, wrong unit notation,
+which is Class D by the letter of the taxonomy.
+
+**Two findings from the first pass are withdrawn:**
+
+1. The Class A, already corrected above.
+2. The period-label D on "a 78% revenue increase". Downgraded to an
+   observation. `reasoning` omits the period, and FY2025 revenue growth was
+   23.9% rather than 78% — but the memo *does* disclose it twice elsewhere:
+   `bear_case` says "a 78% revenue increase **from FY2023 to FY2025**" and
+   `research_thesis` says "on a 78% larger revenue base". §6.2 asks whether
+   the memo says which period; it does. A reader of `reasoning` alone could
+   still be misled, so it is recorded — but "wrong label" is not what this
+   is, and counting it was the auditor grading to a conclusion.
+
+**Residual in the fix itself, recorded because it was found while
+re-auditing.** AVGO's `$2.2B` cleared containment against an unrelated
+`2,171` elsewhere in the corpus (2171/1000 → 2.2 at one decimal). The
+figure is legitimate and the clearance was luck. A one-decimal figure
+clears against a 100-unit window at the 1000-scale, and requiring an
+explicit magnitude unit does not close it — the corpus reports in millions,
+so 2,171M reads as $2.17B and matches at the stated scale too. Containment
+on a rounded figure is coarse by construction. Documented in
+`_is_rounding_of`; precision is what `debate_originated_numbers` adds, by
+asking a different question rather than a looser one.
+
+### C/D tally: ceiling exceeded at three memos
+
+| memo | A | B | C | D | C+D |
+|---|---|---|---|---|---|
+| ACN | 0 | 0 | 1 | 1 | 2 |
+| NFLX | 0 | 0 | 0 | 1 | 1 |
+| AVGO (re-audited) | 0 | 0 | 0 | 1 | 1 |
+
+Battery C/D total: **4**, against a ceiling of 3 set for six memos. ACN
+still breaches the per-memo ≤1. Criterion 6 still fails, but by less than
+the first pass claimed, and ACN and NFLX have not been re-audited under the
+corrected method — only AVGO has.
+
+Ceiling is ≤1/memo and ≤3/battery. ACN and AVGO breach per-memo; the
+battery breaches at **5 over three memos**, where the ceiling was set for
+six.
+
+The two most material:
+
+- **NFLX, wrong unit.** "leverage fell **41 basis points** gross and **34
+  basis points** net" against a corpus that says "a **0.41-turn**
+  improvement" (1.50x→1.09x) and "a **0.34-turn** improvement"
+  (0.75x→0.41x). Turns are not basis points: as written the reader sees
+  0.41%, the real move is a 27% reduction in gross leverage. Two orders of
+  magnitude, on the memo's lead positive claim — and the *same memo* states
+  it correctly in `risk_debate_summary` ("1.09x gross and 0.41x net").
+- **ACN, trigger already satisfied.** Watch item: "Stock price closes below
+  200-day moving average (201.73) for five consecutive trading days,
+  confirming intermediate downtrend entry." Last close is **181.38** —
+  already far below. The memo's own `technical_signal` says so.
+
+Also: unverified quote spans scale badly with memo complexity — ACN 4
+claims, NFLX 6, **AVGO 24**. The pipeline flags these itself and they are
+not counted above, but AVGO's 24 is most of that debate's citations.
+
+### §8 triage: the ceiling rule governs
+
+With the Class A withdrawn, only one stop condition fires — but it is the
+governing one either way. An exceeded C/D ceiling says "**stop the phase**;
+the finding is that the gap's rate is higher than Phase 7 evidence
+supported, and the right next move is characterizing the gap, not patching
+six memos."
+
+Phase 7 saw **one** confirmed C-class instance across five memos. This saw
+**five C/D across three**, plus a Class A. The most likely explanation, and
+it is an inference: Phase 7 averaged $0.448/run, which is not consistent
+with paying for real fundamentals (~$0.85/run measured here). Its cost
+lines predate `run_id` so it cannot be confirmed per-run, but only one
+`trading-fundamentals` call is on record for 2026-08-26 against a
+five-ticker battery, and one of those five (NFLX) is independently known to
+have run `--only technical`. Phase 7 very likely audited memos carrying far
+less live numeric content than these three — which would depress its
+observed defect rate for reasons unrelated to the pipeline changing.
+
+**Phase 9 is not closeable as specified.** Criteria 5 and 6 both fail on a
+half-sized battery. Finishing FIG/ASML/MSFT would add evidence but cannot
+un-fail them.
