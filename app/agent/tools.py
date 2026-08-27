@@ -5,6 +5,7 @@ Tool schemas and dispatch for the research agent.
 import ast
 import logging
 import operator
+import os
 import re
 import sys
 
@@ -19,6 +20,29 @@ logger = logging.getLogger(__name__)
 
 API_BASE = "http://localhost:8000"
 HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
+
+# `ask_edgar` is the most expensive thing the agent can do and nothing
+# bounded it. Measured on the Phase 9 battery: NFLX 22 calls, AVGO 40, ACN
+# 40, every question distinct (checked -- there is no duplicate work to
+# dedupe away). At ~$0.008 of server-side spend per call plus a full context
+# round-trip, the call count is the single biggest cost lever in a
+# fundamentals run.
+#
+# The budget is announced to the agent rather than sprung on it. A blind cap
+# truncates wherever the agent happens to be when it trips, which on a
+# 12-item checklist means the last items silently get nothing; an announced
+# one lets it allocate. That is the same reasoning behind telling a person a
+# deadline at the start rather than at the end.
+#
+# 30 is a judgement, not a measurement: above NFLX's 22, below the 40 that
+# AVGO and ACN each used. ACN completed its checklist in 40, so this WILL
+# bind on dense tickers -- deliberately, since the alternative is an
+# unbounded cost per run. Raise it with ASK_EDGAR_MAX_CALLS if a ticker's
+# analysis is being cut short in a way that matters.
+ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
+# How many calls out from the cap the agent starts being told to wrap up.
+_ASK_EDGAR_WARN_AT = 5
+_ASK_EDGAR_CALLS = 0
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +96,15 @@ TOOLS = [
             "Ask one specific question about SEC filings. Returns an answer "
             "with citations and source excerpts. Best for cross-section "
             "analysis, year-over-year comparisons, risk factors, MD&A "
-            "commentary, and segment breakdowns."
+            "commentary, and segment breakdowns.\n\n"
+            f"BUDGETED: you may call this at most {ASK_EDGAR_MAX_CALLS} times "
+            "in one analysis, and it is the most expensive tool available to "
+            "you. Plan the whole checklist against that number before "
+            "spending the first call — ask one broad question that covers "
+            "several checklist items rather than one narrow question per "
+            "item, and do not re-ask something an earlier answer already "
+            "told you. When the budget runs out you will be told to write "
+            "the memo from what you have."
         ),
         "input_schema": {
             "type": "object",
@@ -297,6 +329,27 @@ async def _dispatch(name: str, inputs: dict) -> str:
         record_calc_result(result)
         return result
 
+    # Budget check BEFORE any transport is set up. A refused call has to
+    # cost nothing at all -- that is the whole point of it -- and putting
+    # the check inside the HTTP context meant a refusal still built a
+    # client. Caught by test_the_refusal_makes_no_http_call.
+    if name == "ask_edgar":
+        global _ASK_EDGAR_CALLS
+        if _ASK_EDGAR_CALLS >= ASK_EDGAR_MAX_CALLS:
+            # Refuse rather than raise: the agent's correct response is to
+            # write the memo from what it has, exactly as it does at
+            # MAX_TURNS. An exception would lose the whole run's work over a
+            # budget that is a preference, not a failure.
+            return (
+                f"BUDGET EXHAUSTED: you have used all "
+                f"{ASK_EDGAR_MAX_CALLS} of your ask_edgar calls for this "
+                f"analysis. No further filing queries are available. Write "
+                f"the memo now from what you have already gathered, and "
+                f"record any checklist item you could not complete as an "
+                f"explicit data gap rather than leaving it unmentioned."
+            )
+        _ASK_EDGAR_CALLS += 1
+
     if USE_STUBS:
         return _stub(name, inputs)
 
@@ -341,6 +394,19 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 for c in data.get("chunks", [])
             )
             out = f"{data['answer']}\n\nSources:\n{citations}"
+            remaining = ASK_EDGAR_MAX_CALLS - _ASK_EDGAR_CALLS
+            if remaining <= _ASK_EDGAR_WARN_AT:
+                # Only inside the warn band. Appending a counter to all 30
+                # answers would put a changing number into every tool result,
+                # and tool results are the agent's provenance corpus -- the
+                # containment guards scan it for figures that "back" memo
+                # claims. Five lines of budget text is a cost worth paying;
+                # thirty is not.
+                out += (
+                    f"\n\n[BUDGET] {remaining} ask_edgar call(s) remaining of "
+                    f"{ASK_EDGAR_MAX_CALLS}. Prioritise the checklist items "
+                    f"you have not yet covered."
+                )
             if data.get("unverified"):
                 out += (
                     f"\n\nWARNING — these figures in the above answer do not "
@@ -543,12 +609,13 @@ _DELEGATED_USAGE = TokenUsage()
 
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
-    global _DELEGATED_USAGE
+    global _DELEGATED_USAGE, _ASK_EDGAR_CALLS
     _RETRIEVED_TEXT.clear()
     _CALC_RESULTS.clear()
     _REJECTED_CALC_ATTEMPTS.clear()
     _SESSION_LOG.clear()
     _DELEGATED_USAGE = TokenUsage()
+    _ASK_EDGAR_CALLS = 0
 
 
 def _record_delegated_usage(resp) -> None:
