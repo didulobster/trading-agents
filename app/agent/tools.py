@@ -40,6 +40,18 @@ HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
 # unbounded cost per run. Raise it with ASK_EDGAR_MAX_CALLS if a ticker's
 # analysis is being cut short in a way that matters.
 ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
+# Chunks retrieved per ask_edgar call. Each chunk averages ~610 tokens, so
+# this is ~77% of a call's input cost: 8 -> 5 saves ~1,800 tokens/call,
+# ~$0.05 per fundamentals run at 30 calls.
+#
+# MEASURE BEFORE MOVING THIS. `scripts/probe_retrieval_rank_decay.py`
+# replays the real questions from a battery; over 102 of them the
+# similarity decay from rank 1 to rank 8 was 5.1% and from rank 5 to rank 6
+# was 0.5%, and ranks 6-8 supplied a filing section absent from ranks 1-5
+# on 59% of questions. There is no cliff at 5 -- the saving is real and so
+# is the coverage it costs, on a checklist whose whole job is reading
+# across sections. Env-overridable so reverting is a config flip.
+ASK_EDGAR_K = int(os.getenv("ASK_EDGAR_K", "5"))
 # How many calls out from the cap the agent starts being told to wrap up.
 _ASK_EDGAR_WARN_AT = 5
 _ASK_EDGAR_CALLS = 0
@@ -432,6 +444,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 json={
                     "question": inputs["question"],
                     "tickers": inputs.get("tickers"),
+                    "k": ASK_EDGAR_K,
                 },
             )
             if resp.status_code != 200:
