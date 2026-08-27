@@ -245,6 +245,32 @@ def main() -> int:
         wall_clock_timeout_s=args.wall_clock_timeout_s,
     )
 
+    # Carry forward rows for tickers this invocation is NOT running.
+    #
+    # Without this, re-running one ticker rebuilt the manifest from scratch
+    # and destroyed the rest of the battery's record. Live (2026-08-28): a
+    # `--tickers MSFT` invocation replaced a four-ticker manifest with a
+    # one-ticker one. The evidence itself survived — vault memos, cost log,
+    # checkpoints are all elsewhere — but the manifest is what §4's gate and
+    # §7's comparison read, so the battery looked like it had one run.
+    #
+    # A ticker being re-run is REPLACED, not appended: the newest attempt is
+    # the one that describes the current state of that thread, and keeping
+    # both would make "how many runs completed" ambiguous.
+    if manifest_path.exists():
+        try:
+            prior = BatteryManifest.model_validate_json(manifest_path.read_text())
+        except Exception as exc:  # noqa: BLE001 — a corrupt manifest must not block a run
+            print(f"WARNING: could not read {manifest_path} ({exc}); starting fresh",
+                  file=sys.stderr)
+        else:
+            rerunning = set(args.tickers)
+            carried = [r for r in prior.runs if r.ticker not in rerunning]
+            manifest.runs.extend(carried)
+            if carried:
+                print(f"carrying forward {len(carried)} prior run(s): "
+                      f"{', '.join(r.ticker for r in carried)}")
+
     problems = preflight()
     if problems:
         print("PREFLIGHT FAILED — nothing was run:", file=sys.stderr)
