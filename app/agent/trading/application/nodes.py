@@ -93,7 +93,12 @@ async def fundamentals_node(state: TradingState) -> dict:
     # cost_event is None on a cache hit — nothing was spent this run. report
     # itself can be None too (a test double simulating "analyst did not
     # run"; the real port never returns None).
-    events = [report.cost_event] if report and report.cost_event else []
+    # Both the agent's own loop AND what its tools spent server-side. The
+    # second used to be invisible to this ledger, which is what let a run
+    # exceed its budget without `check_run_guards` ever seeing it.
+    events = []
+    if report:
+        events = [e for e in (report.cost_event, report.tool_cost_event) if e]
     return {"fundamentals_report": report, "cost_events": events}
 
 

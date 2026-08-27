@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from app.agent.researcher import AGENT_MODEL, _save_output, log_cost, run_agent
+from app.agent.tools import get_delegated_usage
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
@@ -40,6 +41,22 @@ async def get_fundamentals_report(
     vault_path = _save_output(result, ticker.upper(), "fundamentals", cost_usd=cost)
     print(f"[fundamentals] saved memo to {vault_path}")
 
+    # What the agent's TOOLS spent server-side, which until 2026-08-27
+    # reached neither the cost log nor `check_run_guards`. Logged as its own
+    # line and its own CostEvent, under a distinct mode, so the two kinds of
+    # spend stay tellable apart in `docs/cost-log.jsonl`.
+    tool_usage = get_delegated_usage()
+    tool_event = None
+    if not tool_usage.is_empty:
+        tool_event_id = new_event_id("fundamentals-tools")
+        tool_cost = log_cost(
+            ticker, "trading-fundamentals-tools", tool_usage,
+            run_id=run_id, event_id=tool_event_id,
+        )
+        tool_event = record_cost_event(
+            tool_event_id, "fundamentals-tools", tool_usage, AGENT_MODEL, tool_cost
+        )
+
     report = FundamentalsReport(
         ticker=ticker,
         summary=result,
@@ -49,6 +66,7 @@ async def get_fundamentals_report(
         output_tokens=usage.output_tokens,
         generated_at=today,
         cost_event=record_cost_event(event_id, "fundamentals", usage, AGENT_MODEL, cost),
+        tool_cost_event=tool_event,
     )
 
     _CACHE_DIR.mkdir(exist_ok=True)

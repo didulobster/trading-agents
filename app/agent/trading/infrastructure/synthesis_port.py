@@ -159,6 +159,34 @@ class MemoVerificationError(Exception):
 # Prompts
 # ---------------------------------------------------------------------------
 
+# Rule 1 in both prompts below already forbids writing ANY number in the
+# narrative fields, and both models violate it routinely: NFLX's memo opens
+# "free cash flow accelerated 37%, leverage fell 41 basis points gross and
+# 34 basis points net, and operating margin expanded 280 bps" — five
+# numbers in the first sentence of a field where none are allowed. The
+# guard that runs after does not catch this, because it checks whether a
+# number is BACKED, not whether it should be there at all.
+#
+# So this is written as a fallback rule rather than a repetition of rule 1:
+# given that figures do get restated, the units have to survive the
+# restatement. Ported from the research agent's own prompt
+# (app/agent/prompts.py), where the identical rule demonstrably works —
+# NFLX's fundamentals report says "a 0.41-turn improvement" and it is the
+# SYNTHESIS layer, which had no such rule, that turned it into "41 basis
+# points". A 27% reduction in gross leverage reported as 0.41 percentage
+# points is the memo's lead positive claim, wrong by two orders of
+# magnitude, and every guard in the pipeline passed it.
+_UNITS_RULE = """\
+UNITS SURVIVE RESTATEMENT. Rule 1 says not to restate figures at all. If
+   you do anyway, the unit must be right: basis points and percentage
+   points apply ONLY to metrics already expressed as a percentage —
+   margins, rates, yields. A leverage, coverage or any ratio expressed in
+   "x" (turns) changes in TURNS: 1.50x to 1.09x is a 0.41-turn improvement,
+   never "41 basis points". Never attach a currency sign to a ratio
+   ("2.80x", not "$2.80x"). Gross and net are different figures — if the
+   source distinguishes them, say which one you mean."""
+
+
 RESEARCH_MANAGER_SYSTEM = f"""\
 You are the Research Manager for an equity research pipeline. You will be
 given the analyst reports and the bull/bear debate transcript for one
@@ -181,6 +209,7 @@ HARD RULES — checked in code after you answer:
    risk panel you never see, decides buy/sell/hold. Do not hedge your
    `thesis` toward a particular direction in anticipation of that decision
    — describe what the debate actually supports.
+4. {_UNITS_RULE}
 
 Call `submit_research_synthesis` exactly once. Say nothing else."""
 
@@ -210,6 +239,7 @@ HARD RULES — checked in code after you answer:
    PIPELINE'S ONLY verdict.
 4. `watch_items`: at most 5, each an observable (not a vague sentiment) that
    would change this read, each citing the `[RFnn]` factor it comes from.
+5. {_UNITS_RULE}
 
 A risk ledger with no rows, or a report/debate marked "NOT RUN"/"empty", is
 missing evidence, not neutral evidence — do not infer anything from its
