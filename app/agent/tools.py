@@ -44,6 +44,19 @@ ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
 _ASK_EDGAR_WARN_AT = 5
 _ASK_EDGAR_CALLS = 0
 
+# Results by normalized expression, for the run. Whitespace only: two
+# expressions that differ in spacing are the same computation, while two
+# that differ in SCALE ("45183.036 - 39001.0" vs "45183036 - 39001000") are
+# deliberately kept apart even though they reduce to the same ratio — a
+# cache is not the place to assert that two differently-written derivations
+# are equivalent.
+_CALC_CACHE: dict[str, str] = {}
+_CALC_WHITESPACE = re.compile(r"\s+")
+
+
+def _normalize_expression(expression: str) -> str:
+    return _CALC_WHITESPACE.sub("", expression)
+
 
 # ---------------------------------------------------------------------------
 # Tool schemas — sent to the model so it knows what it can call.
@@ -145,11 +158,21 @@ TOOLS = [
             "a zero total_on_sec with domestic form types searched does NOT "
             "mean the company has no SEC filings at all. Returns which "
             "filings are new and not yet ingested. Use this to ensure the "
-            "corpus has the most recent reports before running analysis."
+            "corpus has the most recent reports before running analysis.\n\n"
+            "By default this returns PERIODIC reports only (10-K/10-Q, or "
+            "20-F for foreign private issuers) — the financial statements a "
+            "checklist is built from. Event filings (8-K/6-K) are excluded "
+            "because they outnumber the periodic ones several times over and "
+            "would fill your context without informing the analysis. Pass "
+            "form_types explicitly, e.g. [\"8-K\"], on the rare occasion you "
+            "need a specific event filing."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {"ticker": {"type": "string"}},
+            "properties": {
+                "ticker": {"type": "string"},
+                "form_types": {"type": "array", "items": {"type": "string"}},
+            },
             "required": ["ticker"],
         },
     },
@@ -319,14 +342,41 @@ async def execute_tool(name: str, inputs: dict) -> str:
 
 async def _dispatch(name: str, inputs: dict) -> str:
     if name == "calculate":
-        err = validate_calculate_inputs(
-            inputs["expression"], inputs.get("inputs", [])
-        )
+        expression = inputs["expression"]
+        # Validation runs on EVERY call, cache hit or not. It checks the
+        # supplied `inputs` have provenance, and a repeat can arrive with
+        # different — possibly worse — inputs than the call that populated
+        # the cache. Short-circuiting before this would let the second call
+        # launder the first one's provenance.
+        err = validate_calculate_inputs(expression, inputs.get("inputs", []))
         if err:
-            record_rejected_calc(inputs["expression"], inputs.get("inputs", []), err)
+            record_rejected_calc(expression, inputs.get("inputs", []), err)
             return err
-        result = safe_calculate(inputs["expression"], inputs.get("inputs", []))
+
+        key = _normalize_expression(expression)
+        if key in _CALC_CACHE:
+            # Note honestly what this does and does not save. `calculate` is
+            # pure Python with no API call, so the direct cost of a repeat is
+            # ~zero and was already paid before this function ran: the
+            # expensive part is the agent TURN, a full context round-trip
+            # (~22k cache-read tokens, ~$0.0022) spent to reach this line.
+            # Memoisation cannot refund that. What it can do is tell the
+            # agent it is repeating itself, which is a behavioural nudge
+            # against the NEXT duplicate. Measured cause: NFLX ran
+            # "10149273 - 688220" three times and one growth-rate expression
+            # twice in a single run (Phase 9 cost audit).
+            #
+            # The note carries no digits of its own, so it adds nothing to
+            # the provenance corpus the containment guards scan.
+            return (
+                f"{_CALC_CACHE[key]}  [already computed earlier this run — "
+                f"identical expression, identical result. Check your earlier "
+                f"working before re-deriving a figure.]"
+            )
+
+        result = safe_calculate(expression, inputs.get("inputs", []))
         record_calc_result(result)
+        _CALC_CACHE[key] = result
         return result
 
     # Budget check BEFORE any transport is set up. A refused call has to
@@ -424,10 +474,14 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return resp.text
 
         if name == "check_latest_filings":
-            resp = await http.post(
-                f"{API_BASE}/latest-filings",
-                json={"ticker": inputs["ticker"]},
-            )
+            payload = {"ticker": inputs["ticker"]}
+            # Passed through only when the agent named its forms. Omitting
+            # the key lets the server auto-detect the filer's family and
+            # narrow it to periodic reports; sending form_types=None would
+            # be the same thing but makes the wire format depend on a null.
+            if inputs.get("form_types"):
+                payload["form_types"] = inputs["form_types"]
+            resp = await http.post(f"{API_BASE}/latest-filings", json=payload)
             if resp.status_code != 200:
                 return f"Error from /latest-filings: {resp.status_code} — {resp.text[:500]}"
             return resp.text
@@ -616,6 +670,7 @@ def reset_run_provenance() -> None:
     _SESSION_LOG.clear()
     _DELEGATED_USAGE = TokenUsage()
     _ASK_EDGAR_CALLS = 0
+    _CALC_CACHE.clear()
 
 
 def _record_delegated_usage(resp) -> None:

@@ -24,7 +24,7 @@ from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.application.citations import format_citation_tag
 
-from app.infrastructure.edgar.client import EdgarClient
+from app.infrastructure.edgar.client import EdgarClient, periodic_forms
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.queries.corpus_status import CorpusStatusQuery
 from app.infrastructure.repositories import metrics_repo
@@ -130,6 +130,14 @@ class LatestFilingsRequest(BaseModel):
     # None = auto-detect the filer's form-type family (see IngestRequest).
     form_types: list[str] | None = None
     since_year: int | None = None
+    # Narrow the auto-detected family to its PERIODIC members (10-K/10-Q, or
+    # 20-F), dropping the event-driven ones. Defaults on because a
+    # fundamentals checklist is built from periodic reports and the event
+    # filings dominate the list by count -- NFLX returned 44 filings of which
+    # 38 were 8-Ks, and every one of them then rode in the agent's context
+    # for the rest of the run. Ignored when `form_types` is given explicitly:
+    # a caller naming its forms has already said what it wants.
+    periodic_only: bool = True
 
 # ---- Endpoint ----
 def _report_usage(response: Response, *usages: TokenUsage) -> None:
@@ -320,6 +328,8 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
         form_types = req.form_types
         if form_types is None:
             form_types = await edgar.default_form_types(cik)
+            if req.periodic_only:
+                form_types = periodic_forms(form_types)
 
         since = date(req.since_year, 1, 1) if req.since_year else None
         sec_filings = await edgar.list_filings(
