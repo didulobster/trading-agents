@@ -1973,13 +1973,74 @@ reliably wrong is worse than no guard: it teaches the reader to skip the
 category, and a true positive would then arrive in a list nobody reads.
 Fixed — see the fix section at the end of this file.
 
+### AVGO re-audited against the fixed verifier (2026-08-27)
+
+Re-run with the false positives gone and a positive control on every
+absence claim. Method changed: the grounded and derived corpora were
+materialized from the checkpoint to disk and searched directly, rather than
+searching the vault's rendered Markdown — the rendering is not what the
+verifier sees, and the gap between the two is where the false Class A came
+from.
+
+Verifier output on the memo, no API calls: `unbacked=[]`,
+`debate_originated=['78%', '5.4']`, passed.
+
+Every figure in the memo's load-bearing prose, checked:
+
+| figure | status |
+|---|---|
+| $70–100B AI financing debt | **grounded** — six news items, see the correction above |
+| $25.5B / $13.5B operating income, $12B increase | grounded |
+| $0.8B amortization decline ($17.3B → $16.5B) | grounded |
+| $7.6B SBC | grounded ($7,570M) |
+| $17.2B FCF, $63.9B revenue | grounded |
+| 2.80x gross, 2.61x net leverage | grounded |
+| $2.2B pre-VMware SBC | derived, correct (6.1% × $35,819M = $2,185M) |
+| $5.4B SBC increase | derived, correct ($7,570M − $2,185M) — flagged debate-originated |
+| 78% revenue increase | derived, correct (63,887/35,819 − 1) — flagged debate-originated |
+| "above 4.0x" post-financing | forward projection, not a citation; arithmetic supports it and is conservative (2.80x × $25.5B ≈ $71.4B debt; +$70B ≈ 5.5x) |
+| $5–6B earnings erosion | rounded band on the $5.4B SBC increase |
+
+**Revised AVGO tally: A=0, B=0, C=0, D=1.** The one remaining defect is
+minor: `risk_debate_summary` writes "**$**2.80x" and "**$**2.61x" —
+currency signs on leverage multiples. Correct numbers, wrong unit notation,
+which is Class D by the letter of the taxonomy.
+
+**Two findings from the first pass are withdrawn:**
+
+1. The Class A, already corrected above.
+2. The period-label D on "a 78% revenue increase". Downgraded to an
+   observation. `reasoning` omits the period, and FY2025 revenue growth was
+   23.9% rather than 78% — but the memo *does* disclose it twice elsewhere:
+   `bear_case` says "a 78% revenue increase **from FY2023 to FY2025**" and
+   `research_thesis` says "on a 78% larger revenue base". §6.2 asks whether
+   the memo says which period; it does. A reader of `reasoning` alone could
+   still be misled, so it is recorded — but "wrong label" is not what this
+   is, and counting it was the auditor grading to a conclusion.
+
+**Residual in the fix itself, recorded because it was found while
+re-auditing.** AVGO's `$2.2B` cleared containment against an unrelated
+`2,171` elsewhere in the corpus (2171/1000 → 2.2 at one decimal). The
+figure is legitimate and the clearance was luck. A one-decimal figure
+clears against a 100-unit window at the 1000-scale, and requiring an
+explicit magnitude unit does not close it — the corpus reports in millions,
+so 2,171M reads as $2.17B and matches at the stated scale too. Containment
+on a rounded figure is coarse by construction. Documented in
+`_is_rounding_of`; precision is what `debate_originated_numbers` adds, by
+asking a different question rather than a looser one.
+
 ### C/D tally: ceiling exceeded at three memos
 
 | memo | A | B | C | D | C+D |
 |---|---|---|---|---|---|
 | ACN | 0 | 0 | 1 | 1 | 2 |
 | NFLX | 0 | 0 | 0 | 1 | 1 |
-| AVGO | 0 | 0 | 0 | 2 | 2 |
+| AVGO (re-audited) | 0 | 0 | 0 | 1 | 1 |
+
+Battery C/D total: **4**, against a ceiling of 3 set for six memos. ACN
+still breaches the per-memo ≤1. Criterion 6 still fails, but by less than
+the first pass claimed, and ACN and NFLX have not been re-audited under the
+corrected method — only AVGO has.
 
 Ceiling is ≤1/memo and ≤3/battery. ACN and AVGO breach per-memo; the
 battery breaches at **5 over three memos**, where the ceiling was set for

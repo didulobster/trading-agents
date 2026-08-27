@@ -720,6 +720,21 @@ def _is_rounding_of(raw: str, known: list[float]) -> bool:
     "$64B") because keeping them is the point of converting; so requiring a
     decimal admits the real restatements and admits none of the round
     inventions. "63.9" still only ever clears against [63850, 63950).
+
+    RESIDUAL, measured and accepted rather than engineered away: a
+    one-decimal figure clears against a window 100 units wide at the
+    1000-scale, so a coincidental match is possible in a dense corpus. Seen
+    once, in the same Phase 9 re-audit: AVGO's "$2.2B" (pre-VMware SBC,
+    legitimately 6.1% x $35,819M = $2,185M) cleared against an unrelated
+    2,171 elsewhere in the corpus. The figure was sound and the clearance
+    was luck. Tightening this by requiring an explicit magnitude unit does
+    NOT help — the corpus reports in millions, so 2,171M reads as $2.17B and
+    matches at the stated scale too. Containment on a rounded figure against
+    a dense corpus is coarse by construction; the honest trade is 7 measured
+    false positives removed against a coincidence rate that is bounded and
+    documented. Precision here is what `debate_originated_numbers`
+    (synthesis_port) exists to add, by asking a different question — does
+    this figure have an analyst source at all — rather than a looser one.
     """
     try:
         value = float(raw.replace(",", ""))
