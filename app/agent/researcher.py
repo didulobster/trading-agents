@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 AGENT_MODEL = os.environ["LLM_CLAUDE_MODEL"]
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
+# How many turns out from the cap the agent starts being told to wrap up.
+# Phase 9 measured 2 of 3 fundamentals runs hitting MAX_TURNS exactly and
+# ending on "forcing memo from gathered data" — the agent had no idea the
+# budget existed, so it was writing its memo under a guillotine rather than
+# to a deadline. 8 is roughly what the final memo turn plus a couple of
+# closing retrievals need.
+TURN_WARN_AT = 8
 # The 12-item memo with citations and tables routinely runs 8-10k output
 # tokens on its own, before any tool-call turns. The previous 4096 cap was
 # well under that, so the final memo-writing turn was silently cut off
@@ -428,7 +435,23 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
     """
     reset_run_provenance()
     client = AsyncAnthropic()
-    messages = [{"role": "user", "content": user_task}]
+    # The budget goes in the TASK, not the system prompt. The system block
+    # carries its own cache breakpoint and is identical across every run;
+    # interpolating a runtime number into it would rewrite that cache
+    # whenever the config moved, for a line that belongs with the task
+    # anyway. Stated up front rather than only warned about near the end,
+    # so the agent can plan the checklist against it — the same reason
+    # ask_edgar's cap is in its tool description.
+    messages = [{
+        "role": "user",
+        "content": (
+            f"{user_task}\n\n"
+            f"You have {MAX_TURNS} tool-calling turns for this entire "
+            f"analysis, and writing the memo takes several of them. Budget "
+            f"accordingly: cover the checklist broadly before going deep on "
+            f"any one item, and do not leave the memo to the last turn."
+        ),
+    }]
     usage = UsageSummary()
 
     for turn in range(MAX_TURNS):
@@ -532,7 +555,26 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
                 )
 
         messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+        # Tool-result blocks must come first in a user message; a trailing
+        # text block is legal after them.
+        content = list(tool_results)
+        remaining = MAX_TURNS - (turn + 1)
+        if 0 < remaining <= TURN_WARN_AT:
+            # Only inside the warn band, for the same reason the ask_edgar
+            # counter is: every one of these lines lands in the conversation
+            # the agent re-reads on every subsequent turn, and a countdown
+            # appended to all 45 turns would be 45 copies of a changing
+            # number in the context the containment guards scan.
+            content.append({
+                "type": "text",
+                "text": (
+                    f"[BUDGET] {remaining} turn(s) remaining before the memo "
+                    f"is forced. Stop opening new lines of enquiry. Finish "
+                    f"the checklist item you are on, then write the memo, "
+                    f"recording anything you could not cover under Data Gaps."
+                ),
+            })
+        messages.append({"role": "user", "content": content})
 
     # Budget exhausted — force a memo from whatever was gathered.
     _trace("\n[MAX_TURNS reached — forcing memo from gathered data]")
