@@ -36,8 +36,8 @@ from app.infrastructure.llm.openai_compat import (
     [
         ("claude-haiku-4-5-20251001", "anthropic"),
         ("claude-sonnet-5", "anthropic"),
-        ("deepseek-chat", "deepseek"),
-        ("deepseek-reasoner", "deepseek"),
+        ("deepseek-v4-flash", "deepseek"),
+        ("deepseek-v4-pro", "deepseek"),
         ("gpt-4.1-nano", "openai"),
         # An id nothing matches must not silently pick a paid third party.
         ("some-unknown-model", "anthropic"),
@@ -59,7 +59,7 @@ def test_llm_provider_env_overrides_the_prefix(monkeypatch):
 def test_unknown_llm_provider_is_rejected(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "not-a-provider")
     with pytest.raises(ProviderNotConfigured, match="not a known provider"):
-        resolve_provider("deepseek-chat")
+        resolve_provider("deepseek-v4-flash")
 
 
 def test_missing_key_fails_at_construction_not_at_first_call(monkeypatch):
@@ -68,7 +68,7 @@ def test_missing_key_fails_at_construction_not_at_first_call(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(ProviderNotConfigured, match="DEEPSEEK_API_KEY"):
-        get_client("deepseek-chat")
+        get_client("deepseek-v4-flash")
 
 
 def test_get_client_with_no_model_routes_per_request(monkeypatch):
@@ -92,12 +92,12 @@ def test_get_client_with_no_model_routes_per_request(monkeypatch):
     import asyncio
 
     asyncio.run(routing.messages.create(model="claude-sonnet-5"))
-    asyncio.run(routing.messages.create(model="deepseek-chat"))
+    asyncio.run(routing.messages.create(model="deepseek-v4-flash"))
     asyncio.run(routing.messages.create(model="claude-sonnet-5"))
 
     assert seen == [
         ("claude-sonnet-5", "claude-sonnet-5"),
-        ("deepseek-chat", "deepseek-chat"),
+        ("deepseek-v4-flash", "deepseek-v4-flash"),
         ("claude-sonnet-5", "claude-sonnet-5"),
     ]
     # Two models, two sub-clients — the third call reused the first.
@@ -202,7 +202,10 @@ def test_error_tool_results_stay_marked_as_errors():
     assert out[0]["content"].startswith("ERROR: ")
 
 
-def test_tool_schema_translation():
+def test_tool_schema_translation_carries_strict():
+    """`strict` is supported in this dialect and must survive. It was added
+    to the debate port's SUBMIT_TOOL because 3 of 3 live turns came back
+    flattened without it, costing a retry every time."""
     out = _translate_tools([
         {"name": "submit", "description": "Call once.", "strict": True,
          "input_schema": {"type": "object", "properties": {"a": {"type": "string"}}}},
@@ -213,8 +216,14 @@ def test_tool_schema_translation():
             "name": "submit",
             "description": "Call once.",
             "parameters": {"type": "object", "properties": {"a": {"type": "string"}}},
+            "strict": True,
         },
     }]
+
+
+def test_a_tool_without_strict_does_not_gain_it():
+    out = _translate_tools([{"name": "f", "input_schema": {"type": "object"}}])
+    assert "strict" not in out[0]["function"]
 
 
 def test_forced_single_tool_call_splits_into_two_parameters():
@@ -238,7 +247,7 @@ def test_tool_choice_any_and_auto():
 def _completion(*, content=None, tool_calls=None, finish_reason="stop", usage=None):
     return SimpleNamespace(
         id="cmpl_1",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
         choices=[SimpleNamespace(
             finish_reason=finish_reason,
             message=SimpleNamespace(content=content, tool_calls=tool_calls or []),
@@ -258,7 +267,7 @@ def _shim():
 def test_stop_reason_mapping(finish_reason, stop_reason):
     """`researcher.py` branches on both mapped values — "max_tokens" to
     recover a memo cut mid-sentence, "tool_use" to continue the loop."""
-    resp = _shim()._to_anthropic_shape(_completion(finish_reason=finish_reason), "deepseek-chat")
+    resp = _shim()._to_anthropic_shape(_completion(finish_reason=finish_reason), "deepseek-v4-flash")
     assert resp.stop_reason == stop_reason
 
 
@@ -269,7 +278,7 @@ def test_tool_calls_become_anthropic_tool_use_blocks():
     )
     resp = _shim()._to_anthropic_shape(
         _completion(content="thinking", tool_calls=[call], finish_reason="tool_calls"),
-        "deepseek-chat",
+        "deepseek-v4-flash",
     )
     assert [b.type for b in resp.content] == ["text", "tool_use"]
     assert resp.content[1].id == "call_1"
@@ -281,7 +290,7 @@ def test_malformed_tool_arguments_degrade_to_the_callers_retry():
     JSONDecodeError would unwind the whole run instead."""
     call = SimpleNamespace(id="c", function=SimpleNamespace(name="submit", arguments="{not json"))
     resp = _shim()._to_anthropic_shape(
-        _completion(tool_calls=[call], finish_reason="tool_calls"), "deepseek-chat"
+        _completion(tool_calls=[call], finish_reason="tool_calls"), "deepseek-v4-flash"
     )
     assert resp.content[0].input == {}
 
@@ -347,8 +356,18 @@ def test_deepseek_is_priced_so_the_budget_guards_can_fire():
     can never trip the per-run budget assertion."""
     from app.infrastructure.llm.pricing import MODEL_PRICING
 
-    for model in ("deepseek-chat", "deepseek-reasoner"):
+    for model in ("deepseek-v4-flash", "deepseek-v4-pro"):
         assert set(MODEL_PRICING[model]) == {"input", "output", "cache_write", "cache_read"}
+
+
+def test_retired_deepseek_ids_are_gone_rather_than_priced():
+    """deepseek-chat and deepseek-reasoner no longer exist. Leaving them in
+    the table would let a stale .env price cleanly all the way to a 404 —
+    warn_if_unpriced is the only thing that would have flagged it."""
+    from app.infrastructure.llm.pricing import MODEL_PRICING
+
+    assert "deepseek-chat" not in MODEL_PRICING
+    assert "deepseek-reasoner" not in MODEL_PRICING
 
 
 def test_pricing_overrides_are_merged_from_the_environment(monkeypatch):
@@ -390,8 +409,10 @@ def test_incomplete_pricing_override_raises_rather_than_silently_keeping_the_old
 
 @pytest.mark.anyio
 async def test_max_tokens_is_clamped_to_the_providers_ceiling(monkeypatch):
-    """The research agent asks for 16000; deepseek-chat caps at 8192. Sent
-    unclamped that is a 400 on the final turn of an already-paid-for run."""
+    """Both V4 models top out at 384K, so the clamp does not fire in this
+    project today — but it did at 8192 on the retired deepseek-chat, where
+    an unclamped 16000 was a 400 on the final turn of an already-paid-for
+    run. Tested at a low ceiling so the mechanism stays covered."""
     sent = {}
 
     shim = OpenAICompatClient(
@@ -405,7 +426,7 @@ async def test_max_tokens_is_clamped_to_the_providers_ceiling(monkeypatch):
 
     monkeypatch.setattr(shim._client.chat.completions, "create", fake_create)
     await shim.messages.create(
-        model="deepseek-chat", max_tokens=16000,
+        model="deepseek-v4-flash", max_tokens=16000,
         messages=[{"role": "user", "content": "hi"}],
     )
     assert sent["max_tokens"] == 8192
@@ -422,7 +443,7 @@ async def test_anthropic_only_parameters_are_dropped(monkeypatch):
 
     monkeypatch.setattr(shim._client.chat.completions, "create", fake_create)
     await shim.messages.create(
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
         max_tokens=100,
         messages=[{"role": "user", "content": "hi"}],
         thinking={"type": "adaptive"},

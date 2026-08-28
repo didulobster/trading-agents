@@ -199,19 +199,28 @@ def _translate_messages(system: Any, messages: list[dict]) -> list[dict]:
 
 
 def _translate_tools(tools: list[dict] | None) -> list[dict] | None:
+    """`strict` carries over.
+
+    It was dropped in the first version of this shim on the assumption that
+    the OpenAI dialect had no target for it. DeepSeek documents the flag on
+    tool definitions, and it is worth carrying: `strict` was added to the
+    debate port's SUBMIT_TOOL because 3 of 3 live turns came back with a
+    flattened payload without it, costing a retry every time — and a retry
+    loop is the one runaway the round cap cannot see.
+    """
     if not tools:
         return None
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("input_schema") or {},
-            },
+    out = []
+    for tool in tools:
+        function = {
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "parameters": tool.get("input_schema") or {},
         }
-        for tool in tools
-    ]
+        if tool.get("strict"):
+            function["strict"] = True
+        out.append({"type": "function", "function": function})
+    return out
 
 
 def _translate_tool_choice(tool_choice: dict | str | None) -> tuple[Any, bool | None]:
@@ -238,8 +247,8 @@ def _translate_tool_choice(tool_choice: dict | str | None) -> tuple[Any, bool | 
 
 # Anthropic-only request parameters, and what happens to each. Warned about
 # once per process rather than per call — a per-call warning on a 45-turn
-# loop is noise nobody reads, and silence is how a dropped `strict` turns
-# into an unexplained retry rate.
+# loop is noise nobody reads, and silence is how a dropped parameter turns
+# into an unexplained change in behavior.
 _UNSUPPORTED = {
     "thinking": "extended/adaptive thinking is Anthropic-only; dropped",
     "output_config": "reasoning effort is Anthropic-only; dropped",
@@ -274,10 +283,11 @@ class OpenAICompatClient:
     """Duck-types `anthropic.AsyncAnthropic` for the surface this repo uses.
 
     `max_output_tokens` clamps `max_tokens` down to what the provider will
-    actually accept. It is not cosmetic: the research agent asks for 16000
-    because a 12-item memo genuinely needs it, and DeepSeek's ceiling is
-    8192 — sent unclamped that is a 400 on the FINAL turn of a run that has
-    already been paid for.
+    actually accept, so a request that asks for more comes back short rather
+    than 400ing at the wire. The research agent asks for 16000 because a
+    12-item memo genuinely needs it, which is under every current provider's
+    ceiling — but it was over the retired `deepseek-chat`'s 8192, and that
+    failure would have landed on the FINAL turn of a run already paid for.
     """
 
     def __init__(
@@ -311,13 +321,6 @@ class OpenAICompatClient:
             max_tokens = self._max_output_tokens
 
         tools = _translate_tools(kwargs.get("tools"))
-        if kwargs.get("tools") and any(t.get("strict") for t in kwargs["tools"]):
-            _warn_once(
-                f"{self._provider}:strict",
-                f"{self._provider}: `strict: True` on a tool schema is not enforced here. "
-                f"Schema violations fall to the callers' existing one-shot retry, so "
-                f"expect a higher retry rate than on Anthropic.",
-            )
 
         tool_choice, parallel = _translate_tool_choice(kwargs.get("tool_choice"))
 

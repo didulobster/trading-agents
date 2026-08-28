@@ -493,13 +493,17 @@ chat-completions endpoint.
 
 What does not survive that translation, dropped with a once-per-process
 warning: `cache_control` breakpoints (DeepSeek caches automatically and has
-no equivalent to place), `thinking` / `output_config`, and `strict: true` on
-a tool schema. The last one has a measurable cost — `strict` was added to
-`SUBMIT_TOOL` because 3 of 3 live debate turns came back with a flattened
-payload without it, so expect a higher schema-retry rate off Anthropic.
-`max_tokens` is clamped to the provider's ceiling (8192 on `deepseek-chat`,
-against the research agent's 16000), which surfaces as
-`stop_reason=max_tokens` on genuinely long output rather than as a 400.
+no equivalent to place) and `thinking` / `output_config`. `strict: true` on
+a tool schema DOES carry over — the dialect supports it, and it matters:
+`strict` was added to `SUBMIT_TOOL` because 3 of 3 live debate turns came
+back with a flattened payload without it.
+
+`max_tokens` is clamped to the provider's ceiling, which surfaces as
+`stop_reason=max_tokens` on genuinely long output rather than as a 400. Both
+V4 models top out at 384K against the research agent's 16000, so it does not
+fire today — it is carried because the retired `deepseek-chat` capped at
+8192, where an unclamped request would have failed on the final turn of a
+run already paid for.
 
 Cost config moved to `llm/pricing.py` and is re-exported from `researcher.py`
 as `_MODEL_PRICING`. `LLM_PRICING_OVERRIDES` (JSON, env) merges over it, so
@@ -511,6 +515,14 @@ assertion silently unable to fire.
 For DeepSeek, `input_tokens` is the *cache-miss* count, not `prompt_tokens`:
 their `prompt_tokens` is hits plus misses, and pricing it as input while also
 counting hits as `cache_read` would overstate every cached run.
+
+**DeepSeek prices by time of day and the table does not.** Off-peak rates are
+half of peak, and off-peak is every hour outside 01:00-04:00 and 06:00-10:00
+UTC Monday-Friday — so most runs cost about half what `pricing.py` says. The
+table holds the peak rate deliberately, the same call made for Sonnet 5's
+introductory pricing: over-estimating fails safe, whereas tracking whichever
+rate applies right now turns "did this run exceed its cap" into a question
+about what time it started.
 
 
 ---

@@ -7,7 +7,7 @@ duck-types the Anthropic client either way (see `openai_compat`).
 
 Switching models is a config change:
 
-    LLM_CLAUDE_MODEL="deepseek-chat"      # or any id in _PROVIDERS' prefixes
+    LLM_CLAUDE_MODEL="deepseek-v4-flash"  # or any id in _PROVIDERS' prefixes
     DEEPSEEK_API_KEY=...
 
 Routing is by model id prefix, so a run can mix providers — the risk judge
@@ -67,10 +67,12 @@ _PROVIDERS: dict[str, ProviderSpec] = {
         api_key_env="DEEPSEEK_API_KEY",
         base_url="https://api.deepseek.com",
         base_url_env="DEEPSEEK_BASE_URL",
-        # deepseek-chat caps output at 8192. The research agent asks for
-        # 16000 (a 12-item memo needs it), so without this clamp the very
-        # last turn of an already-paid-for run 400s.
-        max_output_tokens=8192,
+        # 384K on both V4 models, against the research agent's 16000 — so
+        # the clamp never fires today. Carried anyway rather than set to
+        # None: it was 8192 on the retired deepseek-chat, which WOULD have
+        # silently truncated the memo, and the next provider added here is
+        # more likely to resemble that one than this one.
+        max_output_tokens=384_000,
         prefixes=("deepseek",),
     ),
     "openai": ProviderSpec(
