@@ -432,24 +432,103 @@ async def test_max_tokens_is_clamped_to_the_providers_ceiling(monkeypatch):
     assert sent["max_tokens"] == 8192
 
 
-@pytest.mark.anyio
-async def test_anthropic_only_parameters_are_dropped(monkeypatch):
+@pytest.fixture
+def capture(monkeypatch):
+    """Capture the request the shim would send, without sending it."""
     sent = {}
     shim = _shim()
 
     async def fake_create(**kwargs):
+        sent.clear()
         sent.update(kwargs)
         return _completion(content="ok")
 
     monkeypatch.setattr(shim._client.chat.completions, "create", fake_create)
+    return shim, sent
+
+
+@pytest.mark.anyio
+async def test_anthropic_only_parameters_are_dropped(capture):
+    shim, sent = capture
     await shim.messages.create(
         model="deepseek-v4-flash",
         max_tokens=100,
         messages=[{"role": "user", "content": "hi"}],
+        betas=["some-beta"],
+        top_k=5,
+    )
+    assert "betas" not in sent and "top_k" not in sent
+
+
+@pytest.mark.anyio
+async def test_forcing_a_tool_disables_thinking(capture):
+    """Live 400: "Thinking mode does not support this tool_choice". Thinking
+    is ON by default here, so a forced tool call fails unless it is turned
+    off explicitly — and the ports force a tool on every structured call."""
+    shim, sent = capture
+    await shim.messages.create(
+        model="deepseek-v4-flash", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "tool", "name": "f", "disable_parallel_tool_use": True},
+    )
+    assert sent["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert sent["tool_choice"] == {"type": "function", "function": {"name": "f"}}
+    assert sent["parallel_tool_calls"] is False
+
+
+@pytest.mark.anyio
+async def test_tool_choice_required_also_disables_thinking(capture):
+    """`required` is rejected by thinking mode too — only `auto` survives."""
+    shim, sent = capture
+    await shim.messages.create(
+        model="deepseek-v4-flash", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "any"},
+    )
+    assert sent["tool_choice"] == "required"
+    assert sent["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.anyio
+async def test_auto_tool_choice_keeps_thinking(capture):
+    """`auto` does not constrain the model, so thinking survives and the
+    caller's requested effort carries through."""
+    shim, sent = capture
+    await shim.messages.create(
+        model="deepseek-v4-flash", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "auto"},
         thinking={"type": "adaptive"},
         output_config={"effort": "low"},
     )
-    assert "thinking" not in sent and "output_config" not in sent
+    assert sent["extra_body"] == {"thinking": {"type": "enabled", "reasoning_effort": "low"}}
+
+
+@pytest.mark.anyio
+async def test_no_thinking_parameter_leaves_the_provider_default(capture):
+    shim, sent = capture
+    await shim.messages.create(
+        model="deepseek-v4-flash", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert "extra_body" not in sent
+
+
+@pytest.mark.anyio
+async def test_an_effort_the_provider_does_not_have_is_dropped_not_rounded(capture):
+    """Anthropic's "medium" has no counterpart; rounding it to a neighbour
+    would silently change what the caller asked for."""
+    shim, sent = capture
+    await shim.messages.create(
+        model="deepseek-v4-flash", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+        thinking={"type": "adaptive"},
+        output_config={"effort": "medium"},
+    )
+    assert sent["extra_body"] == {"thinking": {"type": "enabled"}}
 
 
 @pytest.fixture
