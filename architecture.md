@@ -493,10 +493,25 @@ chat-completions endpoint.
 
 What does not survive that translation, dropped with a once-per-process
 warning: `cache_control` breakpoints (DeepSeek caches automatically and has
-no equivalent to place) and `thinking` / `output_config`. `strict: true` on
+no equivalent to place), `betas`, `top_k` and `metadata`. `strict: true` on
 a tool schema DOES carry over — the dialect supports it, and it matters:
 `strict` was added to `SUBMIT_TOOL` because 3 of 3 live debate turns came
 back with a flattened payload without it.
+
+**Thinking is on by default on DeepSeek, and it rejects a constrained
+`tool_choice`.** Both `required` and a named function come back
+`400 "Thinking mode does not support this tool_choice"`; only `auto`
+survives. Since the debate, risk and synthesis ports all force a named tool
+— their contract is "call exactly this tool, exactly once", and `_extract`
+raises when no tool block arrives — the shim sends
+`thinking: {"type": "disabled"}` on any call that constrains the choice, and
+translates Anthropic's `thinking`/`output_config` to the provider's
+`thinking` object otherwise. Forcing the tool wins over keeping thinking:
+`auto` would trade a hard API guarantee for a behavioural hope on exactly
+the calls whose output is most load-bearing. Reasoning tokens bill as
+output either way, so no cost accounting depends on the choice. The
+parameter goes out in `extra_body` — the OpenAI SDK raises `TypeError` on
+top-level kwargs it does not recognise.
 
 `max_tokens` is clamped to the provider's ceiling, which surfaces as
 `stop_reason=max_tokens` on genuinely long output rather than as a 400. Both
