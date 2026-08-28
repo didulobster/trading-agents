@@ -4,6 +4,7 @@ from datetime import date
 from typing import Literal
 
 from app.infrastructure.llm import get_client
+from app.infrastructure.llm.models import model_for
 from pydantic import BaseModel, field_validator
 
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk
@@ -36,7 +37,7 @@ class FinancialMetrics(BaseModel):
 
 class MetricsExtractor:
     def __init__(self):
-        self.llm_model = os.getenv("LLM_CLAUDE_MODEL")
+        self.llm_model = model_for("extraction")
         self.client = get_client(self.llm_model)
         # Set by every `extract` call. Starts empty so a caller that reads it
         # before any extraction gets a zero rather than an AttributeError.

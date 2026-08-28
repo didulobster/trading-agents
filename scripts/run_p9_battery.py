@@ -28,6 +28,7 @@ load_dotenv(override=True)
 
 import os  # noqa: E402
 
+from app.infrastructure.llm.models import model_env_vars
 from app.agent.trading.domain.validation import (  # noqa: E402
     BatteryManifest,
     RunRecord,
@@ -39,15 +40,13 @@ COST_LOG = Path("docs/cost-log.jsonl")
 # The env vars that actually select a model. Recorded rather than a
 # hand-written "Haiku nodes / Sonnet nodes" tiering, which is a thing the
 # code does not know and so cannot be checked against on a rerun.
-MODEL_ENV_VARS = [
-    "LLM_CLAUDE_MODEL",
-    "TRADING_RESEARCH_MANAGER_MODEL",
-    "TRADING_RISK_MODEL",
-    "RISK_MODEL",
-    "RISK_JUDGE_MODEL",
-    "OPENAI_MODEL",
-    "EMBEDDING_MODEL",
-]
+#
+# Sourced from the role registry rather than listed here: the hand-written
+# copy had drifted, carrying two variables nothing read (RISK_MODEL,
+# RISK_JUDGE_MODEL) while missing the ones that do select a model. A run
+# recorded against the wrong list is a run whose configuration cannot be
+# reconstructed.
+MODEL_ENV_VARS = [*model_env_vars(), "OPENAI_MODEL", "EMBEDDING_MODEL"]
 
 PINNED_PACKAGES = ["langgraph", "pandas-ta-classic", "anthropic", "pydantic"]
 

@@ -49,11 +49,10 @@ import sys
 from dataclasses import dataclass, field
 
 from app.infrastructure.llm import LLMClient, get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
 from app.agent.researcher import (
-    AGENT_MODEL,
-    _MODEL_PRICING,
     UsageSummary,
     log_cost,
 )
@@ -78,8 +77,8 @@ from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_
 # switching back makes the temperature=0 replay a genuine controlled
 # condition for the Research Manager/Risk Judge too, not just the risk
 # panel. Still overridable per-role independent of the project-wide default.
-RESEARCH_MANAGER_MODEL = os.getenv("TRADING_RESEARCH_MANAGER_MODEL") or AGENT_MODEL
-RISK_JUDGE_MODEL = os.getenv("TRADING_RISK_JUDGE_MODEL") or AGENT_MODEL
+RESEARCH_MANAGER_MODEL = model_for("research_manager")
+RISK_JUDGE_MODEL = model_for("risk_judge")
 
 SYNTHESIS_MAX_TOKENS = 4000
 
@@ -91,13 +90,7 @@ SYNTHESIS_MAX_TOKENS = 4000
 SYNTHESIS_BUDGET_USD = 0.30
 
 for _model in (RESEARCH_MANAGER_MODEL, RISK_JUDGE_MODEL):
-    if _model not in _MODEL_PRICING:
-        print(
-            f"[synthesis] WARNING: no pricing configured for {_model} — its "
-            f"calls will log cost as null and the ${SYNTHESIS_BUDGET_USD:.2f} "
-            f"combined budget assertion cannot fire for them. Add it to "
-            f"_MODEL_PRICING in researcher.py."
-        )
+    warn_if_unpriced(_model, "synthesis", SYNTHESIS_BUDGET_USD)
 
 _CRASH_AT = os.getenv("SYNTHESIS_CRASH_AT")   # "research" | "risk_judge" | None
 

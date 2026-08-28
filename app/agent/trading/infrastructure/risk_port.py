@@ -25,11 +25,10 @@ from pathlib import Path
 from typing import Literal
 
 from app.infrastructure.llm import LLMClient, get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
 from app.agent.researcher import (
-    AGENT_MODEL,
-    _MODEL_PRICING,
     UsageSummary,
     _save_output,
     log_cost,
@@ -60,7 +59,7 @@ from app.agent.trading.infrastructure.debate_port import (
 Phase = Literal["enumerate", "score", "adjudicate", "respond"]
 
 # The project-wide model from .env, same override pattern as DEBATE_MODEL.
-RISK_MODEL = os.getenv("TRADING_RISK_MODEL") or AGENT_MODEL
+RISK_MODEL = model_for("risk_panel")
 
 RISK_MAX_TOKENS = 4000
 
@@ -71,12 +70,7 @@ RISK_MAX_TOKENS = 4000
 # against a linear extrapolation.
 RISK_BUDGET_USD = 0.35
 
-if RISK_MODEL not in _MODEL_PRICING:
-    print(
-        f"[risk] WARNING: no pricing configured for {RISK_MODEL} — per-turn "
-        f"costs will log as null and the ${RISK_BUDGET_USD:.2f} budget "
-        f"assertion cannot fire. Add it to _MODEL_PRICING in researcher.py."
-    )
+warn_if_unpriced(RISK_MODEL, "risk", RISK_BUDGET_USD)
 
 # Forced-failure hooks for the resume tests, mirroring DEBATE_CRASH_AT_TURN.
 _CRASH_AT = os.getenv("RISK_CRASH_AT_TURN")

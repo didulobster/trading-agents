@@ -27,11 +27,10 @@ from typing import Any
 
 from anthropic import BadRequestError
 from app.infrastructure.llm import LLMBadRequestError, LLMClient, get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
 from app.agent.researcher import (
-    AGENT_MODEL,
-    _MODEL_PRICING,
     UsageSummary,
     _save_output,
     log_cost,
@@ -62,7 +61,7 @@ from app.agent.trading.infrastructure.technical_interpreter_port import (
 # and that failure is invisible to both exit criteria — they test
 # termination and resume, not argument quality. Read a transcript by hand
 # after changing this, because no assertion here will tell you.
-DEBATE_MODEL = os.getenv("TRADING_DEBATE_MODEL") or AGENT_MODEL
+DEBATE_MODEL = model_for("debate")
 
 # Room for adaptive thinking plus the tool call. Thinking tokens count
 # against this, so the 1200 that fit a text-only turn does not fit here.
@@ -180,17 +179,7 @@ async def create_with_temperature_fallback(client: LLMClient, **kwargs):
         raise
 
 
-if DEBATE_MODEL not in _MODEL_PRICING:
-    # Not fatal, but the budget assertion is the only thing standing between a
-    # prompt-bloat regression and an unbounded bill, and an unpriced model
-    # makes every turn cost None — which sums to 0.00 and can never trip it.
-    # Say so once at import rather than letting the ceiling be silently
-    # absent for a whole run.
-    print(
-        f"[debate] WARNING: no pricing configured for {DEBATE_MODEL} — per-turn "
-        f"costs will log as null and the ${DEBATE_BUDGET_USD:.2f} budget "
-        f"assertion cannot fire. Add it to _MODEL_PRICING in researcher.py."
-    )
+warn_if_unpriced(DEBATE_MODEL, "debate", DEBATE_BUDGET_USD)
 
 # Forced-failure hooks for the resume tests. Deliberately in the port rather
 # than the node: variant B has to die AFTER the API call and before the node

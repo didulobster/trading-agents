@@ -1,4 +1,3 @@
-import os 
 import logging
 from dotenv import load_dotenv
 
@@ -8,13 +7,15 @@ from app.chunk import Chunk, Chunks
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 from app.application.citations import format_citation_tag, format_context_block
 from app.infrastructure.llm import get_client
+from app.infrastructure.llm.models import model_for
 
 load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
-claude_api_key = os.getenv("ANTHROPIC_API_KEY")
-claude_model = os.getenv("LLM_CLAUDE_MODEL")
+# The default for callers that do not pass one. `answer_question` takes
+# `model` as a parameter, so this is only the fallback.
+claude_model = model_for("answer")
 
 SYSTEM_PROMPT = """You answer questions about SEC filings using ONLY the provided context excerpts.
 Rules:
