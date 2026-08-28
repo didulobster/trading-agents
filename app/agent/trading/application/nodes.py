@@ -10,7 +10,7 @@ same split as the risk/debate ports vs. their nodes.
 from collections import Counter
 from datetime import date, datetime, timezone
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import get_client
 
 from app.agent.trading.application.guards import check_run_guards
 from app.agent.trading.application.risk_ledger import build_risk_ledger
@@ -596,7 +596,10 @@ async def synthesizer_node(state: TradingState) -> dict:
     # trials, and undercounting a run's real spend is exactly the failure
     # mode the run-level budget guard exists to prevent.
     all_cost_events: list = []
-    client = AsyncAnthropic()
+    # Routing, not bound to one model: this object is handed to
+    # run_synthesis, which uses it for BOTH the Research Manager and the
+    # Risk Judge, and those read two different model env vars.
+    client = get_client()
     for i in range(RISK_VERDICT_SAMPLES):
         if i == 0:
             # The first trial reuses the graph-checkpointed panel already in

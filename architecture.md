@@ -447,6 +447,48 @@ default), and metric extraction (`extraction_service`). These have
 disagreed in practice, which makes both cost attribution and quality
 attribution unreliable until they are set deliberately.
 
+## Provider abstraction (`app/infrastructure/llm/`)
+
+Every LLM client in the app is built by `get_client(model)`. Which provider
+serves a call is decided by the model id's prefix — `claude-*` to Anthropic,
+`deepseek*` to DeepSeek, `gpt-*`/`o1`/`o3`/`o4` to OpenAI — so a run can mix
+providers per role without a global switch. `LLM_PROVIDER` overrides that
+inference wholesale for a gateway whose model ids carry no useful prefix.
+
+**Anthropic's message shape is the internal lingua franca.** The ports build
+`tool_use`/`tool_result` turns by hand, the synthesis and debate schema
+retries re-send `response.content` verbatim, and the provenance guards read
+block text — that shape is load-bearing in tested code, so it stayed, and
+translation happens at the wire instead. `OpenAICompatClient` duck-types
+`AsyncAnthropic` for the surface this repo uses (`messages.create` returning
+`.content` / `.stop_reason` / `.usage`) and maps it onto an OpenAI-dialect
+chat-completions endpoint.
+
+What does not survive that translation, dropped with a once-per-process
+warning: `cache_control` breakpoints (DeepSeek caches automatically and has
+no equivalent to place), `thinking` / `output_config`, and `strict: true` on
+a tool schema. The last one has a measurable cost — `strict` was added to
+`SUBMIT_TOOL` because 3 of 3 live debate turns came back with a flattened
+payload without it, so expect a higher schema-retry rate off Anthropic.
+`max_tokens` is clamped to the provider's ceiling (8192 on `deepseek-chat`,
+against the research agent's 16000), which surfaces as
+`stop_reason=max_tokens` on genuinely long output rather than as a 400.
+
+Cost config moved to `llm/pricing.py` and is re-exported from `researcher.py`
+as `_MODEL_PRICING`. `LLM_PRICING_OVERRIDES` (JSON, env) merges over it, so
+a repriced model is a config change rather than a code change — and a
+malformed override raises at import rather than leaving a stale rate in
+place, because an unpriced or mispriced model makes the per-run budget
+assertion silently unable to fire.
+
+For DeepSeek, `input_tokens` is the *cache-miss* count, not `prompt_tokens`:
+their `prompt_tokens` is hits plus misses, and pricing it as input while also
+counting hits as `cache_read` would overstate every cached run.
+
+
+---
+
+
 
 ---
  

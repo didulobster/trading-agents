@@ -27,12 +27,12 @@ from pathlib import Path
 import sys
 import yaml
 
-from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
+from app.infrastructure.llm import MODEL_PRICING, get_client
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -56,31 +56,13 @@ AGENT_MAX_TOKENS = 16000
 WATCHLIST_PATH = Path("watchlist.yaml")
 MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]
 
-# Pricing per million tokens — add new models as needed
-_MODEL_PRICING = {
-    "claude-haiku-4-5-20251001": {
-        "input": 1.00,
-        "output": 5.00,
-        "cache_write": 1.25,
-        "cache_read": 0.10,
-    },
-    "claude-sonnet-4-5-20250929": {
-        "input": 3.00,
-        "output": 15.00,
-        "cache_write": 3.75,
-        "cache_read": 0.30,
-    },
-    # Sonnet 5 carries an introductory $2/$10 through 2026-08-31 and reverts
-    # to $3/$15 on Sep 1. Budgeted at the standing rate deliberately: pricing
-    # the intro here would make every debate-cost assertion start failing on
-    # a date nobody was watching, and over-estimating cost fails safe.
-    "claude-sonnet-5": {
-        "input": 3.00,
-        "output": 15.00,
-        "cache_write": 3.75,
-        "cache_read": 0.30,
-    },
-}
+# Cost config — per million tokens. The table moved to
+# app/infrastructure/llm/pricing.py when the provider layer landed, because
+# pricing is a property of the provider rather than of this agent. Re-exported
+# under the old name so the three ports and the budget assertions that import
+# `_MODEL_PRICING` from here keep working.
+_MODEL_PRICING = MODEL_PRICING
+
 
 def _trace(msg: str) -> None:
     """Print to stderr so tool traces don't pollute the memo output.
@@ -434,7 +416,7 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
     Tool traces go to stderr; only the final output goes to stdout.
     """
     reset_run_provenance()
-    client = AsyncAnthropic()
+    client = get_client(AGENT_MODEL)
     # The budget goes in the TASK, not the system prompt. The system block
     # carries its own cache breakpoint and is identical across every run;
     # interpolating a runtime number into it would rewrite that cache

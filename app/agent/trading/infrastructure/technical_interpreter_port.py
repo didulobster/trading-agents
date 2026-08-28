@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import get_client
 
 from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
 from app.agent.trading.domain.budget import CostEvent
@@ -107,7 +107,7 @@ def derive_relations(ind: TechnicalIndicators) -> list[str]:
 async def interpret_indicators(
     ticker: str, indicators: TechnicalIndicators, run_id: str | None = None
 ) -> tuple[str, list[str], list[str], float | None, CostEvent]:
-    client = AsyncAnthropic()
+    client = get_client(AGENT_MODEL)
     relations = "\n".join(f"- {r}" for r in derive_relations(indicators))
     prompt = (
         f"Ticker: {ticker}\n"

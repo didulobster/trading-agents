@@ -48,7 +48,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import LLMClient, get_client
 from pydantic import ValidationError
 
 from app.agent.researcher import (
@@ -605,7 +605,7 @@ def _risk_judge_tool() -> dict:
 
 
 async def _call_model(
-    client: AsyncAnthropic, model: str, tool: dict, system_blocks: list[dict],
+    client: LLMClient, model: str, tool: dict, system_blocks: list[dict],
     messages: list[dict], temperature: float | None,
 ):
     from app.agent.trading.infrastructure.debate_port import (
@@ -666,7 +666,7 @@ def _accumulate(usage: UsageSummary, raw) -> None:
 
 
 async def _call_with_schema_retry(
-    client: AsyncAnthropic, model: str, tool: dict, payload_cls,
+    client: LLMClient, model: str, tool: dict, payload_cls,
     system_blocks: list[dict], messages: list[dict], usage: UsageSummary,
     temperature: float | None,
 ):
@@ -739,7 +739,7 @@ async def run_research_manager(
     state,
     *,
     claims: dict[str, DebateClaim],
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     temperature: float | None = None,
 ) -> tuple[ResearchManagerPayload, float | None, list[str], CostEvent]:
     """Synthesizes the bull/bear debate ONLY. Returns (payload, cost,
@@ -754,7 +754,7 @@ async def run_research_manager(
     """
     _maybe_crash("research")
     ticker = state["ticker"]
-    client = client or AsyncAnthropic()
+    client = client or get_client(RESEARCH_MANAGER_MODEL)
 
     pack = build_research_pack(state)
     system_blocks = [
@@ -813,7 +813,7 @@ async def run_risk_judge(
     ledger: list[RiskLedgerEntry],
     claims: dict[str, DebateClaim],
     research: ResearchManagerPayload,
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     temperature: float | None = None,
 ) -> tuple[RiskJudgePayload, float | None, list[str], CostEvent]:
     """Synthesizes the risk ledger, reviews the Research Manager's output,
@@ -824,7 +824,7 @@ async def run_risk_judge(
     """
     _maybe_crash("risk_judge")
     ticker = state["ticker"]
-    client = client or AsyncAnthropic()
+    client = client or get_client(RISK_JUDGE_MODEL)
     ledger_by_id = {e.factor_id: e for e in ledger}
 
     pack = build_risk_judge_pack(state, ledger, research)
@@ -881,7 +881,7 @@ async def run_synthesis(
     base_gaps: list[str],
     base_evidence: list[str],
     as_of,
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     research_temperature: float | None = None,
     risk_temperature: float | None = None,
 ) -> DecisionMemo:

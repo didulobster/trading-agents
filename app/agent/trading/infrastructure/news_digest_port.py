@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import LLMClient, get_client
 
 from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
 from app.agent.trading.domain.budget import CostEvent
@@ -112,7 +112,7 @@ def _render_batch(articles: list[dict[str, Any]], ticker: str) -> str:
 
 
 async def _summarize_batch(
-    client: AsyncAnthropic, articles: list[dict[str, Any]], ticker: str
+    client: LLMClient, articles: list[dict[str, Any]], ticker: str
 ) -> tuple[list[dict[str, Any]], Any]:
     resp = await client.messages.create(
         model=AGENT_MODEL,
@@ -264,7 +264,7 @@ async def build_digest(
 
     articles, sanitizer_flags = _sanitize_articles(articles)
 
-    client = AsyncAnthropic()
+    client = get_client(AGENT_MODEL)
     usage = UsageSummary()
     items: list[NewsItem] = []
     issues: list[str] = []

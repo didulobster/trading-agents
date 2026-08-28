@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import LLMClient, get_client
 from pydantic import ValidationError
 
 from app.agent.researcher import (
@@ -397,7 +397,7 @@ def _check_turn(
 # ---------------------------------------------------------------------------
 
 async def _submit(
-    client: AsyncAnthropic, system_blocks: list[dict], messages: list[dict],
+    client: LLMClient, system_blocks: list[dict], messages: list[dict],
     temperature: float | None = None,
 ):
     return await create_with_temperature_fallback(
@@ -557,7 +557,7 @@ def _assemble(
 
 
 async def run_risk_turn(
-    state, persona: Persona, turn_index: int, client: AsyncAnthropic | None = None,
+    state, persona: Persona, turn_index: int, client: LLMClient | None = None,
     temperature: float | None = None,
 ) -> RiskTurn:
     """One turn: build the pack, make one forced tool call, run the guards.
@@ -585,7 +585,7 @@ async def run_risk_turn(
     texts = report_texts(state)
     debate_corpus = _debate_claim_corpus(debate_turns)
     pack = build_risk_evidence_pack(state)
-    client = client or AsyncAnthropic()
+    client = client or get_client(RISK_MODEL)
 
     system_blocks = [
         {"type": "text", "text": _build_system(persona)},

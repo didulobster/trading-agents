@@ -4,17 +4,16 @@ from dotenv import load_dotenv
 
 from app.domain.token_usage import TokenUsage
 from dataclasses import dataclass, field
-from anthropic import AsyncAnthropic
 from app.chunk import Chunk, Chunks
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 from app.application.citations import format_citation_tag, format_context_block
+from app.infrastructure.llm import get_client
 
 load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
 claude_api_key = os.getenv("ANTHROPIC_API_KEY")
-_client  = AsyncAnthropic(api_key=claude_api_key)
 claude_model = os.getenv("LLM_CLAUDE_MODEL")
 
 SYSTEM_PROMPT = """You answer questions about SEC filings using ONLY the provided context excerpts.
@@ -61,7 +60,9 @@ async def answer_question(
         f"Question: {question}"
     )
 
-    resp = await _client.messages.create(
+    # Resolved per call rather than once at import: `model` is what
+    # decides the provider now, and it is a parameter here.
+    resp = await get_client(model).messages.create(
         model=model,
         max_tokens=max_tokens,
         system=SYSTEM_PROMPT,

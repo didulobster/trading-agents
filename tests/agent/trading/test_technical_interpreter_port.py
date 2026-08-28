@@ -229,8 +229,12 @@ FULL_PRECISION_INDICATORS = TechnicalIndicators(
 
 
 def _mock_model_response(monkeypatch, text: str) -> None:
-    """Stand in for AsyncAnthropic with a canned response, and neutralize
-    log_cost so tests don't append to the real docs/cost-log.jsonl."""
+    """Stand in for the LLM client with a canned response, and neutralize
+    log_cost so tests don't append to the real docs/cost-log.jsonl.
+
+    Patches `get_client`, not a provider class: which client the port builds
+    is now a function of the configured model, and this test does not care
+    which one it would have been."""
 
     class FakeClient:
         def __init__(self):
@@ -247,7 +251,7 @@ def _mock_model_response(monkeypatch, text: str) -> None:
                 ),
             )
 
-    monkeypatch.setattr(port, "AsyncAnthropic", FakeClient)
+    monkeypatch.setattr(port, "get_client", lambda *a, **k: FakeClient())
     monkeypatch.setattr(port, "log_cost", lambda *args, **kwargs: None)
 
 

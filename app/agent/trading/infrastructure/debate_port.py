@@ -25,7 +25,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import BadRequestError
+from app.infrastructure.llm import LLMBadRequestError, LLMClient, get_client
 from pydantic import ValidationError
 
 from app.agent.researcher import (
@@ -143,7 +144,7 @@ def reasoning_config(model: str, temperature: float | None) -> dict:
     return {}
 
 
-async def create_with_temperature_fallback(client: AsyncAnthropic, **kwargs):
+async def create_with_temperature_fallback(client: LLMClient, **kwargs):
     """`client.messages.create(**kwargs)`, but if the model rejects
     `temperature` outright, retry once without it.
 
@@ -165,7 +166,7 @@ async def create_with_temperature_fallback(client: AsyncAnthropic, **kwargs):
     """
     try:
         return await client.messages.create(**kwargs)
-    except BadRequestError as e:
+    except (BadRequestError, LLMBadRequestError) as e:
         message = str(e).lower()
         if "temperature" in kwargs and "temperature" in message and "deprecated" in message:
             print(
@@ -897,7 +898,7 @@ def check_claim_stability(payload: DebateTurnPayload, turns: list[DebateTurn]) -
 # ---------------------------------------------------------------------------
 
 async def _submit(
-    client: AsyncAnthropic, system_blocks: list[dict], messages: list[dict]
+    client: LLMClient, system_blocks: list[dict], messages: list[dict]
 ):
     reasoning: dict[str, Any] = {}
     if supports_adaptive_thinking(DEBATE_MODEL):
@@ -1002,7 +1003,7 @@ def _assert_within_budget(ticker: str, turns: list[DebateTurn], this_turn: float
 
 
 async def run_debate_turn(
-    state, side: Side, turn_index: int, client: AsyncAnthropic | None = None
+    state, side: Side, turn_index: int, client: LLMClient | None = None
 ) -> DebateTurn:
     """One turn: build the pack, make one forced tool call, run the guards.
 
@@ -1017,7 +1018,7 @@ async def run_debate_turn(
     turns: list[DebateTurn] = list(state.get("debate_turns") or [])
     texts = quotable_texts(state)
     pack = build_evidence_pack(state)
-    client = client or AsyncAnthropic()
+    client = client or get_client(DEBATE_MODEL)
 
     # Two blocks, stance first. The pack is identical across all six turns,
     # so it caches; the stance prefix differs, so bull and bear keep separate
