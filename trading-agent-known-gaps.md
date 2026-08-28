@@ -2319,3 +2319,107 @@ simplest possible factual question ("what was revenue"), and output length
 is what varies most with question complexity. The audit's ~28%-unlogged
 conclusion is unaffected in direction, and its per-call figure should still
 be read as an estimate.
+
+
+## Phase 9 exit criteria: final status (2026-08-28)
+
+Battery `p9-20260826`, `as_of=2026-08-26`, 5 tickers. **ASML dropped by
+explicit decision**, so this is a five-ticker battery scored against
+six-ticker criteria and that is stated rather than adjusted for.
+
+| ticker | verdict | confidence | samples | cost |
+|---|---|---|---|---|
+| ACN | hold | 0.93 | hold,hold,hold | $0.6945 |
+| FIG | hold | 0.91 | hold,hold,hold | $0.8628 |
+| NFLX | hold | 0.89 | hold,hold,hold | $0.7560 |
+| AVGO | **unresolved** | 0.89 | sell,hold | $1.0372 |
+| MSFT | hold | 0.88 | hold,hold,hold | $1.0377 |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | **PASS** — 6/6 after ingesting NFLX |
+| 2 | 6/6 runs complete | **FAIL (by decision)** — 5/5 attempted completed |
+| 3 | Schema-valid | **PASS** — 5/5 |
+| 4 | Verifier clean (in-band) | **PASS** — 0 `decision_failed` across 5 |
+| 5 | Zero Class A/B/E | **PASS** — 5 memos audited, none found |
+| 6 | C/D within ceiling | **FAIL** — 4 total, ACN breaches the per-memo ≤1 |
+| 7 | `as_of_date` integrity | **PASS** — all 5 carry 2026-08-26, no lookahead |
+| 8 | Verdict-direction stability | **NOT RUN** |
+| 9 | Cost ≤ $4.00 | **FAIL** — $4.7950 actual, $4.3881 excluding waste |
+
+### The two genuine failures
+
+**Criterion 9 failed for the reason predicted before the battery started.**
+The $4.00 ceiling was set against $0.45/run, derived from Phase 7's $2.24÷5.
+Measured with real fundamentals the figure is **$0.69–$1.04/run**. Five clean
+runs come to $4.3881; actual spend was $4.7950 including $0.4069 burned by a
+resume against an expired deadline (fixed, see the entry above). The
+criterion did not drift during the phase — its basis was wrong going in.
+
+**Criterion 6 failed on ACN alone.** Final tally across all five memos:
+
+| memo | A | B | C | D | C+D |
+|---|---|---|---|---|---|
+| ACN | 0 | 0 | 1 | 1 | **2** |
+| NFLX | 0 | 0 | 0 | 1 | 1 |
+| AVGO | 0 | 0 | 0 | 1 | 1 |
+| FIG | 0 | 0 | 0 | 0 | **0** |
+| MSFT | 0 | 0 | 0 | 0 | **0** |
+| **total** | **0** | **0** | **1** | **3** | **4** |
+
+Ceiling: ≤1 per memo, ≤3 per battery. ACN breaches per-memo; the battery
+breaches at 4. Both by one.
+
+### FIG and MSFT audited clean — with the confound stated
+
+Both were audited under the corrected method (corpora materialized from the
+checkpoint, positive control on every absence claim). Every figure traces:
+MSFT's 6.4% FCF decline, 79.8% capex growth, 61bp Intelligent Cloud
+compression, $67.0B FCF, 41.3% margin; FIG's 136% NDR, 41% growth, 129%
+SBC-to-revenue, $242.7M FCF, $275M operating loss, 27.03 price.
+
+These are the two memos synthesized AFTER the units rule landed, and both
+are clean where all three earlier memos carried a unit/label defect each.
+**That is not evidence the rule worked.** n=2, and it is confounded: FIG
+carries no leverage ratios at all (zero debt), so the rule had almost no
+surface to bind on, and MSFT's single basis-point claim is about a MARGIN,
+where basis points is the correct unit anyway. The rule may be working; this
+battery cannot tell.
+
+Two things checked and cleared rather than counted:
+
+- **MSFT "above the 40.7% threshold"** — 40.7% appears nowhere in the
+  grounded corpus. It is a forward risk-trigger the panel set, not a cited
+  figure, same shape as AVGO's "above 4.0x". Not a defect.
+- **MSFT mentions 2027** (flagged by the gate as a lookahead lead) — a 2027
+  debt maturity and FY2027 lease commencements, both disclosed in the FY2026
+  10-K, which predates `as_of`. Not lookahead.
+
+### A Class C in the analyst layer that did NOT reach the memo
+
+MSFT's fundamentals report, line 17, contradicts itself inside one sentence:
+
+> "**Free cash flow grew to $67.0B (FY2026) from $71.6B (FY2025)** ... while
+> FCF **declined 6.4%**"
+
+$67.0B is less than $71.6B. The headline says "grew to"; the same bullet's
+body says "declined". **The memo did not inherit it** — MSFT's memo says
+"FCF fell 6.4%" and "FCF declining while capex surged", correctly.
+
+Recorded because it is the same defect class the battery was measuring, one
+layer upstream of where the audit looks, and it propagated by luck rather
+than by any guard. The audit scope is the memo; nothing checks the analyst
+reports for directional self-consistency.
+
+### Not run, and what it would take
+
+**Criterion 8 (verdict-direction stability) was never run.** It needs two
+re-runs at ~$1.00 each. The gate nominates MSFT (lowest confidence, 0.88)
+and NFLX (least-tested input) — though AVGO is the more interesting subject,
+since its `unresolved` came from a 2-sample split after the fabrication
+guard dropped a trial, which is now the third independent observation of
+AVGO verdict instability.
+
+**Phase 9 does not close.** Criteria 6 and 9 fail on their own terms, and 2
+fails by decision. Criterion 8 is unmeasured. Per §8 the ceiling breach
+governs: characterize the gap rather than patch and re-run.
