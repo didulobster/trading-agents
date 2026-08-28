@@ -25,12 +25,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic, BadRequestError
+from anthropic import BadRequestError
+from app.infrastructure.llm import LLMBadRequestError, LLMClient, get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
 from app.agent.researcher import (
-    AGENT_MODEL,
-    _MODEL_PRICING,
     UsageSummary,
     _save_output,
     log_cost,
@@ -61,7 +61,7 @@ from app.agent.trading.infrastructure.technical_interpreter_port import (
 # and that failure is invisible to both exit criteria — they test
 # termination and resume, not argument quality. Read a transcript by hand
 # after changing this, because no assertion here will tell you.
-DEBATE_MODEL = os.getenv("TRADING_DEBATE_MODEL") or AGENT_MODEL
+DEBATE_MODEL = model_for("debate")
 
 # Room for adaptive thinking plus the tool call. Thinking tokens count
 # against this, so the 1200 that fit a text-only turn does not fit here.
@@ -143,7 +143,7 @@ def reasoning_config(model: str, temperature: float | None) -> dict:
     return {}
 
 
-async def create_with_temperature_fallback(client: AsyncAnthropic, **kwargs):
+async def create_with_temperature_fallback(client: LLMClient, **kwargs):
     """`client.messages.create(**kwargs)`, but if the model rejects
     `temperature` outright, retry once without it.
 
@@ -165,7 +165,7 @@ async def create_with_temperature_fallback(client: AsyncAnthropic, **kwargs):
     """
     try:
         return await client.messages.create(**kwargs)
-    except BadRequestError as e:
+    except (BadRequestError, LLMBadRequestError) as e:
         message = str(e).lower()
         if "temperature" in kwargs and "temperature" in message and "deprecated" in message:
             print(
@@ -179,17 +179,7 @@ async def create_with_temperature_fallback(client: AsyncAnthropic, **kwargs):
         raise
 
 
-if DEBATE_MODEL not in _MODEL_PRICING:
-    # Not fatal, but the budget assertion is the only thing standing between a
-    # prompt-bloat regression and an unbounded bill, and an unpriced model
-    # makes every turn cost None — which sums to 0.00 and can never trip it.
-    # Say so once at import rather than letting the ceiling be silently
-    # absent for a whole run.
-    print(
-        f"[debate] WARNING: no pricing configured for {DEBATE_MODEL} — per-turn "
-        f"costs will log as null and the ${DEBATE_BUDGET_USD:.2f} budget "
-        f"assertion cannot fire. Add it to _MODEL_PRICING in researcher.py."
-    )
+warn_if_unpriced(DEBATE_MODEL, "debate", DEBATE_BUDGET_USD)
 
 # Forced-failure hooks for the resume tests. Deliberately in the port rather
 # than the node: variant B has to die AFTER the API call and before the node
@@ -897,7 +887,7 @@ def check_claim_stability(payload: DebateTurnPayload, turns: list[DebateTurn]) -
 # ---------------------------------------------------------------------------
 
 async def _submit(
-    client: AsyncAnthropic, system_blocks: list[dict], messages: list[dict]
+    client: LLMClient, system_blocks: list[dict], messages: list[dict]
 ):
     reasoning: dict[str, Any] = {}
     if supports_adaptive_thinking(DEBATE_MODEL):
@@ -1002,7 +992,7 @@ def _assert_within_budget(ticker: str, turns: list[DebateTurn], this_turn: float
 
 
 async def run_debate_turn(
-    state, side: Side, turn_index: int, client: AsyncAnthropic | None = None
+    state, side: Side, turn_index: int, client: LLMClient | None = None
 ) -> DebateTurn:
     """One turn: build the pack, make one forced tool call, run the guards.
 
@@ -1017,7 +1007,7 @@ async def run_debate_turn(
     turns: list[DebateTurn] = list(state.get("debate_turns") or [])
     texts = quotable_texts(state)
     pack = build_evidence_pack(state)
-    client = client or AsyncAnthropic()
+    client = client or get_client(DEBATE_MODEL)
 
     # Two blocks, stance first. The pack is identical across all six turns,
     # so it caches; the stance prefix differs, so bull and bear keep separate

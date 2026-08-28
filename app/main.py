@@ -24,6 +24,7 @@ from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.application.citations import format_citation_tag
 
+from app.infrastructure.llm.models import model_for
 from app.infrastructure.edgar.client import EdgarClient, periodic_forms
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.queries.corpus_status import CorpusStatusQuery
@@ -44,7 +45,7 @@ from app.llm import answer_question
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
-claude_model = os.getenv("LLM_CLAUDE_MODEL")
+claude_model = model_for("answer")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

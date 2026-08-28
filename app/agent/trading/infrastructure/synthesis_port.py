@@ -48,12 +48,11 @@ import re
 import sys
 from dataclasses import dataclass, field
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import LLMClient, get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
 from app.agent.researcher import (
-    AGENT_MODEL,
-    _MODEL_PRICING,
     UsageSummary,
     log_cost,
 )
@@ -78,8 +77,8 @@ from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_
 # switching back makes the temperature=0 replay a genuine controlled
 # condition for the Research Manager/Risk Judge too, not just the risk
 # panel. Still overridable per-role independent of the project-wide default.
-RESEARCH_MANAGER_MODEL = os.getenv("TRADING_RESEARCH_MANAGER_MODEL") or AGENT_MODEL
-RISK_JUDGE_MODEL = os.getenv("TRADING_RISK_JUDGE_MODEL") or AGENT_MODEL
+RESEARCH_MANAGER_MODEL = model_for("research_manager")
+RISK_JUDGE_MODEL = model_for("risk_judge")
 
 SYNTHESIS_MAX_TOKENS = 4000
 
@@ -91,13 +90,7 @@ SYNTHESIS_MAX_TOKENS = 4000
 SYNTHESIS_BUDGET_USD = 0.30
 
 for _model in (RESEARCH_MANAGER_MODEL, RISK_JUDGE_MODEL):
-    if _model not in _MODEL_PRICING:
-        print(
-            f"[synthesis] WARNING: no pricing configured for {_model} — its "
-            f"calls will log cost as null and the ${SYNTHESIS_BUDGET_USD:.2f} "
-            f"combined budget assertion cannot fire for them. Add it to "
-            f"_MODEL_PRICING in researcher.py."
-        )
+    warn_if_unpriced(_model, "synthesis", SYNTHESIS_BUDGET_USD)
 
 _CRASH_AT = os.getenv("SYNTHESIS_CRASH_AT")   # "research" | "risk_judge" | None
 
@@ -605,7 +598,7 @@ def _risk_judge_tool() -> dict:
 
 
 async def _call_model(
-    client: AsyncAnthropic, model: str, tool: dict, system_blocks: list[dict],
+    client: LLMClient, model: str, tool: dict, system_blocks: list[dict],
     messages: list[dict], temperature: float | None,
 ):
     from app.agent.trading.infrastructure.debate_port import (
@@ -666,7 +659,7 @@ def _accumulate(usage: UsageSummary, raw) -> None:
 
 
 async def _call_with_schema_retry(
-    client: AsyncAnthropic, model: str, tool: dict, payload_cls,
+    client: LLMClient, model: str, tool: dict, payload_cls,
     system_blocks: list[dict], messages: list[dict], usage: UsageSummary,
     temperature: float | None,
 ):
@@ -739,7 +732,7 @@ async def run_research_manager(
     state,
     *,
     claims: dict[str, DebateClaim],
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     temperature: float | None = None,
 ) -> tuple[ResearchManagerPayload, float | None, list[str], CostEvent]:
     """Synthesizes the bull/bear debate ONLY. Returns (payload, cost,
@@ -754,7 +747,7 @@ async def run_research_manager(
     """
     _maybe_crash("research")
     ticker = state["ticker"]
-    client = client or AsyncAnthropic()
+    client = client or get_client(RESEARCH_MANAGER_MODEL)
 
     pack = build_research_pack(state)
     system_blocks = [
@@ -813,7 +806,7 @@ async def run_risk_judge(
     ledger: list[RiskLedgerEntry],
     claims: dict[str, DebateClaim],
     research: ResearchManagerPayload,
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     temperature: float | None = None,
 ) -> tuple[RiskJudgePayload, float | None, list[str], CostEvent]:
     """Synthesizes the risk ledger, reviews the Research Manager's output,
@@ -824,7 +817,7 @@ async def run_risk_judge(
     """
     _maybe_crash("risk_judge")
     ticker = state["ticker"]
-    client = client or AsyncAnthropic()
+    client = client or get_client(RISK_JUDGE_MODEL)
     ledger_by_id = {e.factor_id: e for e in ledger}
 
     pack = build_risk_judge_pack(state, ledger, research)
@@ -881,7 +874,7 @@ async def run_synthesis(
     base_gaps: list[str],
     base_evidence: list[str],
     as_of,
-    client: AsyncAnthropic | None = None,
+    client: LLMClient | None = None,
     research_temperature: float | None = None,
     risk_temperature: float | None = None,
 ) -> DecisionMemo:

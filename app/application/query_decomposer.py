@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 import logging
 
 from app.domain.token_usage import TokenUsage
-import os
 import re
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import get_client
+from app.infrastructure.llm.models import model_for
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +107,8 @@ class QueryDecomposer:
     """
 
     def __init__(self, model: str | None = None):
-        self._client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        self._model = model or os.getenv("LLM_CLAUDE_MODEL")
+        self._model = model or model_for("decomposer")
+        self._client = get_client(self._model)
 
     def needs_rewrite(self, query: str) -> str | None:
         """Stage 1: cheap detection.

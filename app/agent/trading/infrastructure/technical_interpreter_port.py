@@ -3,9 +3,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
+from app.infrastructure.llm import get_client
+from app.infrastructure.llm.models import model_for, warn_if_unpriced
 
-from app.agent.researcher import AGENT_MODEL, UsageSummary, _save_output, log_cost
+# Its own knob (TRADING_TECHNICAL_MODEL), defaulting to the
+# project-wide model — which is all this role had before.
+TECHNICAL_MODEL = model_for("technical")
+warn_if_unpriced(TECHNICAL_MODEL, "technical")
+
+from app.agent.researcher import UsageSummary, _save_output, log_cost
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
@@ -107,7 +113,7 @@ def derive_relations(ind: TechnicalIndicators) -> list[str]:
 async def interpret_indicators(
     ticker: str, indicators: TechnicalIndicators, run_id: str | None = None
 ) -> tuple[str, list[str], list[str], float | None, CostEvent]:
-    client = AsyncAnthropic()
+    client = get_client(TECHNICAL_MODEL)
     relations = "\n".join(f"- {r}" for r in derive_relations(indicators))
     prompt = (
         f"Ticker: {ticker}\n"
@@ -117,7 +123,7 @@ async def interpret_indicators(
         "Provide the interpretation now."
     )
     response = await client.messages.create(
-        model=AGENT_MODEL,
+        model=TECHNICAL_MODEL,
         max_tokens=512,
         system=TECHNICAL_INTERPRETER_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
@@ -132,7 +138,7 @@ async def interpret_indicators(
     usage.output_tokens = u.output_tokens
     event_id = new_event_id("technical")
     cost = log_cost(ticker, "trading-technical", usage, run_id=run_id, event_id=event_id)
-    cost_event = record_cost_event(event_id, "technical", usage, AGENT_MODEL, cost)
+    cost_event = record_cost_event(event_id, "technical", usage, TECHNICAL_MODEL, cost)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
     flagged_claims = flag_contradicted_claims(interpretation, indicators)
