@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -52,6 +53,51 @@ DEFAULT_MAX_USD = 0.75
 DEFAULT_WALL_CLOCK_TIMEOUT_S = 1800
 
 
+def _describe_stale_budget(values: dict, max_usd: float, wall_clock_timeout_s: float) -> str | None:
+    """Refuse a resume whose inherited deadline has already passed, and say
+    so when the inherited budget disagrees with the flags just given.
+
+    Returns an error string to print, or None to proceed. Checked BEFORE
+    `ainvoke` so a doomed resume costs nothing: the run-level guards can only
+    fire between nodes, which on this graph means after the fundamentals
+    stage has already been paid for.
+    """
+    budget = values.get("budget")
+    if budget is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    lines = []
+    if budget.deadline_utc <= now:
+        overdue = now - budget.deadline_utc
+        lines.append(
+            f"REFUSING TO RESUME: this thread's deadline passed "
+            f"{_humanize(overdue)} ago ({budget.deadline_utc.isoformat()}).\n"
+            f"The deadline is an absolute instant fixed when the run first "
+            f"started, not a fresh window per attempt, so resuming would run "
+            f"the expensive analyst stages and then abort on the first guard "
+            f"check — paying full price for no memo."
+        )
+    if abs(budget.max_usd - max_usd) > 1e-9:
+        lines.append(
+            f"NOTE: --max-usd {max_usd:.2f} is IGNORED on a resume; this "
+            f"thread carries ${budget.max_usd:.2f} from its first attempt."
+        )
+    if not lines:
+        return None
+
+    lines.append(
+        "Start a fresh thread instead (--thread-id ...-r2), which takes the "
+        "budget and deadline from this command line."
+    )
+    return "\n".join(lines)
+
+
+def _humanize(delta: timedelta) -> str:
+    hours, rem = divmod(int(delta.total_seconds()), 3600)
+    return f"{hours}h{rem // 60:02d}m" if hours else f"{rem // 60}m"
+
+
 async def run(
     ticker: str,
     thread_id: str | None,
@@ -85,7 +131,24 @@ async def run(
             result = state.values
         elif state.next:
             print(f"Resuming unfinished run for {ticker} at: {state.next}")
-            invoked = True
+            # A resume inherits the checkpoint's budget and deadline, never
+            # the flags on THIS command line — see the comment on the
+            # new-run branch below for why that rule exists. It is the right
+            # rule and it had a hole: nothing said so out loud, and nothing
+            # checked whether the inherited deadline was already in the past.
+            #
+            # Live cost of that hole (MSFT, 2026-08-28): a thread whose first
+            # attempt died ~17 hours earlier was resumed with --max-usd 1.40.
+            # The run silently used the checkpointed 1.10, executed the whole
+            # fundamentals stage, then aborted `deadline_exceeded` on the
+            # first guard check after it — $0.4069 spent, no memo. The
+            # deadline is an absolute instant, so it had expired long before
+            # the process started; the guard simply had no chance to say so
+            # until an expensive node had already run.
+            stale = _describe_stale_budget(state.values, max_usd, wall_clock_timeout_s)
+            if stale:
+                print(stale, file=sys.stderr)
+                return None
             result = await graph.ainvoke(None, config=config)
         else:
             print(f"Starting new run for {ticker}")
