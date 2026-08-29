@@ -55,10 +55,21 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("manifest", type=Path)
     ap.add_argument("--tickers", nargs="+", required=True)
+    ap.add_argument(
+        "--thread-id", action="append", default=[], metavar="TICKER=THREAD",
+        help=(
+            "Override the derived thread id for one ticker, e.g. "
+            "MSFT=deepseek-v4-verify-3. Needed when a run predates the "
+            "battery's naming convention but belongs in its manifest — a "
+            "run made by hand, or one carried over from an earlier "
+            "experiment at the same as_of."
+        ),
+    )
     ap.add_argument("--vault", type=Path,
                     default=Path.home() / "Documents/Obsidian Vault/EDGAR-MEMO/memos")
     args = ap.parse_args()
 
+    overrides = dict(pair.split("=", 1) for pair in args.thread_id)
     manifest = BatteryManifest.model_validate_json(args.manifest.read_text())
     summaries = _summaries()
     have = {r.ticker for r in manifest.runs}
@@ -67,7 +78,7 @@ def main() -> None:
         if ticker in have:
             print(f"{ticker}: already present, skipping")
             continue
-        thread_id = f"trading-{ticker}-{manifest.battery_id}-a2"
+        thread_id = overrides.get(ticker, f"trading-{ticker}-{manifest.battery_id}-a2")
         s = summaries.get(thread_id)
         if s is None:
             print(f"{ticker}: no run_summary for {thread_id}, skipping")
