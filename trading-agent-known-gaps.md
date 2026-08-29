@@ -182,6 +182,14 @@ of the debate*, which the exit criteria do not test.
    field is not dead weight. The concession guard has still never fired in
    production, so its correctness rests entirely on unit tests.
 
+   **[Diagnosed 2026-08-29 — see "The concession channel has never fired"
+   below.]** Re-measured at 42 transcripts / 249 turns, still 0 `concede`.
+   The cause is not that a justified concession is unattractive: it was not
+   expressible. `stance` is per-turn, concession is per-claim, and the guard
+   raised on a `concession_trigger` set outside `stance='concede'` — so the
+   only shape that occurs (accept one point, hold the rest) was a hard error.
+   Debaters conceded in prose instead, where nothing counted it.
+
    **[Investigated 2026-08-24, falsified] Read against claim volume, this
    looked like it might be worse than "rare concessions": 145 claims / 30
    turns = 4.83 per turn against a `max_length=5` cap — the schema is binding
@@ -2994,3 +3002,82 @@ record — and that is the change that would make `RISK_VERDICT_SAMPLES = 5`
 worth its ~$0.07/run, since Laplace at N=3 yields only {0.80, 0.60, 0.40}
 while N=5 yields {0.857, 0.714, 0.571, 0.429}. Deliberately not done here:
 it is a calibration decision, not a naming one.
+
+## The concession channel has never fired, and the summary said so wrong
+## (2026-08-29)
+
+Phase 5 gap (4) above recorded "0 `concede` across 30 turns" and left it as
+an open oddity. Re-measured across the whole vault — **42 debate transcripts,
+249 turns: 245 `hold`, 4 `sharpen`, 0 `concede`.** The structural concession
+channel has never fired, in any run, ever. Its correctness still rests
+entirely on unit tests.
+
+**Meanwhile debaters do concede — in prose, where nothing counts it.** MSFT,
+2026-08-29 (`memos/MSFT/20260829/2026-0829-143228/MSFT-debate.md`), turn 2,
+bull, `stance=hold`:
+
+> The bear's strongest point is the material weakness, and I concede that is
+> a genuine overhang. But the authoritative technical relations show...
+
+The transcript summary for that debate printed **"Structurally-justified
+concessions: 0"**, and the Research Manager, reading the same transcript,
+wrote into `MSFT-decision.md`: "The bull's strongest conceded point is that
+the material weakness is a genuine overhang [turn 2]". One artifact said the
+debate contained a concession; the other said it contained none. Both were
+generated from the same six turns.
+
+### Cause: a modeling mismatch, not a weak prompt
+
+`stance` is one label per **turn**. A concession is about one **claim**. The
+concession that actually occurs is partial — accept the point you cannot
+answer, hold the rest — and such a turn is honestly `hold`, because the
+debater IS holding. `check_concession` then made the truthful annotation
+impossible: `elif payload.concession_trigger: raise` meant naming the claim
+that moved you on any stance but `concede` was a hard error that killed the
+turn. The only concession the schema accepted was total capitulation, which
+no debater with a case ever offers. So the concession went into the prose.
+
+Two prose concessions exist in 249 turns (MSFT turn 2 above; ACN
+`2026-0829-103316` turn 2, "The bear's central point is the DOJ matter, and I
+concede it is open-ended — but..."). Both are the partial shape. Neither was
+expressible.
+
+### Why the counter was NOT widened with a keyword match
+
+Measured before deciding. Of 21 occurrences of `concede*` across the vault:
+
+| Shape | Count | Example |
+|---|---:|---|
+| Debater says the OPPONENT concedes X — an **attack** | 18 | "The bull concedes capex is consuming nearly all incremental cash" |
+| Negated | 1 | "None of this is a reason to concede a high-quality... franchise" |
+| Genuine first-person concession | 2 | "I concede that is a genuine overhang" |
+
+A `"I concede"`-style keyword counter would report ~21 concessions where
+there are 2, and would invert the direction of 18 of them — counting an
+attack on the opponent as a surrender to them. Prose is not a channel.
+
+### Fix
+
+1. **`concession_trigger` is decoupled from `stance`.** It names the one
+   opposing `claim_id` accepted this turn, on any stance. The guard's whole
+   point is unchanged and unweakened: the id must still be a real claim
+   belonging to the OTHER side. Severity splits along the two postures
+   already in this module — `stance='concede'` with a bad trigger still
+   RAISES (it changes what the transcript says the debate did), a partial
+   concession with a bad trigger DROPS AND FLAGS like `check_rebuts`
+   (`unresolved_concession: <id>` in `guard_flags`).
+2. **Prompt** (`_SYSTEM_TEMPLATE` rule 6) tells the model the partial shape
+   is the expected one, and that a concession written only in prose is
+   invisible downstream. Prompt-only, and flagged as such in the module
+   docstring — the structural half is what is actually enforced.
+3. **Zero is reported as what it is.** The summary row now reads
+   `N (X full, Y partial)`, and a debate with none carries a caveat saying no
+   turn named an opposing `claim_id` and that this is *not* evidence neither
+   side moved. `_debate_caveats` adds the same as a memo `data_gap`. This
+   half holds regardless of whether the prompt change ever moves the model.
+
+**Not verified live.** No pipeline run was made for this — the change is
+covered by unit tests only, and whether debaters actually start populating
+`concession_trigger` is unmeasured. The reporting fix (3) is deliberately
+independent of that: if the model never fills the field, the artifacts now
+say "nothing was recorded" instead of "nobody moved".

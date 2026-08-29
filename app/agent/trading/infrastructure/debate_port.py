@@ -14,6 +14,22 @@ agreement because agreement is what the pretraining distribution rewards.
 Directions recalled rather than re-read — verify before citing any of it.
 Four of the five counters here are enforced by pydantic or Python, because a
 prompt-only guardrail is the kind that degrades silently.
+
+Debate has the opposite failure mode too, and this module found it: total
+entrenchment. Across all 42 vault transcripts, 249 turns are `hold` or
+`sharpen` and NOT ONE is `concede`, while debaters concede in the argument
+prose. `check_concession`'s docstring has the diagnosis. Half the fix there is
+structural (a partial concession is now expressible and still validated); the
+other half — getting the model to route a prose concession into
+`concession_trigger` — is prompt-only and therefore exactly the kind of
+guardrail this module distrusts. It is written that way ON PURPOSE: the
+alternative is scanning the argument text for "I concede", and that does not
+work. Of 21 occurrences of the word across the vault, 18 are a debater saying
+the OPPONENT concedes something (an attack, the opposite of a concession) and
+one is a negation ("None of this is a reason to concede..."). A keyword
+counter would report ~21 concessions where there are 2 and invert the
+direction of 18 of them. So the prompt asks, and the reporting side states
+plainly what a zero means rather than claiming nobody moved.
 """
 
 from __future__ import annotations
@@ -258,21 +274,30 @@ HARD RULES — these are checked in code after you answer:
    genuinely new assertion.
 4. `rebuts` lists the opponent claim_ids you are directly attacking. It may
    be empty only on the opening turn.
-5. Stance:
+5. Stance — your OVERALL posture this turn:
    - 'hold'    — you are maintaining your position against the rebuttal.
    - 'sharpen' — you are narrowing or qualifying your own earlier claim.
-   - 'concede' — you accept a specific opposing claim. Then, and only then,
-     `concession_trigger` must name the opponent claim_id that moved you; on
-     every other stance it is the literal string 'none'. Naming a claim on a
-     non-concede stance is an error, and so is conceding to a claim_id that
-     is not in the transcript.
+   - 'concede' — the opposing claim has overturned your position. Rare.
+6. `concession_trigger` is a SEPARATE axis from stance. It names the ONE
+   opponent claim_id you are accepting as correct this turn, and it applies
+   on ANY stance. Accepting a point you cannot answer while holding your
+   overall case is the normal, expected shape: stance='hold' with
+   `concession_trigger` naming that claim. Reserve stance='concede' for the
+   rarer case where accepting it overturns your side.
+   IF YOUR ARGUMENT TEXT ACCEPTS AN OPPOSING POINT — "I concede X", "that is
+   a genuine overhang", "the bear is right about X", "X is real but" — YOU
+   MUST NAME THAT CLAIM'S id IN `concession_trigger`. A concession written
+   only in prose is invisible to everything downstream, which then reports
+   that neither side moved. The id must be an OPPONENT claim_id already in
+   the transcript; your own earlier claim is not a concession, and neither
+   is an id nobody made. If you accepted nothing this turn, send 'none'.
 
 A report marked "NOT RUN" is missing evidence, not neutral evidence. Do not
 infer anything from its absence, and do not argue from it in either direction.
 
 Do not concede to be agreeable, and do not manufacture disagreement. If the
-evidence genuinely does not support your side on a point, 'concede' it and
-argue the points where it does.
+evidence genuinely does not support your side on a point, name it in
+`concession_trigger` and argue the points where it does.
 
 Call `submit_argument` exactly once. Say nothing else."""
 
@@ -479,6 +504,7 @@ def render_transcript(turns: list[DebateTurn]) -> str:
             f"{turn.side.upper()} · stance={turn.payload.stance}"
             + (
                 f" · concedes to {turn.payload.concession_trigger}"
+                + ("" if turn.payload.stance == "concede" else " (partial)")
                 if turn.payload.concession_trigger
                 else ""
             )
@@ -812,20 +838,57 @@ def check_quotes(payload: DebateTurnPayload, texts: dict[str, str]) -> list[str]
 
 def check_concession(
     payload: DebateTurnPayload, turns: list[DebateTurn], side: Side
-) -> None:
+) -> str | None:
     """Concession must point at a real opposing claim, or it isn't one.
+    Returns a dangling `concession_trigger` that was DROPPED, else None.
 
     Highest-value guardrail in the phase and it costs nothing at runtime: it
     makes "you know, that's a fair point" structurally impossible unless the
-    fair point exists in the transcript and belongs to the other side.
+    fair point exists in the transcript and belongs to the other side. That
+    part is unchanged and is the reason this check must never be relaxed
+    into a keyword scan of the argument prose.
+
+    What changed 2026-08-29: `concession_trigger` is no longer gated on
+    `stance == 'concede'`. It used to be an error to name a conceded claim on
+    any other stance, and the effect of that coupling was that the channel
+    NEVER FIRED — across all 42 debate transcripts in the vault, 249 turns
+    were `hold` or `sharpen` and not one was `concede`, so every summary the
+    pipeline has ever written reported zero concessions.
+
+    The cause was a modeling mismatch, not a weak prompt. `stance` is one
+    label per TURN; a concession is about one CLAIM. The shape that actually
+    occurs is partial: accept the point you cannot answer, hold the rest.
+    MSFT turn 2 (2026-08-29) is the clean instance — "The bear's strongest
+    point is the material weakness, and I concede that is a genuine
+    overhang. But the authoritative technical relations show..." — and that
+    turn is honestly labelled `hold`, because the debater IS holding. The
+    old `elif` then made the truthful annotation impossible: naming the
+    claim that moved you on a `hold` stance was a hard error that killed the
+    turn. The only concession the schema accepted was total capitulation,
+    which is not a thing a debater with a case ever does. So the concession
+    went into the prose, where the Research Manager read it and cited it
+    ("The bull's strongest conceded point is that the material weakness is a
+    genuine overhang [turn 2]") while the transcript summary printed
+    "Structurally-justified concessions: 0" about the same debate.
+
+    Two severities, matching the two postures already in this module:
+
+      stance='concede'  — RAISES, as before. A full concession changes what
+        the transcript says the debate DID, so a trigger naming a claim
+        nobody made is corruption, not a typo.
+      any other stance  — DROPS AND FLAGS, like `check_rebuts`. A partial
+        concession is an annotation on an otherwise sound turn; the stance,
+        the argument and the claims are unaffected by a bad pointer, and
+        killing a run that has already paid for fundamentals over one is the
+        trade e7c82b8 and the `check_rebuts` softening both declined to make.
     """
+    prior_ids = {
+        claim.claim_id
+        for turn in turns
+        if turn.side != side
+        for claim in turn.payload.claims
+    }
     if payload.stance == "concede":
-        prior_ids = {
-            claim.claim_id
-            for turn in turns
-            if turn.side != side
-            for claim in turn.payload.claims
-        }
         if payload.concession_trigger not in prior_ids:
             raise ValueError(
                 f"concede with concession_trigger="
@@ -833,11 +896,12 @@ def check_concession(
                 f"claim_id in this transcript (opposing ids: "
                 f"{sorted(prior_ids) or 'none'})"
             )
-    elif payload.concession_trigger:
-        raise ValueError(
-            f"concession_trigger={payload.concession_trigger!r} set on a "
-            f"non-concede stance ({payload.stance})"
-        )
+        return None
+    if payload.concession_trigger and payload.concession_trigger not in prior_ids:
+        dropped = payload.concession_trigger
+        payload.concession_trigger = ""
+        return dropped
+    return None
 
 
 def check_rebuts(
@@ -1104,7 +1168,12 @@ async def run_debate_turn(
     # `check_rebuts` DROPS AND FLAGS: a dangling rebuts id is a bad pointer
     # inside an otherwise sound turn, and killing a run that has already paid
     # for fundamentals over one is a poor trade. See its docstring.
-    check_concession(payload, turns, side)
+    #
+    # `check_concession` does BOTH, split on stance: it raises on a bad
+    # trigger under stance='concede' for the reason above, and drops+flags a
+    # bad trigger on a partial concession (any other stance), which is the
+    # same bad-pointer-in-a-sound-turn shape as `rebuts`.
+    dropped_concession = check_concession(payload, turns, side)
     dropped_rebuts = check_rebuts(payload, turns, side)
 
     node_name = f"{side}_turn"
@@ -1129,7 +1198,9 @@ async def run_debate_turn(
         guard_flags=_flag_debate_numbers(
             payload.argument + "\n" + "\n".join(c.text for c in payload.claims),
             pack,
-        ) + ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else []),
+        )
+        + ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else [])
+        + ([f"unresolved_concession: {dropped_concession}"] if dropped_concession else []),
         unquoted_evidence=check_quotes(payload, texts),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
@@ -1152,7 +1223,19 @@ def _format_debate_markdown(
     flagged = [f for t in turns for f in t.guard_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
     drifted = sorted({cid for t in turns for cid in t.claim_text_drift})
-    concessions = [t for t in turns if t.payload.stance == "concede"]
+    # Split, because the two mean different things and collapsing them is how
+    # this summary came to report "0" about a debate that contained a
+    # concession. A `full` concession overturns the debater's position; a
+    # `partial` one accepts a specific opposing claim while holding the rest,
+    # and is the only shape observed live. Both are structurally justified in
+    # exactly the same sense — `check_concession` has verified the named id
+    # against the opposing side's claims — so both belong in the count.
+    full_concessions = [t for t in turns if t.payload.stance == "concede"]
+    partial_concessions = [
+        t for t in turns
+        if t.payload.stance != "concede" and t.payload.concession_trigger
+    ]
+    concessions = full_concessions + partial_concessions
 
     lines = [
         f"# {ticker} — Bull/Bear Debate",
@@ -1192,6 +1275,17 @@ def _format_debate_markdown(
             f"assertion — read `canonical_claims` (the first occurrence) as the "
             f"authoritative wording, not whichever turn is read last."
         )
+    if turns and not concessions:
+        caveats.append(
+            "**No concession was recorded structurally.** Zero here means no turn "
+            "named an opposing `claim_id` in `concession_trigger` — it is NOT "
+            "evidence that neither side moved. A debater who concedes a point in "
+            "the argument prose without naming its id is not counted, and that has "
+            "happened: MSFT 2026-08-29 turn 2 conceded the material weakness in "
+            "prose on a `hold` stance, and the Research Manager went on to cite "
+            "that concession while this table said zero. Read the arguments before "
+            "concluding the debate was unmoved."
+        )
     if caveats:
         lines += ["## Caveats", ""] + [f"- {c}" for c in caveats] + [""]
 
@@ -1201,7 +1295,8 @@ def _format_debate_markdown(
         "| Measure | Value |",
         "|---|---|",
         f"| Turns | {len(turns)} |",
-        f"| Structurally-justified concessions | {len(concessions)} |",
+        f"| Structurally-justified concessions | {len(concessions)} "
+        f"({len(full_concessions)} full, {len(partial_concessions)} partial) |",
         f"| Unproductive turns (no new claim, observational only) | "
         f"{sum(1 for t in turns if not t.productive)} |",
         f"| Flagged figures | {len(flagged)} |",
@@ -1219,6 +1314,7 @@ def _format_debate_markdown(
             f"*stance:* `{turn.payload.stance}`"
             + (
                 f" · *concedes to:* `{turn.payload.concession_trigger}`"
+                + ("" if turn.payload.stance == "concede" else " (partial)")
                 if turn.payload.concession_trigger
                 else ""
             )

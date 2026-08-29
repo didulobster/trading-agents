@@ -35,7 +35,10 @@ EvidenceRef = Literal["fundamentals", "technical", "news", "sentiment", "none"]
 # one it writes a stray "</antml parameter>" marker instead, and that landed
 # in `concession_trigger` on 4 of 4 live turns — which then tripped the
 # concession guard on a turn that was not conceding anything. Asking for the
-# literal 'none' produced a clean first attempt every time.
+# literal 'none' produced a clean first attempt every time. (That trip was
+# the old stance-gated guard, which raised on any trigger set outside
+# stance='concede'; it now drops and flags instead. The sentinel is still
+# what keeps a stray marker out of the field in the first place.)
 #
 # So the wire protocol uses a sentinel and Python normalizes it back: "" stays
 # the internal meaning of "absent", and nothing downstream has to know. A
@@ -83,11 +86,19 @@ class DebateTurnPayload(BaseModel):
     """EXACTLY what the LLM returns. No indices, no counters, no side."""
 
     stance: Stance
+    # NOT gated on stance. A debater who accepts one opposing point and holds
+    # the rest is the shape that actually occurs — see check_concession's
+    # docstring for the 249-turn transcript survey that found zero
+    # `stance='concede'` turns and prose concessions on `hold` ones.
     concession_trigger: str = Field(
         default="",
         description=(
-            "The opposing claim_id that moved you. The literal string 'none' "
-            "unless stance='concede'. Never an empty string."
+            "The ONE opposing claim_id you accept as correct this turn, on "
+            "ANY stance — including 'hold', where you accept that point but "
+            "hold your overall case. Required when stance='concede'. If your "
+            "argument text concedes a point, that point's id belongs here. "
+            "The literal string 'none' if you accepted nothing. Never an "
+            "empty string."
         ),
     )
     argument: str = Field(description="<=200 words.")
