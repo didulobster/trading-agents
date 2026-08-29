@@ -811,8 +811,11 @@ def check_concession(
         )
 
 
-def check_rebuts(payload: DebateTurnPayload, turns: list[DebateTurn], side: Side) -> None:
-    """Every rebutted claim_id must belong to a real opposing claim.
+def check_rebuts(
+    payload: DebateTurnPayload, turns: list[DebateTurn], side: Side
+) -> list[str]:
+    """Drop rebutted claim_ids that do not belong to a real opposing claim,
+    and return the ones dropped so the caller can flag them.
 
     The completeness gap `check_concession` closed for `stance='concede'`:
     nothing stopped `rebuts` from naming an id that was never made, or one
@@ -838,12 +841,28 @@ def check_rebuts(payload: DebateTurnPayload, turns: list[DebateTurn], side: Side
     }
     bad = [rid for rid in payload.rebuts if rid not in opposing_ids]
     if bad:
-        raise ValueError(
-            f"rebuts names {bad!r}, which {'is' if len(bad) == 1 else 'are'} "
-            f"not opposing claim_id(s) in this transcript (opposing ids: "
-            f"{sorted(opposing_ids) or 'none'}) — either a hallucinated id or "
-            f"the debater's own side"
-        )
+        # DROPPED, not raised. This used to raise ValueError and kill the
+        # run. Live cost of that (AVGO, deepseek-v4-flash, 2026-08-29): a
+        # bear turn named `technical-contained-uptrend`, an id in no
+        # transcript, and took down a run that had already paid for
+        # fundamentals, news and technical — $0.1586 for no memo, and no
+        # `run_summary` either, since the process died before writing one.
+        #
+        # A dangling `rebuts` is bad debate hygiene, not a corrupted
+        # artifact: the turn's argument and claims are unaffected and remain
+        # perfectly usable. Removing the id keeps the transcript honest
+        # (nothing downstream can resolve a reference that was never real),
+        # and the flag keeps the failure visible. Same posture, and the same
+        # reasoning, as e7c82b8's softening of the synthesis fabrication
+        # guard: drop the trial, not the run.
+        #
+        # Why this arose now: the check was added after measuring 95 of 95
+        # rebutted ids resolving correctly across five Haiku transcripts.
+        # That is a statement about one model. A guard calibrated on one
+        # model's failure modes should degrade rather than detonate when a
+        # different model deviates.
+        payload.rebuts = [rid for rid in payload.rebuts if rid not in bad]
+    return bad
 
 
 def is_productive(payload: DebateTurnPayload, turns: list[DebateTurn]) -> bool:
@@ -1045,11 +1064,19 @@ async def run_debate_turn(
         _accumulate(usage, retry.usage)
         payload = _extract(retry)   # a second failure raises out of the node
 
-    # Structural guards. These raise: in a checkpointed graph the last good
-    # super-step survives, so a loud failure costs a fix-and-resume while
-    # silent corruption costs a debate you cannot trust.
+    # Structural guards, and they differ deliberately.
+    #
+    # `check_concession` still RAISES: a concession is a termination-shaped
+    # event, so a concession trigger naming a claim nobody made changes what
+    # the transcript says the debate DID, and in a checkpointed graph the
+    # last good super-step survives — a loud failure costs a fix-and-resume
+    # while silent corruption costs a debate you cannot trust.
+    #
+    # `check_rebuts` DROPS AND FLAGS: a dangling rebuts id is a bad pointer
+    # inside an otherwise sound turn, and killing a run that has already paid
+    # for fundamentals over one is a poor trade. See its docstring.
     check_concession(payload, turns, side)
-    check_rebuts(payload, turns, side)
+    dropped_rebuts = check_rebuts(payload, turns, side)
 
     node_name = f"{side}_turn"
     event_id = new_event_id(node_name, turn_index=turn_index)
@@ -1073,7 +1100,7 @@ async def run_debate_turn(
         guard_flags=_flag_debate_numbers(
             payload.argument + "\n" + "\n".join(c.text for c in payload.claims),
             pack,
-        ),
+        ) + ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else []),
         unquoted_evidence=check_quotes(payload, texts),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
