@@ -2682,3 +2682,172 @@ to act on directly: the reader must cross-reference the Evidence section to
 recover any figure. Whether that is the right trade is a product judgement
 nobody has made explicitly, and it is now the main difference between the
 two models' output.
+
+
+## Discrimination probe: the verdict does respond to evidence, and the
+## confidence does not (2026-08-29)
+
+The deepseek battery closed with a question the criteria could not answer:
+six unanimous `hold`s at 0.92-0.97 fit "less noisy than Haiku" and "returns
+`hold` regardless of input" equally well. Criterion 8 cannot separate them —
+a system with no discriminating power is perfectly stable under re-run. Only
+changing the input can.
+
+### Design, and why the lever is legitimate
+
+One channel manipulated, the fundamentals report text; everything else held
+at the battery's settings — `as_of=2026-08-28`, deepseek-v4-flash in every
+role, same prompts, majority-of-3 sampling, live technical and news.
+
+`synthesis_port._grounded_corpus` builds from the analyst reports in state,
+not from the EDGAR vector store, so a substituted summary is grounded **by
+construction**: quotes resolve against it, the number guards check against
+it, `verify_decision_memo` passes. Nothing is smuggled past a guard. That is
+the point — this measures response to evidence, not the guards' reaction to
+malformed input. Both runs came back `*-decision.md`, not
+`*-decision_failed.md`.
+
+Variants are the real cached report with named `##` sections replaced and
+everything else carried through verbatim — preamble, untouched sections,
+appendices, and the red-flag rubric. Leaving the rubric untouched means the
+injected distress is distress **by the report's own standard**: MSFT goes
+MIXED/1 flag to IMPAIRED/10 flags, ACN MIXED/2 to IMPAIRED/8, in both cases
+tripping two independent IMPAIRED triggers (material weakness in ICFR,
+persistent accrual gap). Predictions were pre-registered before spending
+anything, in `docs/validation/disc-probe-20260829/pre-registration.md`.
+
+### Result
+
+| ticker | battery baseline | distressed | samples | conf | cost |
+|---|---|---|---|---|---|
+| MSFT | hold 0.94, hold x3 | **sell** | sell, hold, sell | **0.97** | $0.1541 |
+| ACN | hold 0.94, hold x3 | hold | hold, **sell**, hold | 0.93 | $0.1259 |
+
+$0.2801 for the arm. **The verdict distribution moved on both tickers**:
+0/3 sell to 2/3 on MSFT, 0/3 to 1/3 on ACN.
+
+- **P1 (a distressed run returns `sell`) — PASS.** MSFT flipped.
+- **P3 (the bear case cites the injected facts) — PASS**, on both. MSFT's
+  reasoning names the material weakness, the SEC subpoena, receivables
+  outrunning revenue, negative FCF, the maturity wall and the RPO decline.
+  ACN's names the adverse ICFR opinion, the 0.83x/0.59x OCF/NI gap, the
+  45.3%-vs-7.35% receivables gap, the margin collapse and the 82.8% fall in
+  operating income.
+- **P2 (confidence falls at least 0.15) — FAIL, and it failed upward.**
+
+**Reading B is refuted in its strong form.** The pipeline reads the evidence
+and the verdict follows it. Six unanimous holds were a fact about the six
+companies, not a fixed point of the model.
+
+### ACN held, and that hold is reasoned rather than reflexive
+
+The memo argues its own verdict: *"A hold reflects that net debt is modest
+and FCF is positive, so a sell is not warranted; but with reported earnings
+unreliable and the leading indicator declining, a buy cannot be justified."*
+
+It is also the pre-registered limitation of a single-channel manipulation
+showing up exactly where it was predicted to. The news channel stayed real
+and genuinely disagreed with the injected filings — analyst upgrades, a
+26.7% one-month gain, a 3.65% dividend yield — and the bull leaned on all
+three. A held verdict under evidence that conflicts across channels is
+defensible. ACN therefore neither confirms nor refutes; **MSFT carries the
+finding**, and one ticker is what this arm establishes.
+
+### The real defect this surfaced: confidence is not a function of anything
+
+MSFT's confidence **rose from 0.94 to 0.97** while its sample vote went from
+unanimous (hold x3) to split (sell, hold, sell). ACN reported 0.93 on a
+2-1 split against 0.94 on a unanimous baseline.
+
+A split vote reporting higher confidence than a unanimous one is backwards,
+and it is now measured rather than suspected. Across baseline, a
+verdict-flipping distressed input and a verdict-holding distressed input,
+confidence never leaves 0.92-0.97. It tracks neither evidence quality nor
+the panel's own agreement — the one quantity the run already has in hand at
+the moment it writes the number. `verdict_samples` is on the memo; the
+confidence beside it ignores it.
+
+This is the residue of the unanimity worry, relocated. The verdict is
+informative; the confidence is decorative, and it is the field a reader is
+most likely to mistake for a measure of how much to trust the verdict.
+
+### Incidental, recorded because the probe is where they showed
+
+- **Both runs hit the 3-round debate cap** — "a truncated argument, not a
+  concluded one", the known Phase 5 residual, unchanged under a much more
+  one-sided input.
+- **The fabrication guard fired on MSFT** (`-36.8%` in the Research
+  Manager's case, in no source). First observation of it firing on a
+  synthetic-input run; the number is in the flagged list, so containment
+  worked as designed.
+- **ACN carried 3 claims and 2 risk factors whose quoted span is not in the
+  cited report**, plus 4 reused `claim_id`s. Both are known classes and
+  neither is caused by the manipulation, but the rate on one run is higher
+  than the battery's.
+
+
+## Phase 9 criterion 8: run at last, and it PASSES (2026-08-29)
+
+The one criterion never run in either battery. Two tickers re-run at the
+battery's `as_of=2026-08-28` on **fresh threads, not resumes**, with real
+fundamentals — a cached report would have frozen the largest single source
+of run-to-run variation, which is the opposite of what the criterion asks.
+Recorded against a clean tree at `5188f95`.
+
+Subjects chosen over the gate's nomination and stated as such: **AVGO**
+because it is the only ticker that has ever produced a split verdict, across
+three separate prior measurements under Haiku, and **NFLX** because it
+carried the lowest confidence in the deepseek battery (0.92) and is the
+least-tested input.
+
+| ticker | battery | re-run | samples | direction | cost |
+|---|---|---|---|---|---|
+| AVGO | hold 0.95 | hold 0.94 | hold x3 | **stable** | $0.2589 |
+| NFLX | hold 0.92 | hold **0.96** | hold x3 | **stable** | $0.2315 |
+
+$0.4905. Both verifier-clean, both carrying `data_as_of_date` 2026-08-28.
+**Criterion 8 PASSES**, and with it the deepseek battery goes 9/9 where the
+Haiku battery was 5 pass / 3 fail / 1 not run.
+
+Read it for exactly what it is. AVGO returning `hold x3` twice is a genuine
+result — this is the ticker Haiku split `sell`/`hold` on three separate
+occasions, and deepseek has now held it unanimous across two independent
+runs. Combined with the probe above, which shows the verdict does move when
+the evidence moves, the stability is evidence of low noise rather than of a
+constant.
+
+### The re-runs sharpen the confidence finding into a number
+
+NFLX returned **0.92 on the battery and 0.96 on the re-run** — same ticker,
+same `as_of`, same models, same prompts, identical input, nothing changed
+but the thread. A 0.04 swing from changing nothing.
+
+Set that beside the probe:
+
+| what changed | ticker | confidence move |
+|---|---|---|
+| nothing (re-run) | NFLX | 0.92 -> **0.96** |
+| nothing (re-run) | AVGO | 0.95 -> 0.94 |
+| fundamentals inverted, verdict flipped hold -> **sell** | MSFT | 0.94 -> 0.97 |
+| fundamentals inverted, verdict held | ACN | 0.94 -> 0.93 |
+
+**The largest confidence move in the whole set came from changing nothing at
+all.** Inverting a company's entire fundamentals picture and flipping its
+verdict moved confidence less (+0.03) than re-running an identical input
+(+0.04). The field is noise of roughly its own magnitude either way, and
+0.92-0.97 is the band it occupies whatever happens.
+
+Criterion 8 as written asks about verdict direction, and by that measure the
+system is stable and passes. It does not ask about confidence, so nothing
+here fails a criterion. But the two measurements together mean the number a
+reader is most likely to treat as "how sure is it" carries no information —
+not about evidence, not about panel agreement, not even about itself across
+identical runs.
+
+### Incidental
+
+`BatteryManifest` serialization warns `Expected date but got str` on
+`data_as_of_date`, which arrives from the memo JSON as a string and is never
+coerced. Harmless — it serializes to the right text — and it predates this
+run, appearing on the same code path the battery used. Noted so the warning
+in `criterion8.log` is not read as something this change introduced.
