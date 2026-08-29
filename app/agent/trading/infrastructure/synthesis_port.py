@@ -32,7 +32,7 @@ human reads directly. Same discipline as before: neither payload carries a
 number or a quote. Every narrative sentence cites `[C:claim_id]` (a debate
 claim) or `[RFnn]` (a risk-ledger factor); Python resolves those, renders
 their evidence, and runs a numeric fabrication guard on the rendered text.
-Confidence is computed from observables, never model-emitted.
+Evidence quality is computed from observables, never model-emitted.
 
 Imports from debate_port are LOCAL to each function rather than at module
 level — see the identical note in the pre-rewrite version of this module
@@ -46,6 +46,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 
 from app.infrastructure.llm import LLMClient, get_client
@@ -60,6 +61,7 @@ from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, canonical_claims
 from app.agent.trading.domain.decision_memo import (
     DecisionMemo,
+    EvidenceQuality,
     ResearchManagerPayload,
     RiskJudgePayload,
     Verdict,
@@ -372,12 +374,15 @@ def _render_evidence(
 
 
 # ---------------------------------------------------------------------------
-# Confidence — computed from observables, never model-emitted
+# Evidence quality — computed from observables, never model-emitted
+#
+# Called `confidence` until 2026-08-29. The rename is the fix: the name
+# promised a probability the number never was. See `EvidenceQuality`.
 # ---------------------------------------------------------------------------
 
-def compute_confidence(
+def compute_evidence_quality(
     state, ledger: list[RiskLedgerEntry], debate_turns: list[DebateTurn]
-) -> float:
+) -> EvidenceQuality:
     """A judgement call in its weights, not a calibration. Unchanged by the
     two-call split — it reads final state (coverage, contestation, guard
     flags), not which call produced which field. Calibrating the weights
@@ -406,7 +411,34 @@ def compute_confidence(
         len(t.guard_flags) for t in risk_turns
     )
     score = 0.6 * coverage + 0.3 * (1 - mean_spread) + 0.1 * max(0.0, 1 - flags / 10)
-    return round(max(0.0, min(1.0, score)), 2)
+    return EvidenceQuality(
+        score=round(max(0.0, min(1.0, score)), 2),
+        analyst_coverage=round(coverage, 2),
+        panel_dispersion=round(mean_spread, 2),
+        guard_flags=flags,
+    )
+
+
+def verdict_agreement(verdicts: list[str]) -> float | None:
+    """k/n: the share of independent trials that reached the reported verdict.
+
+    Reported, not enforced. An earlier version of this function returned the
+    same number as a CEILING on `confidence`, because a field called
+    confidence reporting 0.97 on a 2-1 split is self-contradictory. Renaming
+    that field to `evidence_quality` removed the contradiction at its source
+    — evidence quality is not bounded by verdict agreement, it is a
+    different quantity — so the clamp went with it. Both numbers are now on
+    the memo under their own names, which is what the clamp was working
+    around.
+
+    Returns None when no sampling ran (empty `verdict_samples`), which is a
+    different state from 1.0: no vote happened, rather than a vote that was
+    unanimous.
+    """
+    if not verdicts:
+        return None
+    top_count = Counter(verdicts).most_common(1)[0][1]
+    return round(top_count / len(verdicts), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +942,7 @@ async def run_synthesis(
     total_cost = (research_cost or 0.0) + (risk_cost or 0.0)
     _assert_within_budget(ticker, total_cost)
 
-    confidence = compute_confidence(state, ledger, debate_turns)
+    evidence_quality = compute_evidence_quality(state, ledger, debate_turns)
     technical = state.get("technical_report")
     ledger_by_id = {e.factor_id: e for e in ledger}
 
@@ -956,7 +988,7 @@ async def run_synthesis(
         # from several calls to this function, one of which it then reuses
         # or overrides. Same string values, so the conversion is lossless.
         verdict=Verdict(risk_judgment.verdict.value),
-        confidence=confidence,
+        evidence_quality=evidence_quality,
         data_as_of_date=as_of,
         data_gaps=data_gaps,
         assumptions=[],

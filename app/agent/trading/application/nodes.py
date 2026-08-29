@@ -35,6 +35,7 @@ from app.agent.trading.infrastructure.synthesis_port import (
     SynthesisFabricationError,
     SynthesisReferenceError,
     run_synthesis,
+    verdict_agreement,
     verify_decision_memo,
 )
 from app.agent.trading.infrastructure.decision_memo_port import (
@@ -677,6 +678,11 @@ async def synthesizer_node(state: TradingState) -> dict:
 
     final = final.model_copy(update={
         "verdict_samples": verdicts,
+        # Reported beside `evidence_quality`, never folded into it: one is
+        # agreement about the VERDICT across trials, the other is coverage
+        # and within-trial factor agreement. Conflating them is what made a
+        # 2-1 split able to report 0.97. See `verdict_agreement`.
+        "verdict_agreement": verdict_agreement(verdicts),
         "data_gaps": final.data_gaps + extra_gaps,
     })
 

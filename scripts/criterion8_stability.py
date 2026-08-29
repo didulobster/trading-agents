@@ -110,7 +110,8 @@ def main() -> int:
     for record in manifest.runs:
         print(
             f"  {record.ticker:5s} verdict={record.verdict} "
-            f"conf={record.confidence} samples={record.verdict_samples} "
+            f"quality={record.evidence_quality} agreement={record.verdict_agreement} "
+            f"samples={record.verdict_samples} "
             f"usd={record.total_usd}"
         )
     print(f"manifest -> {manifest_path}")

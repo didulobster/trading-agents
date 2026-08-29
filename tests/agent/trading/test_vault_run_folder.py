@@ -15,7 +15,7 @@ from datetime import date, datetime
 
 import app.agent.researcher as researcher
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
-from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict, EvidenceQuality
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 from app.agent.trading.infrastructure.debate_port import save_debate_transcript
@@ -92,7 +92,7 @@ def _memo() -> DecisionMemo:
         reasoning="STUB",
         watch_items=[],
         verdict=Verdict.HOLD,
-        confidence=0.0,
+        evidence_quality=EvidenceQuality(score=0.0, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0),
         data_as_of_date=AS_OF,
     )
 

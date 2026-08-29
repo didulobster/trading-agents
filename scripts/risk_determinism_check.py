@@ -34,7 +34,7 @@ exactly, and each is reported PASS/FAIL independently — a verdict match
 with a ledger-score or contested-set mismatch is reported as a determinism
 FAILURE, not papered over. For stability (production temperature, 3
 samples), verdict direction is still the pass/fail bar (the criterion as
-specified only asks for that), but confidence spread and the contested-set
+specified only asks for that), but evidence-quality spread and the contested-set
 Jaccard similarity across the three samples are reported alongside it,
 since — per the same review — that is where instability actually shows up
 even when the verdict itself doesn't move.
@@ -174,7 +174,7 @@ async def run_pipeline_once(
         "label": label,
         "temperature": temperature,
         "verdict": memo.verdict.value,
-        "confidence": memo.confidence,
+        "evidence_quality": memo.evidence_quality.score,
         "ledger_size": len(ledger),
         "ledger_scores": _ledger_scores(ledger),
         "contested": contested,
@@ -196,7 +196,8 @@ async def run_pipeline_once(
         "ledger_factor_text": {e.factor_id: e.text for e in ledger},
     }
     print(f"[{label}] temperature={temperature} verdict={memo.verdict.value} "
-          f"ledger={len(ledger)} contested={len(contested)} confidence={memo.confidence}")
+          f"ledger={len(ledger)} contested={len(contested)} "
+          f"evidence_quality={memo.evidence_quality.score}")
     return detail
 
 
@@ -359,7 +360,7 @@ def _report_stability(results: list[dict]) -> bool:
     directions = {r["verdict"] for r in results}
     direction_holds = len(directions) == 1
 
-    confidences = [r["confidence"] for r in results]
+    confidences = [r["evidence_quality"] for r in results]
     confidence_spread = max(confidences) - min(confidences)
 
     contested_sets = [set(r["contested"]) for r in results]
@@ -372,11 +373,11 @@ def _report_stability(results: list[dict]) -> bool:
 
     print(f"\nSTABILITY — verdict direction: {'PASS' if direction_holds else 'FAIL'} "
           f"({[r['verdict'] for r in results]})")
-    print(f"  confidence spread across samples: {confidence_spread:.2f} "
+    print(f"  evidence-quality spread across samples: {confidence_spread:.2f} "
           f"({confidences})")
     print(f"  contested-set Jaccard similarity (min pairwise): {min_jaccard:.2f} "
           f"— 1.0 means identical contested sets every sample, 0.0 means no overlap")
-    print("  (confidence spread and contested-set Jaccard are reported, not gated — "
+    print("  (evidence-quality spread and contested-set Jaccard are reported, not gated — "
           "the exit criterion is verdict direction only; a wide spread here with a "
           "held direction means the VERDICT is stable while the RISK READ under it "
           "is not, which the criterion as specified does not catch)")
