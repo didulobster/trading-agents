@@ -25,7 +25,7 @@ import pytest
 
 import app.agent.trading.application.nodes as nodes
 import app.agent.trading.application.risk_nodes as risk_nodes
-from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.decision_memo import DecisionMemo, EvidenceQuality, Verdict
 from app.agent.trading.domain.risk import (
     PERSONAS,
     RiskFactor,
@@ -89,7 +89,7 @@ def _memo(
     tag: str,
     data_gaps=None,
     reasoning="stub reasoning",
-    confidence: float = 0.5,
+    quality: float = 0.5,
 ) -> DecisionMemo:
     return DecisionMemo(
         ticker=ticker,
@@ -101,7 +101,9 @@ def _memo(
         reasoning=reasoning,
         watch_items=[],
         verdict=verdict,
-        confidence=confidence,
+        evidence_quality=EvidenceQuality(
+            score=quality, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0
+        ),
         data_as_of_date=AS_OF,
         data_gaps=list(data_gaps or []),
         assumptions=[],
@@ -351,117 +353,96 @@ async def test_the_chosen_samples_verification_failure_raises_even_with_a_majori
         await nodes.synthesizer_node(_state())
 
 
+
+
 # ---------------------------------------------------------------------------
-# Confidence clamped by the run's own verdict samples (added 2026-08-29)
+# `verdict_agreement` — reported beside evidence quality, never folded in
 #
-# `compute_confidence` reads within-trial observables and is computed before
-# any vote exists, so it could report high confidence on a split verdict.
-# Measured live: MSFT 0.97 on a 2-1 split against 0.94 on its unanimous
-# baseline, and AVGO 0.89 on samples that did not agree at all.
+# Until 2026-08-29 the memo carried a single `confidence` float that a reader
+# took for "how likely is this verdict right". It is coverage plus WITHIN-trial
+# factor agreement, computed before any vote exists, so it could report 0.97 on
+# a 2-1 split (MSFT, measured) and 0.89 on samples that did not agree at all
+# (AVGO, Phase 9 battery). The two quantities now have their own names.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_a_split_verdict_cannot_report_more_confidence_than_its_agreement(monkeypatch):
-    """2 of 3 samples reached hold, so the memo may claim at most 2/3.
-
-    Floored rather than rounded: `round(2/3, 2)` is 0.67, which is above the
-    bound AND on the HIGH side of `_confidence_band`'s 2/3 boundary."""
+async def test_a_split_verdict_reports_the_share_of_trials_that_reached_it(monkeypatch):
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.HOLD, tag="a", confidence=0.97),
-        _memo("ACN", Verdict.SELL, tag="b", confidence=0.97),
-        _memo("ACN", Verdict.HOLD, tag="c", confidence=0.97),
+        _memo("ACN", Verdict.HOLD, tag="a", quality=0.97),
+        _memo("ACN", Verdict.SELL, tag="b", quality=0.97),
+        _memo("ACN", Verdict.HOLD, tag="c", quality=0.97),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
-    assert memo.verdict == Verdict.HOLD
-    assert memo.confidence == 0.66
-    assert any("confidence clamped 0.97 → 0.66" in g for g in memo.data_gaps)
+    assert memo.verdict_agreement == 0.67
+    # Untouched: evidence quality is not bounded by verdict agreement, it is
+    # a different quantity. Clamping one with the other was the workaround
+    # the rename made unnecessary.
+    assert memo.evidence_quality.score == 0.97
 
 
 @pytest.mark.anyio
-async def test_a_unanimous_verdict_is_left_alone(monkeypatch):
-    """3 of 3 agreed, so the ceiling is 1.0 and cannot bind. The common case
-    must be untouched — the clamp exists to catch self-contradiction, not to
-    reprice every memo in the record."""
+async def test_a_unanimous_verdict_reports_full_agreement(monkeypatch):
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.SELL, tag="a", confidence=0.94),
-        _memo("ACN", Verdict.SELL, tag="b", confidence=0.94),
-        _memo("ACN", Verdict.SELL, tag="c", confidence=0.94),
+        _memo("ACN", Verdict.SELL, tag="a", quality=0.94),
+        _memo("ACN", Verdict.SELL, tag="b", quality=0.94),
+        _memo("ACN", Verdict.SELL, tag="c", quality=0.94),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
-    assert memo.confidence == 0.94
-    assert not any("confidence clamped" in g for g in memo.data_gaps)
+    assert memo.verdict_agreement == 1.0
+    assert memo.evidence_quality.score == 0.94
 
 
 @pytest.mark.anyio
-async def test_an_unresolved_verdict_is_clamped_to_its_best_agreement(monkeypatch):
-    """buy/sell/hold: no verdict got more than 1 of 3. AVGO's Phase 9 run
-    reported 0.89 in exactly this shape."""
+async def test_an_unresolved_verdict_reports_its_best_agreement(monkeypatch):
+    """buy/sell/hold: no verdict got more than 1 of 3. AVGO's Phase 9 memo
+    reported 0.89 in exactly this shape, under a field called confidence."""
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.BUY, tag="a", confidence=0.89),
-        _memo("ACN", Verdict.SELL, tag="b", confidence=0.89),
-        _memo("ACN", Verdict.HOLD, tag="c", confidence=0.89),
+        _memo("ACN", Verdict.BUY, tag="a", quality=0.89),
+        _memo("ACN", Verdict.SELL, tag="b", quality=0.89),
+        _memo("ACN", Verdict.HOLD, tag="c", quality=0.89),
     ])
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
     assert memo.verdict == Verdict.UNRESOLVED
-    assert memo.confidence == 0.33
+    assert memo.verdict_agreement == 0.33
 
 
 @pytest.mark.anyio
-async def test_confidence_below_the_ceiling_is_not_raised_to_meet_it(monkeypatch):
-    """The bound is a ceiling, not a target. A 2-1 split whose confidence is
-    already 0.20 stays at 0.20 — clamping is one-directional."""
-    _stub_extra_panel_samples(monkeypatch)
-    _stub_synthesis_sequence(monkeypatch, [
-        _memo("ACN", Verdict.HOLD, tag="a", confidence=0.20),
-        _memo("ACN", Verdict.SELL, tag="b", confidence=0.20),
-        _memo("ACN", Verdict.HOLD, tag="c", confidence=0.20),
-    ])
-
-    memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
-
-    assert memo.confidence == 0.20
-    assert not any("confidence clamped" in g for g in memo.data_gaps)
-
-
-@pytest.mark.anyio
-async def test_a_memo_with_no_sampling_is_not_clamped_against_a_vote_that_never_happened(
-    monkeypatch,
-):
-    """`--only technical`: no risk panel, so `verdict_samples` is empty and
-    the single Judge call's confidence passes through untouched."""
+async def test_no_sampling_reports_none_not_full_agreement(monkeypatch):
+    """`--only technical`: no vote happened. None and 1.0 are different
+    states and the renderer must be able to tell them apart — a memo whose
+    verdict was never put to a vote has not achieved unanimity."""
 
     async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
-        return _memo("ACN", Verdict.HOLD, tag="only", confidence=0.91)
+        return _memo("ACN", Verdict.HOLD, tag="only", quality=0.91)
 
     monkeypatch.setattr(nodes, "run_synthesis", fake_run_synthesis)
 
     memo = (await nodes.synthesizer_node(_state(risk_turns=[])))["decision_memo"]
 
     assert memo.verdict_samples == []
-    assert memo.confidence == 0.91
+    assert memo.verdict_agreement is None
 
 
 @pytest.mark.anyio
-async def test_a_dropped_trial_lowers_the_ceiling_it_is_measured_against(monkeypatch):
-    """One trial dropped by the fabrication guard leaves 2 surviving samples.
-    The ceiling is k/n over what SURVIVED (2/2 = 1.0, no clamp) — the weaker
-    evidence behind a 2-sample vote is reported by the existing dropped-sample
-    caveat, not by silently deflating the number."""
+async def test_agreement_is_measured_over_surviving_trials_only(monkeypatch):
+    """One trial dropped by the fabrication guard leaves 2 survivors, both
+    hold — agreement is 2/2, with the weaker basis carried by the existing
+    dropped-sample caveat rather than by deflating the ratio."""
     _stub_extra_panel_samples(monkeypatch)
     memos = iter([
-        _memo("ACN", Verdict.HOLD, tag="a", confidence=0.90),
+        _memo("ACN", Verdict.HOLD, tag="a", quality=0.90),
         SynthesisFabricationError("fabricated: 12.3"),
-        _memo("ACN", Verdict.HOLD, tag="c", confidence=0.90),
+        _memo("ACN", Verdict.HOLD, tag="c", quality=0.90),
     ])
 
     async def fake_run_synthesis(state, *, ledger, base_gaps, base_evidence, as_of, client=None):
@@ -476,5 +457,5 @@ async def test_a_dropped_trial_lowers_the_ceiling_it_is_measured_against(monkeyp
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
     assert memo.verdict_samples == ["hold", "hold"]
-    assert memo.confidence == 0.90
+    assert memo.verdict_agreement == 1.0
     assert any("dropped by the citation/fabrication guard" in g for g in memo.data_gaps)

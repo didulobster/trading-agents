@@ -22,6 +22,10 @@ from pathlib import Path
 
 from app.agent.trading.domain.validation import BatteryManifest, RunRecord
 
+# One definition of the legacy-`confidence` fallback, in the script that
+# writes manifests in the first place.
+from run_p9_battery import _quality_and_agreement
+
 COST_LOG = Path("docs/cost-log.jsonl")
 _RAW = re.compile(r"## Raw memo\s*\n+```json\n(.*?)\n```", re.S)
 
@@ -103,7 +107,7 @@ def main() -> None:
             record.run_folder = str(path.parent)
             record.verdict = memo.get("verdict")
             record.verdict_samples = memo.get("verdict_samples") or []
-            record.confidence = memo.get("confidence")
+            record.evidence_quality, record.verdict_agreement = _quality_and_agreement(memo)
             # Coerced explicitly: pydantic does not validate on attribute
             # assignment, so a raw string would sit in a `date` field and
             # serialize with a warning.

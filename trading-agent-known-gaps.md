@@ -2923,3 +2923,74 @@ coverage-plus-factor-spread — on a full run coverage alone contributes 0.6 of
 it — and still moves 0.04 between identical runs. **`verdict_samples` remains
 the field to read.** Calibrating the weights against realised outcomes is
 still the later-phase item `compute_confidence` has always said it was.
+
+
+## `confidence` renamed to `evidence_quality`, and the clamp withdrawn
+## (2026-08-29)
+
+The clamp in the entry above was the right fix for a field called
+confidence. It is the wrong fix once the field is named for what it
+measures, and this change supersedes it.
+
+### Why renaming beats repairing
+
+`compute_confidence` is `0.6*coverage + 0.3*(1 - mean_spread) +
+0.1*(1 - flags/10)`. `ANALYST_OUTPUTS` has three entries and all three are
+present on any full run, so **`coverage` is 1.0 and 0.6 of the number is a
+constant**. The whole informative part is the remaining 0.4, and the
+observed 0.92-0.97 band means the two live terms sit at 0.32-0.37 of a
+possible 0.40. The field had roughly five points of usable range and
+reported them on a 0-1 scale that reads like a probability.
+
+That is not a number to repair. It is a well-defined measurement of input
+quality wearing a name that promises something else.
+
+### What changed
+
+- `confidence: float` → `evidence_quality: EvidenceQuality`, carrying
+  `score` plus the three components (`analyst_coverage`,
+  `panel_dispersion`, `guard_flags`) so a reader can see which term moved
+  instead of comparing two composites whose first 0.6 is identical.
+- `verdict_agreement: float | None` — k/n over `verdict_samples`, reported
+  as its own field. **None when no sampling ran**, which is a different
+  state from 1.0: a verdict never put to a vote has not achieved unanimity,
+  and the renderer omits the line rather than faking one.
+- The clamp is gone. Evidence quality is not bounded by verdict agreement —
+  they are different quantities, which was the point. Both now sit on the
+  memo under their own names, which is what the clamp was working around.
+- `**Confidence:** HIGH (0.93)` → `**Verdict agreement:** 2 of 3 (0.67)  ·
+  **Evidence quality:** 0.97 (analyst coverage 1.00, panel dispersion 0.05,
+  1 guard flag)`. The LOW/MEDIUM/HIGH band is dropped outright: it restated
+  the same number in language that invites the misreading harder.
+
+The MSFT probe memo now renders `**Verdict agreement:** 2 of 3 (0.67)`
+beside `**Evidence quality:** 0.97` — side by side, unreconciled, and no
+longer contradictory, because neither claims to be the other.
+
+### Caught by an existing guard, not by review
+
+`EvidenceQuality` is a new domain type reachable from `TradingState`, and
+`test_every_domain_type_reachable_from_trading_state_is_registered` failed
+until it was added to `ALLOWED_MSGPACK_MODULES`. Under
+`LANGGRAPH_STRICT_MSGPACK=true` a nested unregistered type round-trips
+*cleanly* as a dict, so this would not have surfaced in a round-trip test —
+it would have surfaced in whichever process first resumed a checkpoint.
+The Phase 0 structural guard earned its keep four phases later.
+
+### Back-compatibility
+
+Memos already in the vault carry `confidence`. `_quality_and_agreement` in
+`run_p9_battery.py` reads the new keys and falls back to the old one, so a
+manifest rebuilt from the Phase 9 batteries still reports their numbers
+rather than silently reporting None.
+
+### What is still not fixed
+
+`evidence_quality.score` is honest about what it is and still nearly
+constant. If a single number meaning "how reproducible is this verdict" is
+wanted, it should be **derived** from `verdict_samples` with a shrunk
+estimator (Laplace `(k+1)/(n+2)`), accepting a one-time repricing of the
+record — and that is the change that would make `RISK_VERDICT_SAMPLES = 5`
+worth its ~$0.07/run, since Laplace at N=3 yields only {0.80, 0.60, 0.40}
+while N=5 yields {0.857, 0.714, 0.571, 0.429}. Deliberately not done here:
+it is a calibration decision, not a naming one.
