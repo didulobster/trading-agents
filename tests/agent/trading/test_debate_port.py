@@ -201,26 +201,28 @@ def test_rebutting_a_real_opposing_claim_is_accepted():
     )   # does not raise
 
 
-def test_rebutting_a_claim_nobody_made_raises():
-    with pytest.raises(ValueError, match="hallucinated id or the debater's own side"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(_payload(rebuts=["invented-id"])),
-            [],
-            "bear",
-        )
+def test_rebutting_a_claim_nobody_made_is_dropped_and_reported():
+    """Was a raise until 2026-08-29. It killed an AVGO run that had already
+    paid for fundamentals, news and technical — $0.1586 for no memo —
+    because deepseek-v4-flash named an id in no transcript. A dangling
+    rebuts is a bad pointer inside an otherwise sound turn."""
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["invented-id"]))
+
+    dropped = port.check_rebuts(payload, [], "bear")
+
+    assert dropped == ["invented-id"]
+    assert payload.rebuts == []   # the transcript keeps no dangling reference
 
 
-def test_rebutting_your_own_earlier_claim_raises():
+def test_rebutting_your_own_earlier_claim_is_dropped():
     """A rebuttal names an OPPONENT's claim. Naming your own is not a
     rebuttal, and check_concession draws the same side/opposing-side line for
     the same reason."""
     turns = [_turn(0, "bull", ["own-claim"])]
-    with pytest.raises(ValueError, match="own side"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(_payload(rebuts=["own-claim"])),
-            turns,
-            "bull",
-        )
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["own-claim"]))
+
+    assert port.check_rebuts(payload, turns, "bull") == ["own-claim"]
+    assert payload.rebuts == []
 
 
 def test_rebutting_an_older_opposing_claim_is_still_accepted():
@@ -232,37 +234,43 @@ def test_rebutting_an_older_opposing_claim_is_still_accepted():
         _turn(0, "bull", ["early-claim"]),
         _turn(1, "bear", ["bear-claim"]),
     ]
-    port.check_rebuts(
-        DebateTurnPayload.model_validate(_payload(rebuts=["early-claim"])),
-        turns,
-        "bear",
-    )   # does not raise
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["early-claim"]))
+    assert port.check_rebuts(payload, turns, "bear") == []
+    assert payload.rebuts == ["early-claim"]   # untouched
 
 
-def test_one_hallucinated_id_among_real_ones_still_raises():
+def test_only_the_hallucinated_id_is_dropped_and_the_real_one_survives():
+    """The whole point of dropping rather than raising: a turn that rebuts
+    one real claim and one invented one has done something worth keeping."""
     turns = [_turn(0, "bull", ["real-id"])]
-    with pytest.raises(ValueError, match=r"\['fake-id'\]"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(
-                _payload(rebuts=["real-id", "fake-id"])
-            ),
-            turns,
-            "bear",
-        )
+    payload = DebateTurnPayload.model_validate(
+        _payload(rebuts=["real-id", "fake-id"])
+    )
+
+    assert port.check_rebuts(payload, turns, "bear") == ["fake-id"]
+    assert payload.rebuts == ["real-id"]
 
 
 @pytest.mark.anyio
-async def test_run_debate_turn_raises_on_a_hallucinated_rebuttal():
-    """The end-to-end path, not just the unit function: a turn whose payload
-    names a rebuttal id that does not exist must fail the node, the same way
-    an unjustified concession does."""
+async def test_run_debate_turn_survives_a_hallucinated_rebuttal_and_flags_it():
+    """The end-to-end path. This used to assert the node FAILED; it now
+    asserts the node survives, because killing a run over a bad pointer
+    costs everything already spent on fundamentals, news and technical —
+    measured at $0.1586 on the AVGO run of 2026-08-29.
+
+    The failure must still be visible, or dropping it would be worse than
+    raising: silent repair of model output is how a transcript stops
+    describing what happened."""
     turns = [_turn(0, "bull", ["real-id"])]
     client = _FakeClient([_payload(rebuts=["invented-id"])])
 
-    with pytest.raises(ValueError, match="hallucinated id"):
-        await port.run_debate_turn(
-            _state(debate_turns=turns), "bear", 1, client=client
-        )
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bear", 1, client=client
+    )
+
+    assert turn.payload.rebuts == []
+    assert any("unresolved_rebuts" in f for f in turn.guard_flags)
+    assert any("invented-id" in f for f in turn.guard_flags)
 
 
 # ---------------------------------------------------------------------------
