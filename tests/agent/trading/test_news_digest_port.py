@@ -126,6 +126,59 @@ def test_bracketed_index_is_accepted_not_dropped():
     assert [i.sentiment for i in items] == ["neutral", "positive", "negative"]
 
 
+def test_a_batch_wrapped_in_an_extra_array_is_unwrapped_not_dropped():
+    """Regression, from the ASML run on deepseek-v4-flash (2026-08-29): one
+    batch came back as [[{...}, ...]] instead of [{...}, ...].
+
+    The outer list passes the "is it an array" check in `_summarize_batch`,
+    so it reached the join, where `obj["index"]` on a list raises TypeError.
+    Every article in the batch was flagged unparseable and dropped — seven
+    real stories — and the digest then scored ASML off the five that
+    survived elsewhere. Same reasoning as the bracketed-index case above:
+    the nesting is unambiguous, so recovering it beats losing articles the
+    model summarised correctly."""
+    articles = _articles(3)
+    inner = [
+        {"index": 0, "summary": "s0", "sentiment": "neutral", "relevance": "primary"},
+        {"index": 1, "summary": "s1", "sentiment": "positive", "relevance": "primary"},
+        {"index": 2, "summary": "s2", "sentiment": "negative", "relevance": "primary"},
+    ]
+
+    items, issues = _join(articles, [inner])
+
+    assert issues == []
+    assert [i.headline for i in items] == ["headline 0", "headline 1", "headline 2"]
+
+
+def test_only_one_level_of_nesting_is_unwrapped():
+    """A deeper structure is a genuinely malformed response, not the known
+    one-level wrap, and must still be flagged rather than ride in on the
+    recovery."""
+    articles = _articles(2)
+    obj = {"index": 0, "summary": "s0", "sentiment": "neutral", "relevance": "primary"}
+
+    items, issues = _join(articles, [[[obj]]])
+
+    assert items == []
+    assert any("unparseable index" in i for i in issues)
+    assert any("missing index 0" in i for i in issues)
+
+
+def test_partial_nesting_recovers_every_article():
+    """The wrap has been seen covering only part of a batch."""
+    articles = _articles(3)
+    flat = {"index": 0, "summary": "s0", "sentiment": "neutral", "relevance": "primary"}
+    wrapped = [
+        {"index": 1, "summary": "s1", "sentiment": "neutral", "relevance": "primary"},
+        {"index": 2, "summary": "s2", "sentiment": "neutral", "relevance": "primary"},
+    ]
+
+    items, issues = _join(articles, [flat, wrapped])
+
+    assert issues == []
+    assert len(items) == 3
+
+
 def test_parse_index_accepts_unambiguous_forms_and_rejects_guesswork():
     assert _parse_index(3) == 3
     assert _parse_index("3") == 3

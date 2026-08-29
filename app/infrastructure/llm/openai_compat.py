@@ -278,7 +278,26 @@ def _translate_thinking(kwargs: dict[str, Any], forces_a_tool: bool) -> dict[str
 
     thinking = kwargs.get("thinking")
     if not thinking:
-        return None
+        # Absence means OFF, and sending that explicitly is the whole point.
+        #
+        # The internal message shape is Anthropic's, where a call that sends
+        # no `thinking` gets none. DeepSeek's default is the opposite, so
+        # "leave the provider default alone" silently turned thinking ON for
+        # every call that does not force a tool — and reasoning tokens are
+        # billed as output and counted against `max_tokens`.
+        #
+        # Measured, on the news digest's own 15-article batch: 1280 output
+        # tokens with thinking on against 632 with it off, into a
+        # DIGEST_MAX_TOKENS of 1500. On the live ACN run all 2 digest
+        # batches came back unparseable and the node refused to pass an
+        # empty digest off as "no news", which ended the run; on MSFT 15 of
+        # 16 batches failed and the technical node — max_tokens 512 —
+        # returned an empty interpretation under its own heading.
+        #
+        # Faithful translation of the lingua franca fixes all of it: a
+        # caller that wants reasoning here has to ask for it, exactly as it
+        # would on Anthropic.
+        return {"type": "disabled"}
 
     out: dict[str, Any] = {"type": "disabled" if thinking.get("type") == "disabled" else "enabled"}
     effort = (kwargs.get("output_config") or {}).get("effort")
@@ -337,10 +356,12 @@ class OpenAICompatClient:
         base_url: str,
         max_output_tokens: int | None = None,
         provider: str = "openai-compatible",
+        thinking_param: str | None = None,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._max_output_tokens = max_output_tokens
         self._provider = provider
+        self._thinking_param = thinking_param
         self.messages = _Messages(self)
 
     async def _create(self, **kwargs: Any) -> ShimResponse:
@@ -366,7 +387,11 @@ class OpenAICompatClient:
         # `auto` and None leave the model free to skip the tool, so they do
         # not constrain it; everything else does.
         forces_a_tool = tool_choice is not None and tool_choice != "auto"
-        thinking = _translate_thinking(kwargs, forces_a_tool)
+        # Skipped entirely for a provider with no reasoning toggle — writing
+        # an unknown key into extra_body is a 400 on a strict server.
+        thinking = (
+            _translate_thinking(kwargs, forces_a_tool) if self._thinking_param else None
+        )
         if forces_a_tool and thinking == {"type": "disabled"} and kwargs.get("thinking"):
             _warn_once(
                 f"{self._provider}:thinking-vs-tool_choice",
@@ -396,7 +421,7 @@ class OpenAICompatClient:
         if thinking is not None:
             # extra_body, not a top-level kwarg: the OpenAI SDK raises
             # TypeError on parameters it does not know.
-            request["extra_body"] = {"thinking": thinking}
+            request["extra_body"] = {self._thinking_param: thinking}
 
         try:
             completion = await self._client.chat.completions.create(**request)

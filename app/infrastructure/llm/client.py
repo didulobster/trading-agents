@@ -52,6 +52,11 @@ class ProviderSpec:
     # Model-id prefixes that route here.
     prefixes: tuple[str, ...]
     base_url_env: str | None = None
+    # extra_body key for this provider's reasoning toggle, or None when it
+    # has none. Named rather than boolean because the shim has to write the
+    # key, and because the next provider to add one will not call it
+    # "thinking".
+    thinking_param: str | None = None
 
 
 _PROVIDERS: dict[str, ProviderSpec] = {
@@ -74,6 +79,7 @@ _PROVIDERS: dict[str, ProviderSpec] = {
         # more likely to resemble that one than this one.
         max_output_tokens=384_000,
         prefixes=("deepseek",),
+        thinking_param="thinking",
     ),
     "openai": ProviderSpec(
         name="openai",
@@ -200,6 +206,7 @@ def get_client(model: str | None = None, *, api_key: str | None = None):
         base_url=base_url,
         max_output_tokens=spec.max_output_tokens,
         provider=spec.name,
+        thinking_param=spec.thinking_param,
     )
 
 
