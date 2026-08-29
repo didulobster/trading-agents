@@ -320,6 +320,129 @@ def _eval_node(node, scale_by_value: dict[float, float] | None = None):
     raise ValueError(f"disallowed expression element: {type(node).__name__}")
 
 
+def _strictify(schema: dict) -> dict:
+    """Rewrite a schema into the form strict tool-calling requires.
+
+    Both dialects want the same three things, recursively: every object
+    closed with `additionalProperties: false`, every declared property
+    listed in `required`, and anything genuinely optional expressed as
+    nullable rather than absent.
+
+    Done as a transformation rather than by hand-editing the schemas above
+    so the readable version stays the source of truth — the `required` list
+    there still says which arguments actually matter, and this only
+    restates it in the shape the API enforces.
+
+    Why bother when `_validate_tool_inputs` already catches a bad call: the
+    validator recovers from the mistake, strict prevents it. The run that
+    exposed all of this lost 376 seconds to one mis-named argument, and a
+    recovered tool call still costs a turn against LOOP_MAX_TURNS — which
+    the priciest runs already exhaust.
+
+    An optional property becomes `["<type>", "null"]`, and the dispatch
+    code reads those through `.get()`, so an explicit null behaves exactly
+    as the previously-absent key did.
+    """
+    if schema.get("type") != "object":
+        return schema
+
+    properties = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    out_properties = {}
+
+    for name, prop in properties.items():
+        prop = dict(prop)
+        if prop.get("type") == "object":
+            prop = _strictify(prop)
+        elif prop.get("type") == "array" and isinstance(prop.get("items"), dict):
+            prop["items"] = _strictify(prop["items"])
+        if name not in required and "type" in prop and not isinstance(prop["type"], list):
+            prop["type"] = [prop["type"], "null"]
+        out_properties[name] = prop
+
+    return {
+        **schema,
+        "properties": out_properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+# Applied after the schemas above are declared, and `strict` set alongside.
+# Kept together so a tool added later cannot pick up one without the other:
+# `strict: true` on a schema that is not strict-compatible is a 400 on the
+# first call, not a quiet degradation.
+# Captured BEFORE the rewrite. `_strictify` lists every property in
+# `required` because that is what strict mode demands, but that is a wire
+# format, not the tool's real contract: `form_types` is still optional, and
+# a call that simply omits it must not be rejected as incomplete by our own
+# validator. So validation keeps asking the original question.
+_REQUIRED_BY_NAME = {
+    tool["name"]: list(tool["input_schema"].get("required", [])) for tool in TOOLS
+}
+
+for _tool in TOOLS:
+    _tool["input_schema"] = _strictify(_tool["input_schema"])
+    _tool["strict"] = True
+
+# ---------------------------------------------------------------------------
+# Argument validation
+# ---------------------------------------------------------------------------
+
+_SCHEMA_BY_NAME = {tool["name"]: tool["input_schema"] for tool in TOOLS}
+
+
+def _validate_tool_inputs(name: str, inputs: dict) -> str | None:
+    """Check a tool call's arguments against its own schema before dispatch.
+
+    Returns an error message for the model, or None when the call is fine.
+
+    Exists because a mis-named argument used to kill the whole run. Every
+    other failure inside `_dispatch` comes back as a STRING the model can
+    read and react to — a non-200 from the API, a rejected expression — but
+    the argument reads were bare subscripts, so `check_latest_filings`
+    called with `tickers=[...]` instead of `ticker="..."` raised a KeyError
+    that propagated out of `execute_tool` and ended a 376-second run at the
+    tool call. Nothing about that is provider-specific; it had simply never
+    been the failing model's mistake before.
+
+    The plural/singular split is the trap that sprang it: `ask_edgar` takes
+    `tickers` (a list) and every other tool takes `ticker` (a string), so a
+    model generalising from one call to the next gets it wrong in a way no
+    amount of prompt wording reliably prevents. Naming the accepted
+    arguments back to the model is what makes the next attempt succeed.
+
+    Unknown arguments are reported, not ignored: a call carrying `tickers`
+    would otherwise fail the `ticker` check with no hint about the list it
+    did send, and the model would have to guess what it got wrong.
+    """
+    schema = _SCHEMA_BY_NAME.get(name)
+    if schema is None:
+        return None
+
+    properties = schema.get("properties", {})
+    required = _REQUIRED_BY_NAME.get(name, [])
+    missing = [k for k in required if k not in inputs]
+    unknown = [k for k in inputs if k not in properties]
+    if not missing and not unknown:
+        return None
+
+    problems = []
+    if missing:
+        problems.append(f"missing required argument(s): {', '.join(sorted(missing))}")
+    if unknown:
+        problems.append(f"unexpected argument(s): {', '.join(sorted(unknown))}")
+
+    accepted = ", ".join(
+        f"{k} ({v.get('type', 'any')})" + ("" if k in required else ", optional")
+        for k, v in properties.items()
+    )
+    return (
+        f"Error: {name} was called with " + "; ".join(problems) + ". "
+        f"This tool accepts exactly: {accepted}. "
+        f"Re-issue the call with the correct argument names."
+    )
+
 # ---------------------------------------------------------------------------
 # Dispatch. Each branch prints its call/result so you can watch the agent
 # reason. Replace the stub branches in step 2.
@@ -332,6 +455,16 @@ USE_STUBS = False
 async def execute_tool(name: str, inputs: dict) -> str:
     print(f"  [tool call] {name}({inputs})")
     record_log_line(f"  [tool call] {name}({inputs})")
+
+    # Before dispatch, and returned WITHOUT recording into the provenance
+    # corpus: a rejected call retrieved nothing, and the corpus is what
+    # every numeric guard checks memo figures against.
+    problem = _validate_tool_inputs(name, inputs)
+    if problem:
+        print(f"  [tool result] {problem}", file=sys.stderr)
+        record_log_line(f"  [tool result] {problem}")
+        return problem
+
     result = await _dispatch(name, inputs)
 
     # Feed tool output into the provenance corpus so calculate() can verify

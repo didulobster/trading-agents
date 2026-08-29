@@ -33,14 +33,14 @@ def test_every_role_falls_back_to_the_project_wide_model(only_the_default):
 
 @pytest.mark.parametrize("role", ROLES, ids=[r.key for r in ROLES])
 def test_each_role_can_be_moved_on_its_own(monkeypatch, only_the_default, role):
-    monkeypatch.setenv(role.env, "deepseek-chat")
+    monkeypatch.setenv(role.env, "deepseek-v4-flash")
     models = configured_models()
-    assert models[role.key] == "deepseek-chat"
+    assert models[role.key] == "deepseek-v4-flash"
     others = {k: v for k, v in models.items() if k != role.key}
     # Moving one role must not drag the others with it — except when the role
     # IS the project-wide default, which every other role follows by design.
     if role.env == DEFAULT_MODEL_ENV:
-        assert set(others.values()) == {"deepseek-chat"}
+        assert set(others.values()) == {"deepseek-v4-flash"}
     else:
         assert set(others.values()) == {"claude-haiku-4-5-20251001"}
 
@@ -93,7 +93,7 @@ def test_unpriced_model_warns_and_names_the_budget(capsys):
 
 
 def test_a_priced_model_says_nothing(capsys):
-    warn_if_unpriced("deepseek-chat", "debate", 0.25)
+    warn_if_unpriced("deepseek-v4-flash", "debate", 0.25)
     assert capsys.readouterr().out == ""
 
 
@@ -101,7 +101,7 @@ def test_describe_reports_provider_and_pricing_per_role(monkeypatch, only_the_de
     from app.infrastructure.llm.models import describe
 
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-chat")
+    monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-v4-flash")
     table = describe()
     assert "anthropic" in table and "deepseek" in table
     for role in ROLES:
@@ -122,13 +122,13 @@ def test_ports_bind_the_role_the_registry_says_they_do(monkeypatch):
     import app.agent.trading.infrastructure.risk_port as risk
 
     monkeypatch.setenv(DEFAULT_MODEL_ENV, "claude-haiku-4-5-20251001")
-    monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-reasoner")
-    monkeypatch.setenv("TRADING_RISK_MODEL", "deepseek-chat")
+    monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("TRADING_RISK_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("TRADING_NEWS_DIGEST_MODEL", "claude-sonnet-5")
 
     try:
-        assert importlib.reload(debate).DEBATE_MODEL == "deepseek-reasoner"
-        assert importlib.reload(risk).RISK_MODEL == "deepseek-chat"
+        assert importlib.reload(debate).DEBATE_MODEL == "deepseek-v4-pro"
+        assert importlib.reload(risk).RISK_MODEL == "deepseek-v4-flash"
         assert importlib.reload(news).NEWS_DIGEST_MODEL == "claude-sonnet-5"
     finally:
         monkeypatch.undo()

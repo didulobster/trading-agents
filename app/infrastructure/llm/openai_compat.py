@@ -199,19 +199,28 @@ def _translate_messages(system: Any, messages: list[dict]) -> list[dict]:
 
 
 def _translate_tools(tools: list[dict] | None) -> list[dict] | None:
+    """`strict` carries over.
+
+    It was dropped in the first version of this shim on the assumption that
+    the OpenAI dialect had no target for it. DeepSeek documents the flag on
+    tool definitions, and it is worth carrying: `strict` was added to the
+    debate port's SUBMIT_TOOL because 3 of 3 live turns came back with a
+    flattened payload without it, costing a retry every time — and a retry
+    loop is the one runaway the round cap cannot see.
+    """
     if not tools:
         return None
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("input_schema") or {},
-            },
+    out = []
+    for tool in tools:
+        function = {
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "parameters": tool.get("input_schema") or {},
         }
-        for tool in tools
-    ]
+        if tool.get("strict"):
+            function["strict"] = True
+        out.append({"type": "function", "function": function})
+    return out
 
 
 def _translate_tool_choice(tool_choice: dict | str | None) -> tuple[Any, bool | None]:
@@ -236,13 +245,53 @@ def _translate_tool_choice(tool_choice: dict | str | None) -> tuple[Any, bool | 
     return "auto", parallel
 
 
+# DeepSeek's reasoning_effort values. Anthropic's "medium" has no
+# counterpart and is dropped rather than rounded to a neighbour.
+_REASONING_EFFORTS = frozenset({"low", "high", "max"})
+
+
+def _translate_thinking(kwargs: dict[str, Any], forces_a_tool: bool) -> dict[str, Any] | None:
+    """The provider's `thinking` object, or None to leave it at their default.
+
+    Two things this has to get right, both learned from the live API rather
+    than from the docs:
+
+    1. Thinking is ON by default here, unlike Anthropic. A caller that sends
+       no thinking parameter at all still gets it.
+
+    2. Thinking mode REJECTS a constrained tool_choice outright — both
+       `required` and a named function come back 400 "Thinking mode does not
+       support this tool_choice". Only `auto` survives it.
+
+    The ports force a named tool because their whole structured-output
+    contract is "call exactly this tool, exactly once"; `_extract` raises
+    when no tool block comes back, and the one retry after that raises out.
+    Falling back to `auto` to keep thinking would trade a hard API guarantee
+    for a behavioural hope, on the calls whose output is most load-bearing.
+    So a forced tool wins and thinking is disabled for that call.
+
+    Its reasoning tokens are billed as output either way, so nothing about
+    cost accounting depends on this — only the quality of those turns.
+    """
+    if forces_a_tool:
+        return {"type": "disabled"}
+
+    thinking = kwargs.get("thinking")
+    if not thinking:
+        return None
+
+    out: dict[str, Any] = {"type": "disabled" if thinking.get("type") == "disabled" else "enabled"}
+    effort = (kwargs.get("output_config") or {}).get("effort")
+    if out["type"] == "enabled" and effort in _REASONING_EFFORTS:
+        out["reasoning_effort"] = effort
+    return out
+
+
 # Anthropic-only request parameters, and what happens to each. Warned about
 # once per process rather than per call — a per-call warning on a 45-turn
-# loop is noise nobody reads, and silence is how a dropped `strict` turns
-# into an unexplained retry rate.
+# loop is noise nobody reads, and silence is how a dropped parameter turns
+# into an unexplained change in behavior.
 _UNSUPPORTED = {
-    "thinking": "extended/adaptive thinking is Anthropic-only; dropped",
-    "output_config": "reasoning effort is Anthropic-only; dropped",
     "betas": "beta headers are Anthropic-only; dropped",
     "top_k": "not in the OpenAI dialect; dropped",
     "metadata": "not forwarded",
@@ -274,10 +323,11 @@ class OpenAICompatClient:
     """Duck-types `anthropic.AsyncAnthropic` for the surface this repo uses.
 
     `max_output_tokens` clamps `max_tokens` down to what the provider will
-    actually accept. It is not cosmetic: the research agent asks for 16000
-    because a 12-item memo genuinely needs it, and DeepSeek's ceiling is
-    8192 — sent unclamped that is a 400 on the FINAL turn of a run that has
-    already been paid for.
+    actually accept, so a request that asks for more comes back short rather
+    than 400ing at the wire. The research agent asks for 16000 because a
+    12-item memo genuinely needs it, which is under every current provider's
+    ceiling — but it was over the retired `deepseek-chat`'s 8192, and that
+    failure would have landed on the FINAL turn of a run already paid for.
     """
 
     def __init__(
@@ -311,15 +361,19 @@ class OpenAICompatClient:
             max_tokens = self._max_output_tokens
 
         tools = _translate_tools(kwargs.get("tools"))
-        if kwargs.get("tools") and any(t.get("strict") for t in kwargs["tools"]):
-            _warn_once(
-                f"{self._provider}:strict",
-                f"{self._provider}: `strict: True` on a tool schema is not enforced here. "
-                f"Schema violations fall to the callers' existing one-shot retry, so "
-                f"expect a higher retry rate than on Anthropic.",
-            )
 
         tool_choice, parallel = _translate_tool_choice(kwargs.get("tool_choice"))
+        # `auto` and None leave the model free to skip the tool, so they do
+        # not constrain it; everything else does.
+        forces_a_tool = tool_choice is not None and tool_choice != "auto"
+        thinking = _translate_thinking(kwargs, forces_a_tool)
+        if forces_a_tool and thinking == {"type": "disabled"} and kwargs.get("thinking"):
+            _warn_once(
+                f"{self._provider}:thinking-vs-tool_choice",
+                f"{self._provider}: thinking disabled on calls that force a tool — "
+                f"the API rejects the combination. The tool-call guarantee is kept; "
+                f"the reasoning on those turns is not.",
+            )
 
         request: dict[str, Any] = {
             "model": model,
@@ -339,6 +393,10 @@ class OpenAICompatClient:
             request["top_p"] = kwargs["top_p"]
         if kwargs.get("stop_sequences"):
             request["stop"] = kwargs["stop_sequences"]
+        if thinking is not None:
+            # extra_body, not a top-level kwarg: the OpenAI SDK raises
+            # TypeError on parameters it does not know.
+            request["extra_body"] = {"thinking": thinking}
 
         try:
             completion = await self._client.chat.completions.create(**request)
