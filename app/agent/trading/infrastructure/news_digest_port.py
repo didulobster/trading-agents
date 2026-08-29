@@ -176,6 +176,35 @@ def _parse_index(raw: Any) -> int:
     raise TypeError(f"index of type {type(raw).__name__}")
 
 
+def _unwrap_nested(parsed: list[Any]) -> list[Any]:
+    """Splice a batch the model wrapped in an extra array.
+
+    Observed live (ASML, 2026-08-29, deepseek-v4-flash): one batch came back
+    as [[{...}, {...}, ...]] rather than [{...}, {...}, ...]. The outer list
+    passes the "is it an array" check in `_summarize_batch`, so it reached
+    `_join`, where `obj["index"]` on a list raises TypeError — every article
+    in that batch was flagged "unparseable index" and dropped. Seven real
+    stories, and the digest then scored ASML off the five that survived.
+
+    Unwrapped rather than rejected for the same reason `_parse_index`
+    tolerates "[0]": the nesting is unambiguous, and the alternative is
+    losing articles the model actually summarised correctly. One level only
+    — anything deeper still falls through to the per-object checks below and
+    is flagged there, so a genuinely malformed response cannot ride in on
+    this.
+
+    Not recorded as an issue when it succeeds: `issues` exists to make DATA
+    LOSS visible, and a fully recovered batch lost nothing.
+    """
+    out: list[Any] = []
+    for obj in parsed:
+        if isinstance(obj, list):
+            out.extend(obj)
+        else:
+            out.append(obj)
+    return out
+
+
 def _join(
     articles: list[dict[str, Any]], parsed: list[dict[str, Any]]
 ) -> tuple[list[NewsItem], list[str]]:
@@ -190,7 +219,7 @@ def _join(
     by_index: dict[int, dict[str, Any]] = {}
     issues: list[str] = []
 
-    for obj in parsed:
+    for obj in _unwrap_nested(parsed):
         try:
             idx = _parse_index(obj["index"])
         except (KeyError, TypeError, ValueError):
