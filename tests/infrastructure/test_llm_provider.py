@@ -256,8 +256,13 @@ def _completion(*, content=None, tool_calls=None, finish_reason="stop", usage=No
     )
 
 
-def _shim():
-    return OpenAICompatClient(api_key="k", base_url="https://example.invalid", provider="deepseek")
+def _shim(thinking_param: str | None = "thinking"):
+    """Defaults to a DeepSeek-shaped provider — one that HAS a reasoning
+    toggle. Pass None for a provider without one."""
+    return OpenAICompatClient(
+        api_key="k", base_url="https://example.invalid", provider="deepseek",
+        thinking_param=thinking_param,
+    )
 
 
 @pytest.mark.parametrize(
@@ -417,7 +422,7 @@ async def test_max_tokens_is_clamped_to_the_providers_ceiling(monkeypatch):
 
     shim = OpenAICompatClient(
         api_key="k", base_url="https://example.invalid",
-        max_output_tokens=8192, provider="deepseek",
+        max_output_tokens=8192, provider="deepseek", thinking_param="thinking",
     )
 
     async def fake_create(**kwargs):
@@ -508,11 +513,40 @@ async def test_auto_tool_choice_keeps_thinking(capture):
 
 
 @pytest.mark.anyio
-async def test_no_thinking_parameter_leaves_the_provider_default(capture):
+async def test_no_thinking_parameter_means_thinking_off(capture):
+    """The regression this exists to prevent.
+
+    The internal shape is Anthropic's, where sending no `thinking` gets
+    none. DeepSeek defaults the other way, so leaving its default alone
+    turned reasoning ON for every call that does not force a tool — and
+    reasoning bills as output against `max_tokens`. Live: all 2 ACN digest
+    batches came back unparseable and ended the run, 15 of 16 on MSFT, and
+    the technical node (max_tokens=512) returned an empty interpretation.
+    """
     shim, sent = capture
     await shim.messages.create(
         model="deepseek-v4-flash", max_tokens=100,
         messages=[{"role": "user", "content": "hi"}],
+    )
+    assert sent["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.anyio
+async def test_a_provider_with_no_reasoning_toggle_gets_no_extra_body(monkeypatch):
+    """Writing an unknown key into extra_body is a 400 on a strict server,
+    so the toggle is only sent to providers that document one."""
+    sent = {}
+    shim = _shim(thinking_param=None)
+
+    async def fake_create(**kwargs):
+        sent.update(kwargs)
+        return _completion(content="ok")
+
+    monkeypatch.setattr(shim._client.chat.completions, "create", fake_create)
+    await shim.messages.create(
+        model="gpt-4.1-nano", max_tokens=100,
+        messages=[{"role": "user", "content": "hi"}],
+        thinking={"type": "adaptive"},
     )
     assert "extra_body" not in sent
 

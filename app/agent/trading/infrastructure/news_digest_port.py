@@ -26,7 +26,13 @@ from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING, sanitize_ex
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
 BATCH_SIZE = 15
-DIGEST_MAX_TOKENS = 1500
+# Sized against Haiku's output profile with no headroom, which is how a
+# provider that reasons before answering broke it: a batch that overruns
+# does not come back short, it comes back as unparseable JSON, and a batch
+# that fails is 15 articles silently absent from the digest. Measured on a
+# full 15-article batch with reasoning off: ~630-680 output tokens. 3000
+# is deliberate slack over that, and costs nothing unless it is used.
+DIGEST_MAX_TOKENS = 3000
 NEWS_BUDGET_USD = 0.20
 # Enough parallelism to keep a full-cap run (20 batches) to a few waves,
 # low enough not to arrive as one burst against the account's rate limit.

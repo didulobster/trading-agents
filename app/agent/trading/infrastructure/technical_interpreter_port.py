@@ -124,7 +124,10 @@ async def interpret_indicators(
     )
     response = await client.messages.create(
         model=TECHNICAL_MODEL,
-        max_tokens=512,
+        # 512 left no room for a model that reasons first: the live ACN/MSFT
+        # runs returned an EMPTY interpretation under its own heading, which
+        # reads as "nothing to say" rather than as a failure.
+        max_tokens=1200,
         system=TECHNICAL_INTERPRETER_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
