@@ -2423,3 +2423,262 @@ AVGO verdict instability.
 **Phase 9 does not close.** Criteria 6 and 9 fail on their own terms, and 2
 fails by decision. Criterion 8 is unmeasured. Per §8 the ceiling breach
 governs: characterize the gap rather than patch and re-run.
+
+
+## deepseek-v4-flash vs Haiku 4.5: memos are 4x less numeric (2026-08-29)
+
+Four `deepseek-v4-flash` runs, made outside the Phase 9 battery and checked
+against its exit criteria afterwards. Not a battery — three tickers, two
+`as_of` dates, ad-hoc run ids — so the scoring below is per-criterion rather
+than a phase verdict.
+
+| run_id | ticker | as_of | verdict | conf | samples | cost | wall |
+|---|---|---|---|---|---|---|---|
+| deepseek-v4-verify-3 | MSFT | **2026-08-28** | hold | 0.94 | hold x3 | $0.2817 | 922s |
+| deepseek-acn-fixed-1 | ACN | 2026-08-29 | hold | 0.96 | hold x3 | $0.2487 | 561s |
+| deepseek-asml-1 | ASML | 2026-08-29 | hold | 0.94 | hold x3 | $0.2346 | 511s |
+| deepseek-asml-fixed-1 | ASML | 2026-08-29 | hold | 0.97 | hold x3 | $0.1964 | 422s |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS for the 3 tickers used |
+| 2 | 6/6 runs complete | **FAIL** — 4 runs, 3 tickers; NFLX/AVGO/FIG absent |
+| 3 | Schema-valid | PASS 4/4 |
+| 4 | Verifier clean (in-band) | PASS 4/4; `debate_originated` empty on all four |
+| 5 | Zero Class A/B/E | PASS on the defect-signature pass |
+| 6 | C/D ceiling | **PASS — zero notation defects** |
+| 7 | `as_of_date` integrity | **FAIL** — MSFT 2026-08-28, ACN/ASML 2026-08-29 |
+| 8 | Verdict stability | partial — the ASML pair agrees, see caveat |
+| 9 | Cost | PASS — $0.9615 total, $0.2404/run |
+
+Criterion 7 is the only structural failure: two `as_of` dates means
+cross-ticker comparison is contaminated by construction, which is what Gate
+C exists to prevent. Individual memos are unaffected; the four cannot be
+read as one battery.
+
+### Why criterion 6 passes: there is far less to get wrong
+
+Numbers written inline in the narrative fields (`reasoning`,
+`research_thesis`, `risk_debate_summary`, `bull_case`, `bear_case`):
+
+| model | numbers per 1k chars | worst case |
+|---|---|---|
+| deepseek-v4-flash | 0.37 – 1.87 | MSFT: **2 numbers in 5,385 chars** |
+| claude-haiku-4-5 | 4.05 – 7.03 | MSFT: **43 numbers in 6,118 chars** |
+
+**This is not information loss.** Citation counts (32–52 vs Haiku's 23–40)
+and rendered evidence lines (27–35 vs 24–36) are at least as high. The
+figures moved into the Python-rendered Evidence section, which is exactly
+what rule 1 of both synthesis prompts asks for: *"never retype a figure
+already established elsewhere."*
+
+**deepseek-v4-flash complies with the memo design that Haiku routinely
+violates.** The clearest instance is the same sentence, same ticker, both
+models:
+
+- Haiku: *"net cash of $6.3B and leverage of 0.50x"* — logged as Class D,
+  since the corpus labels 0.50x explicitly as GROSS and FY2025 net leverage
+  is (0.62)x, i.e. negative.
+- DeepSeek: *"gross leverage is trivial and net cash is roughly $6.3B"* —
+  correctly labelled, and it declines to restate the ratio at all.
+
+So the entire notation defect class that failed criterion 6 on the Haiku
+battery (4 defects, 3 of them unit/ratio-label errors) does not arise here.
+That is a real advantage, and it is an advantage of restraint rather than of
+better arithmetic — worth distinguishing, because the two would be fixed by
+different things.
+
+### Three caveats before reading this as a win
+
+1. **Confidence runs high and flat.** 0.94–0.97 against Haiku's 0.88–0.93,
+   consistent with the standing observation that deepseek reports ~0.05–0.10
+   more confidence and that it does not move with evidence quality. A memo
+   with two numbers in it reporting 0.94 confidence is the combination most
+   worth distrusting.
+2. **All four verdicts are unanimous `hold`.** Haiku produced one
+   `unresolved` (AVGO, from a 2-sample split). Four runs cannot distinguish
+   "less noise" from "less discrimination".
+3. **The ASML pair is NOT a determinism pair.** `deepseek-asml-1` (11:09)
+   and `deepseek-asml-fixed-1` (12:27) straddle the fixes merged as PRs
+   #63/#64 — the mis-named tool argument, the `thinking` translation, and
+   the wrapped digest batch. Same ticker, same `as_of`, agreeing direction,
+   different code. It is the closest thing to criterion 8 evidence this
+   project has and it still is not criterion 8.
+
+### Six-ticker battery at one as_of (2026-08-29, `p9-20260828`)
+
+Criterion 2 and 7 were the two failures above, so the battery was re-run at
+a single `as_of` of **2026-08-28 (Friday)** — deliberately NOT the
+2026-08-29 the earlier ACN/ASML runs used, which is a **Saturday**: a
+non-trading `as_of` leaves technicals on the prior close and ends the news
+window on a day with no market. Five fresh runs plus the existing MSFT run,
+which already sat at 2026-08-28. **Total $1.4160.**
+
+| ticker | verdict | conf | samples | cost | wall |
+|---|---|---|---|---|---|
+| ASML | hold | 0.97 | hold x3 | $0.2309 | 489s |
+| ACN | hold | 0.94 | hold x3 | $0.2138 | 494s |
+| MSFT | hold | 0.94 | hold x3 | $0.2817 | 922s |
+| FIG | hold | 0.93 | hold x3 | $0.2795 | 613s |
+| NFLX | hold | 0.92 | hold x3 | $0.2515 | 500s |
+| AVGO | **crashed** | — | — | $0.1586 wasted | — |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS |
+| 2 | 6/6 runs complete | **FAIL** — 5/6, AVGO crashed (mechanical, below) |
+| 3 | Schema-valid | PASS on 5/5 produced |
+| 4 | Verifier clean (in-band) | PASS — 0 `decision_failed`, `debate_originated` empty on all |
+| 5 | Zero Class A/B/E | **PASS** — every prose number traces to grounded |
+| 6 | C/D within ceiling | **PASS — zero notation defects** |
+| 7 | `as_of_date` integrity | **PASS** — all six at 2026-08-28 |
+| 8 | Verdict stability | NOT RUN |
+| 9 | Cost | PASS — $1.2574 logged, $4.00 ceiling |
+
+### AVGO: the `rebuts` validator is a hard stop, and deepseek trips it
+
+AVGO died in debate turn 1. The bear emitted
+`rebuts: ['technical-contained-uptrend']`, an id present nowhere in the
+transcript (the opposing claims were `icfr-effective`, `no-maturity-wall`,
+`ocf-covers-ni`, `rpo-books-demand`, `segment-margins-up`) — it appears to
+have reached for a technical-report-style name instead of a debate claim id.
+`validate_rebuts` (debate_port.py) raises `ValueError`, which kills the run:
+**$0.1586 spent, no memo, and no `run_summary`** since the process died
+before one could be written.
+
+**This is a model-behaviour difference, not a regression.** The check was
+added after measuring **95 of 95** rebutted ids resolving correctly across
+five Haiku transcripts. deepseek-v4-flash hallucinated one on its second
+debate turn.
+
+The fix has direct precedent in this repo: commit `e7c82b8` softened the
+synthesis fabrication guard from *kill the run* to *drop the trial*. The
+same reasoning applies — a `rebuts` pointing at a nonexistent claim is bad
+debate hygiene, not a corrupted artifact. The turn's argument and claims
+remain usable, and `DebateTurn.guard_flags` already exists as the mechanism.
+Drop the bad ids, flag them, continue. **Not yet done.**
+
+Worth noting the pattern: this is the second guard written against Haiku's
+failure modes whose response to a deepseek deviation is to destroy an
+expensive run outright.
+
+### AVGO re-run after softening the guard: 6/6, automated gate clean
+
+`check_rebuts` was changed from raise to drop-and-flag (see the entry
+above), and AVGO was re-run on a fresh thread — not a resume, because the
+crashed thread's deadline had expired and the resume guard correctly
+refused it. **hold, confidence 0.95, $0.2656, 555s.**
+
+**The guard fix was not exercised.** No `unresolved_rebuts` flag fired: the
+debate ran six clean turns and the model simply did not hallucinate an id
+this time. So the crash was stochastic, not deterministic, and the softening
+is proven by unit tests rather than by a live catch. Worth stating, because
+"we fixed it and the re-run passed" would imply a causal link the evidence
+does not support.
+
+Final battery, all six tickers at `as_of=2026-08-28`, **$1.6816 total
+including the $0.1586 lost to the crash**:
+
+| ticker | verdict | conf | samples | cost |
+|---|---|---|---|---|
+| ASML | hold | 0.97 | hold x3 | $0.2309 |
+| AVGO | hold | 0.95 | hold x3 | $0.2656 |
+| ACN | hold | 0.94 | hold x3 | $0.2138 |
+| MSFT | hold | 0.94 | hold x3 | $0.2817 |
+| FIG | hold | 0.93 | hold x3 | $0.2795 |
+| NFLX | hold | 0.92 | hold x3 | $0.2515 |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS |
+| 2 | 6/6 runs complete | **PASS** |
+| 3 | Schema-valid | **PASS** 6/6 |
+| 4 | Verifier clean (in-band) | **PASS** — 0 `decision_failed` |
+| 5 | Zero Class A/B/E | **PASS** |
+| 6 | C/D within ceiling | **PASS** — zero notation defects |
+| 7 | `as_of_date` integrity | **PASS** |
+| 8 | Verdict-direction stability | NOT RUN |
+| 9 | Cost | **PASS** — $1.5231 logged vs $4.00 |
+
+**Eight of nine pass. Criterion 8 is the only one not run.** On the Haiku
+battery the same criteria came out 5 pass / 3 fail / 1 not run.
+
+AVGO's memo audits clean: every prose number traces to grounded, and its one
+ratio sentence is *"the de-leveraging to **2.63x** is partly
+purchase-accounting, not organic"* — correct unit and no currency sign,
+which is the third measured Haiku defect avoided like-for-like (Haiku's AVGO
+memo wrote "$2.80x" and "$2.61x").
+
+### The unanimity question now has an answer, and it is not reassuring
+
+**All six verdicts are `hold`, every one unanimous 3/3.** That now includes
+AVGO — the ticker Haiku split `sell`/`hold` across three separate
+measurements (Phase 6 determinism work, Phase 8's injection canary, and the
+Phase 9 battery, where a dropped trial left 2 samples that disagreed and
+produced `unresolved`).
+
+Two readings, and this battery cannot separate them:
+
+- deepseek is genuinely less noisy on a debate Haiku finds genuinely
+  ambiguous; or
+- deepseek is less discriminating, and six unanimous `hold`s across six
+  materially different companies — a monopoly toolmaker, a hypergrowth
+  design SaaS, an IT-services bellwether, a streamer, a semi conglomerate
+  and a hyperscaler — is a signal about the model, not about the companies.
+
+The second reading is worth taking seriously precisely because confidence
+also runs high and flat (0.92–0.97) and does not track evidence quality. A
+system that returns the same verdict at high confidence for every input has
+excellent-looking criteria and no discriminating power, and the exit
+criteria as written cannot tell that apart from a system that is right.
+**Criterion 8 is the test that would separate them, and it is the one
+criterion never run in either battery.**
+
+### Numeric density, now measured across five tickers
+
+| ticker | deepseek numbers/1k | haiku numbers/1k |
+|---|---|---|
+| MSFT | 0.37 | 7.03 |
+| FIG | 0.36 | 5.07 |
+| ACN | 0.52 | 4.09 |
+| ASML | 1.09 | — |
+| NFLX | 1.69 | 4.05 |
+| AVGO | 2.38 | 5.32 |
+
+**~4-6x sparser, on every ticker measured**, while carrying MORE citations
+(38–49 vs Haiku's 23–40) and comparable-or-more rendered evidence lines
+(25–30 vs 24–36). The earlier four-run reading holds at six.
+
+The like-for-like case is NFLX, the same ticker whose Haiku memo produced
+the battery's most serious notation defect:
+
+- **Haiku:** *"leverage fell **41 basis points** gross and 34 basis points
+  net"* — turns reported as basis points, wrong by two orders of magnitude.
+- **deepseek:** *"a clean credit profile at **1.09x gross debt/operating
+  income**"* — correct unit, and `gross` stated explicitly, which is the
+  other defect (ACN's unlabelled gross ratio) avoided in the same phrase.
+
+Every number in NFLX's prose (1.09, 12, 18, 200, 24, 50) appears in the
+grounded corpus. ASML's 2027/2028 mentions, flagged by the gate as a
+lookahead lead, are its real backlog horizon and present in the corpus.
+
+### What this does and does not establish
+
+It establishes that the notation defect class which failed criterion 6 on
+Haiku does not arise here, across six tickers at one `as_of`, and that the
+restraint is genuine compliance rather than information loss.
+
+It does **not** establish that deepseek reasons better. Confidence still
+runs high and flat (0.92–0.97 against Haiku's 0.88–0.93) and still does not
+track evidence quality. **All five verdicts are unanimous `hold`** — and the
+one ticker that would have tested whether that is less noise or less
+discrimination is AVGO, which is precisely the run that crashed. Haiku split
+AVGO `sell/hold` three separate times; deepseek has never completed it.
+
+### Readability, unstated
+
+A memo carrying 2 numbers in 5,385 characters is more compliant and harder
+to act on directly: the reader must cross-reference the Evidence section to
+recover any figure. Whether that is the right trade is a product judgement
+nobody has made explicitly, and it is now the main difference between the
+two models' output.

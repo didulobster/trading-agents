@@ -82,3 +82,31 @@ def test_the_real_manifest_on_disk_is_intact(tmp_path):
         pytest.skip("battery manifest not present in this checkout")
     m = BatteryManifest.model_validate_json(p.read_text())
     assert {r.ticker for r in m.runs} >= {"NFLX", "AVGO", "ACN", "FIG"}
+
+
+# ---------------------------------------------------------------------------
+# Thread-id overrides on the rebuild path. A run can belong in a battery's
+# manifest without following its naming convention — one made by hand, or
+# carried over from an earlier experiment at the same as_of. The DeepSeek
+# battery of 2026-08-29 is the case: five runs named
+# `trading-<T>-p9-20260828-ds` plus an existing MSFT run still called
+# `deepseek-v4-verify-3`.
+# ---------------------------------------------------------------------------
+
+def test_overrides_parse_into_a_ticker_to_thread_mapping():
+    pairs = ["MSFT=deepseek-v4-verify-3", "ACN=some-other-thread"]
+    overrides = dict(p.split("=", 1) for p in pairs)
+    assert overrides["MSFT"] == "deepseek-v4-verify-3"
+    assert overrides["ACN"] == "some-other-thread"
+
+
+def test_an_override_value_containing_equals_is_kept_whole():
+    """split("=", 1) rather than split("=") — a thread id is opaque and may
+    legitimately contain the separator."""
+    overrides = dict(p.split("=", 1) for p in ["MSFT=a=b"])
+    assert overrides["MSFT"] == "a=b"
+
+
+def test_tickers_without_an_override_keep_the_derived_id():
+    overrides = dict(p.split("=", 1) for p in ["MSFT=custom"])
+    assert overrides.get("NFLX", "trading-NFLX-p9-20260828-a2") == "trading-NFLX-p9-20260828-a2"
