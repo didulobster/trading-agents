@@ -2423,3 +2423,92 @@ AVGO verdict instability.
 **Phase 9 does not close.** Criteria 6 and 9 fail on their own terms, and 2
 fails by decision. Criterion 8 is unmeasured. Per §8 the ceiling breach
 governs: characterize the gap rather than patch and re-run.
+
+
+## deepseek-v4-flash vs Haiku 4.5: memos are 4x less numeric (2026-08-29)
+
+Four `deepseek-v4-flash` runs, made outside the Phase 9 battery and checked
+against its exit criteria afterwards. Not a battery — three tickers, two
+`as_of` dates, ad-hoc run ids — so the scoring below is per-criterion rather
+than a phase verdict.
+
+| run_id | ticker | as_of | verdict | conf | samples | cost | wall |
+|---|---|---|---|---|---|---|---|
+| deepseek-v4-verify-3 | MSFT | **2026-08-28** | hold | 0.94 | hold x3 | $0.2817 | 922s |
+| deepseek-acn-fixed-1 | ACN | 2026-08-29 | hold | 0.96 | hold x3 | $0.2487 | 561s |
+| deepseek-asml-1 | ASML | 2026-08-29 | hold | 0.94 | hold x3 | $0.2346 | 511s |
+| deepseek-asml-fixed-1 | ASML | 2026-08-29 | hold | 0.97 | hold x3 | $0.1964 | 422s |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS for the 3 tickers used |
+| 2 | 6/6 runs complete | **FAIL** — 4 runs, 3 tickers; NFLX/AVGO/FIG absent |
+| 3 | Schema-valid | PASS 4/4 |
+| 4 | Verifier clean (in-band) | PASS 4/4; `debate_originated` empty on all four |
+| 5 | Zero Class A/B/E | PASS on the defect-signature pass |
+| 6 | C/D ceiling | **PASS — zero notation defects** |
+| 7 | `as_of_date` integrity | **FAIL** — MSFT 2026-08-28, ACN/ASML 2026-08-29 |
+| 8 | Verdict stability | partial — the ASML pair agrees, see caveat |
+| 9 | Cost | PASS — $0.9615 total, $0.2404/run |
+
+Criterion 7 is the only structural failure: two `as_of` dates means
+cross-ticker comparison is contaminated by construction, which is what Gate
+C exists to prevent. Individual memos are unaffected; the four cannot be
+read as one battery.
+
+### Why criterion 6 passes: there is far less to get wrong
+
+Numbers written inline in the narrative fields (`reasoning`,
+`research_thesis`, `risk_debate_summary`, `bull_case`, `bear_case`):
+
+| model | numbers per 1k chars | worst case |
+|---|---|---|
+| deepseek-v4-flash | 0.37 – 1.87 | MSFT: **2 numbers in 5,385 chars** |
+| claude-haiku-4-5 | 4.05 – 7.03 | MSFT: **43 numbers in 6,118 chars** |
+
+**This is not information loss.** Citation counts (32–52 vs Haiku's 23–40)
+and rendered evidence lines (27–35 vs 24–36) are at least as high. The
+figures moved into the Python-rendered Evidence section, which is exactly
+what rule 1 of both synthesis prompts asks for: *"never retype a figure
+already established elsewhere."*
+
+**deepseek-v4-flash complies with the memo design that Haiku routinely
+violates.** The clearest instance is the same sentence, same ticker, both
+models:
+
+- Haiku: *"net cash of $6.3B and leverage of 0.50x"* — logged as Class D,
+  since the corpus labels 0.50x explicitly as GROSS and FY2025 net leverage
+  is (0.62)x, i.e. negative.
+- DeepSeek: *"gross leverage is trivial and net cash is roughly $6.3B"* —
+  correctly labelled, and it declines to restate the ratio at all.
+
+So the entire notation defect class that failed criterion 6 on the Haiku
+battery (4 defects, 3 of them unit/ratio-label errors) does not arise here.
+That is a real advantage, and it is an advantage of restraint rather than of
+better arithmetic — worth distinguishing, because the two would be fixed by
+different things.
+
+### Three caveats before reading this as a win
+
+1. **Confidence runs high and flat.** 0.94–0.97 against Haiku's 0.88–0.93,
+   consistent with the standing observation that deepseek reports ~0.05–0.10
+   more confidence and that it does not move with evidence quality. A memo
+   with two numbers in it reporting 0.94 confidence is the combination most
+   worth distrusting.
+2. **All four verdicts are unanimous `hold`.** Haiku produced one
+   `unresolved` (AVGO, from a 2-sample split). Four runs cannot distinguish
+   "less noise" from "less discrimination".
+3. **The ASML pair is NOT a determinism pair.** `deepseek-asml-1` (11:09)
+   and `deepseek-asml-fixed-1` (12:27) straddle the fixes merged as PRs
+   #63/#64 — the mis-named tool argument, the `thinking` translation, and
+   the wrapped digest batch. Same ticker, same `as_of`, agreeing direction,
+   different code. It is the closest thing to criterion 8 evidence this
+   project has and it still is not criterion 8.
+
+### Readability, unstated
+
+A memo carrying 2 numbers in 5,385 characters is more compliant and harder
+to act on directly: the reader must cross-reference the Evidence section to
+recover any figure. Whether that is the right trade is a product judgement
+nobody has made explicitly, and it is now the main difference between the
+two models' output.
