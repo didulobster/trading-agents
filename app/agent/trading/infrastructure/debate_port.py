@@ -637,6 +637,20 @@ def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
        — the bare-number tolerance stage is deliberately not given veto
        power here, for the density reason above.
 
+    3. SIGN, added 2026-08-29. The news feed says Viking "Cuts Share Stake In
+       Microsoft Corp By 36.8%" and the debater wrote "Viking -36.8%" — the
+       same figure, the sign carrying the direction the source states in
+       words. Comparison is therefore on MAGNITUDE: "-36.8" clears against a
+       pack "36.8" and vice versa.
+
+       What that gives up, stated rather than discovered later: this guard no
+       longer reports a sign INVERSION of a sourced figure — "-5.2%" written
+       against a pack "+5.2%" now clears. That is the correct trade for THIS
+       guard, whose question is whether a figure has a source at all, not
+       whether it was read in the right direction; a magnitude present in the
+       pack was not invented. Direction errors need a check that knows what
+       the number means, which containment never did.
+
     Flags, never blocks. This guard is new enough to have unknown
     false-positive classes, and debate prose is looser than the templated
     technical interpretation, so expect more of them here than in Phase 3.
@@ -645,12 +659,16 @@ def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
     pack = evidence_pack.replace("−", "-").replace(",", "")
 
     pack_tokens = {m.group(1) for m in _DEBATE_NUMBER.finditer(pack)}
+    # Magnitudes as well as signed tokens — see the SIGN note in the
+    # docstring. Built from the same scan so the two can never disagree.
+    pack_magnitudes = {t.lstrip("-") for t in pack_tokens}
     known: list[float] = []
     for token in pack_tokens:
         try:
             known.append(float(token))
         except ValueError:
             continue
+    known_magnitudes = [abs(k) for k in known]
 
     # Second opinion, consulted ONLY for percent forms (see docstring).
     tolerance_flags = set(_flag_unmatched_numbers_against(text, known))
@@ -659,9 +677,10 @@ def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
     flagged: list[str] = []
     for match in _DEBATE_NUMBER.finditer(scanned):
         raw, percent = match.group(1), match.group(2)
-        if raw.replace(",", "") in pack_tokens:
+        bare = raw.replace(",", "")
+        if bare in pack_tokens or bare.lstrip("-") in pack_magnitudes:
             continue
-        if _is_rounding_of(raw, known):
+        if _is_rounding_of(bare.lstrip("-"), known_magnitudes):
             continue
         if percent:
             if not ({f"{raw}%", f"{raw}% above/below"} & tolerance_flags):
@@ -743,11 +762,12 @@ def _is_rounding_of(raw: str, known: list[float]) -> bool:
     )
 
 
-# Formatting, not content: quote characters and whitespace. Everything with
-# meaning — digits, letters, and the punctuation that changes a value
-# (".", ",", "-", ":") — is preserved, so "38.72" still fails to match
-# "3.872".
-_QUOTE_NOISE = re.compile(r'[\s"\u201c\u201d\u2018\u2019\']+')
+# Formatting, not content: quote characters, whitespace, and the markdown
+# markers that carry emphasis rather than meaning ("*", "_", "`").
+# Everything with meaning — digits, letters, and the punctuation that changes
+# a value (".", ",", "-", ":") — is preserved, so "38.72" still fails to
+# match "3.872".
+_QUOTE_NOISE = re.compile(r'[\s"\u201c\u201d\u2018\u2019\'*_`]+')
 
 
 def _norm(text: str) -> str:
@@ -762,6 +782,15 @@ def _norm(text: str) -> str:
 
     Whitespace goes entirely rather than collapsing to a single space,
     because a quote copied out of a wrapped markdown report carries the wrap.
+
+    Markdown emphasis goes for the same reason, added 2026-08-29 after the
+    discrimination probe: the fundamentals report writes "was **not
+    effective** as of 2026-06-30" and the debater quoted that sentence with
+    the asterisks dropped — a faithful 40-word span reported as a quote not
+    in the report, on the one claim the SELL verdict rested on. The markers
+    are invisible to a reader and unquotable by construction, so stripping
+    them from BOTH sides cannot make a false quote match a real span; it can
+    only stop formatting from deciding the answer.
     """
     return _QUOTE_NOISE.sub("", text).lower()
 

@@ -379,6 +379,42 @@ def test_the_same_fabricated_figure_repeated_is_one_finding():
     assert port._flag_debate_numbers(text, PACK) == ["71.4"]
 
 
+def test_a_decline_written_as_a_negative_clears_against_an_unsigned_source():
+    """Found on the discrimination probe (MSFT, 2026-08-29). The news feed
+    states a decline in words — "Cuts Share Stake In Microsoft Corp By 36.8%"
+    — and the debater wrote it as a signed delta, "Viking -36.8%". That was
+    reported to the reader as a possibly fabricated figure in the memo's data
+    gaps, on a run whose only other flags were real. Prose puts the direction
+    in the verb; a debater putting it in the sign is restating, not
+    inventing."""
+    pack = "NEWS: Viking Global Investors Cuts Share Stake In Microsoft Corp By 36.8%."
+    assert port._flag_debate_numbers("Investors are exiting (Viking -36.8%).", pack) == []
+    assert port._flag_debate_numbers("Investors are exiting (Viking 36.8%).", pack) == []
+
+
+def test_a_source_negative_restated_without_its_sign_also_clears():
+    """The same equivalence in the other direction: the pack carries the sign
+    and the prose carries the word."""
+    pack = "FUNDAMENTALS: free cash flow of -44,708 million."
+    assert port._flag_debate_numbers("FCF was negative 44,708 million.", pack) == []
+
+
+def test_a_sign_inversion_of_a_sourced_figure_is_no_longer_reported():
+    """The cost of the two tests above, asserted rather than left to be
+    discovered from a memo. This guard answers "does this figure have a
+    source", and a magnitude in the pack was not invented; reading it in the
+    wrong direction is a different defect needing a check that knows what the
+    number means."""
+    pack = "FUNDAMENTALS: revenue grew 5.2% year over year."
+    assert port._flag_debate_numbers("Revenue fell -5.2%.", pack) == []
+
+
+def test_magnitude_matching_does_not_widen_the_guard_beyond_the_sign():
+    """A figure absent from the pack is still flagged at either sign — the
+    change is an equivalence between "-x" and "x", not a tolerance."""
+    assert port._flag_debate_numbers("Revenue reached -71.4 billion.", PACK) == ["-71.4"]
+
+
 @pytest.mark.anyio
 async def test_fabricated_numbers_reach_the_turn_record(monkeypatch):
     client = _FakeClient(
@@ -624,6 +660,55 @@ def test_quote_matching_tolerates_whitespace_differences():
         }])
     )
     assert port.check_quotes(payload, port.report_texts(_state())) == []
+
+
+def test_quote_matching_tolerates_markdown_emphasis_in_the_report():
+    """Found on the discrimination probe (MSFT, 2026-08-29). The report wrote
+    "internal control ... was **not effective** as of 2026-06-30"; the
+    debater quoted the sentence as a reader sees it, without the asterisks,
+    and its claim was reported as citing a span not in the report — the one
+    claim the run's SELL verdict rested on."""
+    state = _state(
+        fundamentals_report=FundamentalsReport(
+            ticker="ACN",
+            summary=(
+                "Item 9A states that internal control over financial "
+                "reporting was **not effective** as of 2026-06-30."
+            ),
+            input_tokens=0,
+            cache_write_tokens=0,
+            cache_read_tokens=0,
+            output_tokens=0,
+            generated_at=date(2026, 8, 19),
+        )
+    )
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "icfr-not-effective",
+            "text": "ICFR was not effective at year end.",
+            "evidence_ref": "fundamentals",
+            "evidence_quote": (
+                "internal control over financial reporting was not effective "
+                "as of 2026-06-30"
+            ),
+        }])
+    )
+    assert port.check_quotes(payload, port.report_texts(state)) == []
+
+
+def test_stripping_emphasis_does_not_let_a_false_quote_verify():
+    """The markers come off BOTH sides, so the check still turns on the
+    words: a quote that misstates the report fails whatever its
+    formatting."""
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "margin-hold",
+            "text": "Margin is stable.",
+            "evidence_ref": "fundamentals",
+            "evidence_quote": "operating **margin** of 51.9%",
+        }])
+    )
+    assert port.check_quotes(payload, port.report_texts(_state())) == ["margin-hold"]
 
 
 def _technical_state() -> dict:
