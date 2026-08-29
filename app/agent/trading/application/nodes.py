@@ -396,11 +396,31 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             f"a truncated argument, not a concluded one"
         )
 
-    concessions = [t for t in turns if t.payload.stance == "concede"]
+    # Counts BOTH shapes — a full concession (stance='concede') and a partial
+    # one (an opposing claim_id named in `concession_trigger` on a hold or
+    # sharpen turn). Counting only the first is what made this line read
+    # "0 structurally-justified concession(s)" for every debate the pipeline
+    # has ever run: see check_concession's docstring for why no turn was ever
+    # stance='concede'.
+    concessions = [
+        t for t in turns
+        if t.payload.stance == "concede" or t.payload.concession_trigger
+    ]
     evidence.append(
         f"{len(turns)}-turn bull/bear debate over the analyst reports; "
         f"{len(concessions)} structurally-justified concession(s)"
     )
+    # Zero is reported as a gap, not as a finding. It means no turn NAMED an
+    # opposing claim_id, which is not the same as neither side moving — a
+    # concession written only in the argument prose is invisible here, and the
+    # memo must not read this count as "the debate was unmoved".
+    if turns and not concessions:
+        gaps.append(
+            "no turn named an opposing claim_id in `concession_trigger`, so no "
+            "concession is recorded structurally — this is not evidence that "
+            "neither side moved, since a concession made only in the argument "
+            "prose is not counted"
+        )
     return gaps, evidence
 
 

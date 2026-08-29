@@ -174,11 +174,100 @@ async def test_conceding_to_your_own_earlier_claim_raises():
 
 
 @pytest.mark.anyio
-async def test_concession_trigger_on_a_non_concede_stance_raises():
+async def test_partial_concession_on_a_hold_stance_is_accepted():
+    """The shape that actually occurs, and the one the old guard rejected.
+
+    `concession_trigger` used to be an error on any stance but 'concede', so
+    the only concession the schema accepted was total capitulation — which no
+    debater with a case ever offers. Result: across all 42 vault transcripts,
+    249 turns, zero `concede`, and every summary reporting zero concessions
+    while debaters conceded in prose (MSFT 2026-08-29 turn 2). Accepting a
+    point you cannot answer while holding your overall case is now
+    expressible, and still has to name a real opposing claim_id.
+    """
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    client = _FakeClient(
+        [_payload(stance="hold", concession_trigger="margin-hold", claims=[
+            {"claim_id": "cost-drag", "text": "Costs still bite.", "evidence_ref": "none"}
+        ])]
+    )
+
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bear", 1, client=client
+    )
+
+    assert turn.payload.stance == "hold"
+    assert turn.payload.concession_trigger == "margin-hold"
+    assert turn.guard_flags == []
+
+
+@pytest.mark.anyio
+async def test_partial_concession_to_your_own_claim_is_dropped_and_flagged():
+    """Agreeing with yourself is still not a concession — but on a partial
+    one it drops and flags rather than killing the run, matching
+    `check_rebuts`. The stance, argument and claims are untouched by a bad
+    pointer; a full `stance='concede'` with the same bad id still raises,
+    because that one changes what the transcript says the debate did.
+    """
+    turns = [_turn(0, "bull", ["margin-hold"]), _turn(1, "bear", ["margin-soft"])]
     client = _FakeClient([_payload(stance="hold", concession_trigger="margin-hold")])
 
-    with pytest.raises(ValueError, match="non-concede stance"):
-        await port.run_debate_turn(_state(), "bull", 0, client=client)
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bull", 2, client=client
+    )
+
+    assert turn.payload.concession_trigger == ""
+    assert turn.guard_flags == ["unresolved_concession: margin-hold"]
+
+
+def test_partial_concession_to_an_invented_claim_is_dropped():
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    payload = DebateTurnPayload.model_validate(
+        _payload(stance="sharpen", concession_trigger="invented-id")
+    )
+
+    assert port.check_concession(payload, turns, "bear") == "invented-id"
+    assert payload.concession_trigger == ""
+
+
+def test_a_clean_turn_drops_nothing():
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    payload = DebateTurnPayload.model_validate(_payload(stance="hold"))
+
+    assert port.check_concession(payload, turns, "bear") is None
+
+
+# ---------------------------------------------------------------------------
+# (a1) The summary must not report "0 concessions" as if it meant "nobody
+# moved". It counts named claim_ids; a concession made only in the argument
+# prose is not one, and that distinction has to survive into the transcript.
+# ---------------------------------------------------------------------------
+
+def test_summary_counts_partial_concessions():
+    turns = [
+        _turn(0, "bull", ["margin-hold"]),
+        _turn(1, "bear", ["margin-soft"]),
+    ]
+    turns[1].payload.concession_trigger = "margin-hold"
+
+    md = port._format_debate_markdown("ACN", turns, "round_cap")
+
+    assert "| Structurally-justified concessions | 1 (0 full, 1 partial) |" in md
+    assert "*concedes to:* `margin-hold` (partial)" in md
+    assert "No concession was recorded structurally" not in md
+
+
+def test_zero_concessions_is_reported_as_a_limit_of_the_count():
+    """The defect this whole change is about: the table said 0 while the
+    Research Manager quoted a concession out of the same transcript's prose.
+    Zero is now stated as "no id was named", not as "neither side moved"."""
+    turns = [_turn(0, "bull", ["margin-hold"]), _turn(1, "bear", ["margin-soft"])]
+
+    md = port._format_debate_markdown("ACN", turns, "round_cap")
+
+    assert "| Structurally-justified concessions | 0 (0 full, 0 partial) |" in md
+    assert "No concession was recorded structurally" in md
+    assert "it is NOT evidence that neither side moved" in md
 
 
 # ---------------------------------------------------------------------------
