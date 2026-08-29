@@ -2562,6 +2562,78 @@ Worth noting the pattern: this is the second guard written against Haiku's
 failure modes whose response to a deepseek deviation is to destroy an
 expensive run outright.
 
+### AVGO re-run after softening the guard: 6/6, automated gate clean
+
+`check_rebuts` was changed from raise to drop-and-flag (see the entry
+above), and AVGO was re-run on a fresh thread — not a resume, because the
+crashed thread's deadline had expired and the resume guard correctly
+refused it. **hold, confidence 0.95, $0.2656, 555s.**
+
+**The guard fix was not exercised.** No `unresolved_rebuts` flag fired: the
+debate ran six clean turns and the model simply did not hallucinate an id
+this time. So the crash was stochastic, not deterministic, and the softening
+is proven by unit tests rather than by a live catch. Worth stating, because
+"we fixed it and the re-run passed" would imply a causal link the evidence
+does not support.
+
+Final battery, all six tickers at `as_of=2026-08-28`, **$1.6816 total
+including the $0.1586 lost to the crash**:
+
+| ticker | verdict | conf | samples | cost |
+|---|---|---|---|---|
+| ASML | hold | 0.97 | hold x3 | $0.2309 |
+| AVGO | hold | 0.95 | hold x3 | $0.2656 |
+| ACN | hold | 0.94 | hold x3 | $0.2138 |
+| MSFT | hold | 0.94 | hold x3 | $0.2817 |
+| FIG | hold | 0.93 | hold x3 | $0.2795 |
+| NFLX | hold | 0.92 | hold x3 | $0.2515 |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS |
+| 2 | 6/6 runs complete | **PASS** |
+| 3 | Schema-valid | **PASS** 6/6 |
+| 4 | Verifier clean (in-band) | **PASS** — 0 `decision_failed` |
+| 5 | Zero Class A/B/E | **PASS** |
+| 6 | C/D within ceiling | **PASS** — zero notation defects |
+| 7 | `as_of_date` integrity | **PASS** |
+| 8 | Verdict-direction stability | NOT RUN |
+| 9 | Cost | **PASS** — $1.5231 logged vs $4.00 |
+
+**Eight of nine pass. Criterion 8 is the only one not run.** On the Haiku
+battery the same criteria came out 5 pass / 3 fail / 1 not run.
+
+AVGO's memo audits clean: every prose number traces to grounded, and its one
+ratio sentence is *"the de-leveraging to **2.63x** is partly
+purchase-accounting, not organic"* — correct unit and no currency sign,
+which is the third measured Haiku defect avoided like-for-like (Haiku's AVGO
+memo wrote "$2.80x" and "$2.61x").
+
+### The unanimity question now has an answer, and it is not reassuring
+
+**All six verdicts are `hold`, every one unanimous 3/3.** That now includes
+AVGO — the ticker Haiku split `sell`/`hold` across three separate
+measurements (Phase 6 determinism work, Phase 8's injection canary, and the
+Phase 9 battery, where a dropped trial left 2 samples that disagreed and
+produced `unresolved`).
+
+Two readings, and this battery cannot separate them:
+
+- deepseek is genuinely less noisy on a debate Haiku finds genuinely
+  ambiguous; or
+- deepseek is less discriminating, and six unanimous `hold`s across six
+  materially different companies — a monopoly toolmaker, a hypergrowth
+  design SaaS, an IT-services bellwether, a streamer, a semi conglomerate
+  and a hyperscaler — is a signal about the model, not about the companies.
+
+The second reading is worth taking seriously precisely because confidence
+also runs high and flat (0.92–0.97) and does not track evidence quality. A
+system that returns the same verdict at high confidence for every input has
+excellent-looking criteria and no discriminating power, and the exit
+criteria as written cannot tell that apart from a system that is right.
+**Criterion 8 is the test that would separate them, and it is the one
+criterion never run in either battery.**
+
 ### Numeric density, now measured across five tickers
 
 | ticker | deepseek numbers/1k | haiku numbers/1k |
@@ -2571,8 +2643,9 @@ expensive run outright.
 | ACN | 0.52 | 4.09 |
 | ASML | 1.09 | — |
 | NFLX | 1.69 | 4.05 |
+| AVGO | 2.38 | 5.32 |
 
-**~6x sparser, on every ticker measured**, while carrying MORE citations
+**~4-6x sparser, on every ticker measured**, while carrying MORE citations
 (38–49 vs Haiku's 23–40) and comparable-or-more rendered evidence lines
 (25–30 vs 24–36). The earlier four-run reading holds at six.
 
