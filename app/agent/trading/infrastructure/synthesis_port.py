@@ -43,9 +43,11 @@ module, so a top-level import here completes the cycle.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 
 from app.infrastructure.llm import LLMClient, get_client
@@ -407,6 +409,51 @@ def compute_confidence(
     )
     score = 0.6 * coverage + 0.3 * (1 - mean_spread) + 0.1 * max(0.0, 1 - flags / 10)
     return round(max(0.0, min(1.0, score)), 2)
+
+
+def sample_agreement_ceiling(verdicts: list[str]) -> float | None:
+    """The upper bound on confidence implied by the run's OWN verdict samples.
+
+    `compute_confidence` above reads within-trial observables — coverage,
+    the panel's score spread per factor, guard flags — and is computed
+    inside each trial, before any vote exists. It therefore cannot see the
+    one disagreement the run explicitly went out and measured: whether
+    independent trials reached the same verdict at all. The two numbers
+    describe different things and nothing reconciled them.
+
+    Measured 2026-08-29: MSFT reported **0.97 on a 2-1 split** against 0.94
+    on its unanimous baseline — higher confidence on more disagreement.
+    AVGO's Phase 9 battery run reported 0.89 on samples that did not agree
+    at all (`['sell', 'hold']`, verdict UNRESOLVED). Both are consistent
+    with the code as written: the panel agreed tightly about each factor
+    WITHIN a trial while different trials reached different verdicts.
+
+    The bound is the plain agreement fraction, k/n. Deliberately NOT a
+    posterior: Laplace ((k+1)/(n+2)) or Jeffreys would shrink a unanimous
+    3/3 to 0.80 or 0.875, repricing every memo in the record against a
+    calibration `compute_confidence`'s own docstring disclaims having. k/n
+    asserts only what was directly observed and binds exactly when the run
+    contradicted itself — a unanimous run is untouched at any N.
+
+    Returns None when no sampling ran (empty `verdict_samples`), so a
+    single-Judge memo is left alone rather than clamped against a vote that
+    never happened.
+    """
+    if not verdicts:
+        return None
+    top_count = Counter(verdicts).most_common(1)[0][1]
+    return top_count / len(verdicts)
+
+
+def floor_to_2dp(value: float) -> float:
+    """Round a ceiling DOWN, never to nearest.
+
+    `round(2/3, 2)` is 0.67, which is above the 2/3 bound it is supposed to
+    express — and 2/3 is exactly where `_confidence_band` switches from
+    MEDIUM to HIGH, so rounding to nearest would label a 2-1 split HIGH on
+    the strength of a rounding error.
+    """
+    return math.floor(value * 100) / 100
 
 
 # ---------------------------------------------------------------------------

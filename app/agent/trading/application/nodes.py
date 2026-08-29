@@ -34,7 +34,9 @@ from app.agent.trading.infrastructure.synthesis_port import (
     MemoVerificationError,
     SynthesisFabricationError,
     SynthesisReferenceError,
+    floor_to_2dp,
     run_synthesis,
+    sample_agreement_ceiling,
     verify_decision_memo,
 )
 from app.agent.trading.infrastructure.decision_memo_port import (
@@ -675,8 +677,25 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"{len(memos)} sample(s), a weaker signal than a full {RISK_VERDICT_SAMPLES}-way vote"
         )
 
+    # A memo may not claim more confidence in its verdict than the share of
+    # its own trials that reached that verdict. `compute_confidence` is
+    # computed inside a trial and cannot see the vote; this is the only
+    # place both numbers exist at once. See `sample_agreement_ceiling`.
+    confidence = final.confidence
+    ceiling = sample_agreement_ceiling(verdicts)
+    if ceiling is not None and ceiling < confidence:
+        confidence = floor_to_2dp(ceiling)
+        extra_gaps.append(
+            f"confidence clamped {final.confidence:.2f} → {confidence:.2f}: only "
+            f"{top_count} of {len(verdicts)} verdict sample(s) reached this verdict, "
+            f"and the memo cannot be more confident in it than the trials that "
+            f"produced it were agreed — the unclamped figure reads within-trial "
+            f"factor agreement, not agreement about the verdict"
+        )
+
     final = final.model_copy(update={
         "verdict_samples": verdicts,
+        "confidence": confidence,
         "data_gaps": final.data_gaps + extra_gaps,
     })
 
