@@ -50,6 +50,50 @@ Respond in 3-5 sentences of plain-language interpretation. No preamble, no heade
 _MA_LABELS = {"sma_50": "50-day average", "sma_200": "200-day average"}
 
 
+def _band_distance(close: float, lower: float, upper: float) -> str:
+    """How FAR price sits from the Bollinger bands, as a clause to append.
+
+    The side alone was not enough. On the FIG run (2026-08-29) the bear's
+    whole technical leg was how overextended the close was — "3.5% above the
+    upper Bollinger band" — a figure the relations did not state, so the model
+    computed it from two pack values and the numeric guard reported it as
+    possibly fabricated. It was neither fabricated nor wrong; it was
+    (close − upper) / close, while the natural reading of "3.5% above the
+    band" is (close − upper) / upper = 3.66%. Two defensible denominators and
+    nothing telling the model which, on a number a reader takes at face value.
+
+    So Python decides it, like every other comparison here, and the text names
+    the denominator rather than leaving it inferable. Distances are measured
+    against the BAND, the reference the phrase "above the band" is about.
+
+    Only the bands the claim can be about: when price has broken out, the far
+    band's distance is not a fact anyone argues from, and every number added
+    here is one more value the containment guard has to hold. Within the
+    bands, both distances are stated — "near the upper band" is a claim
+    debaters make constantly, and it needs the same grounding as a breakout.
+    """
+    def pct(band: float) -> float:
+        return (close - band) / band * 100
+
+    if upper > 0 and close > upper:
+        return f" — price is {pct(upper):.2f}% ABOVE the upper band (as a percentage of that band)"
+    if lower > 0 and close < lower:
+        return f" — price is {abs(pct(lower)):.2f}% BELOW the lower band (as a percentage of that band)"
+    # Within the bands. A band of zero or less has no percentage to be a
+    # denominator of — bb_lower can go negative on a volatile enough series —
+    # so each side is stated only if it is meaningful, rather than dropping
+    # both because one was not.
+    parts = []
+    if upper > 0:
+        parts.append(f"{abs(pct(upper)):.2f}% BELOW the upper band")
+    if lower > 0:
+        parts.append(f"{pct(lower):.2f}% ABOVE the lower band")
+    if not parts:
+        return ""
+    suffix = "each as a percentage" if len(parts) > 1 else "as a percentage"
+    return f" — price is {' and '.join(parts)} ({suffix} of that band)"
+
+
 def derive_relations(ind: TechnicalIndicators) -> list[str]:
     """State the comparisons in code rather than leaving them to the model.
 
@@ -100,7 +144,8 @@ def derive_relations(ind: TechnicalIndicators) -> list[str]:
             else "WITHIN the bands"
         )
         rel.append(f"last close ({close:.2f}) is {where} "
-                   f"({ind.bb_lower:.2f} to {ind.bb_upper:.2f})")
+                   f"({ind.bb_lower:.2f} to {ind.bb_upper:.2f})"
+                   + _band_distance(close, ind.bb_lower, ind.bb_upper))
 
     if ind.volume_vs_20d_avg is not None:
         side = "ABOVE" if ind.volume_vs_20d_avg > 1 else "BELOW"
