@@ -13,7 +13,10 @@ from datetime import date, datetime, timezone
 from app.infrastructure.llm import get_client
 
 from app.agent.trading.application.guards import check_run_guards
-from app.agent.trading.application.risk_ledger import build_risk_ledger
+from app.agent.trading.application.risk_ledger import (
+    build_risk_ledger,
+    unexpected_missing_scores,
+)
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.decision_memo import Verdict
 from app.agent.trading.domain.news_digest import (
@@ -444,7 +447,11 @@ def _risk_caveats(state: TradingState) -> tuple[list[str], list[str], list]:
             + (f" (+{len(unquoted) - 5} more)" if len(unquoted) > 5 else "")
         )
 
-    missing_any = [e for e in ledger if e.missing_scores]
+    # Only the absences nobody asked for — see `unexpected_missing_scores`.
+    # Counting every gap in `missing_scores` reported the neutral's
+    # protocol-required silence on uncontested factors as a defect, in every
+    # run of the 2026-08-29 battery.
+    missing_any = [e for e in ledger if unexpected_missing_scores(e)]
     if missing_any:
         gaps.append(
             f"{len(missing_any)} of {len(ledger)} risk factor(s) are missing a "

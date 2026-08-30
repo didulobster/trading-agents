@@ -10,7 +10,11 @@ persona ever asserted.
 
 from __future__ import annotations
 
-from app.agent.trading.application.risk_ledger import build_risk_ledger, contested_ids
+from app.agent.trading.application.risk_ledger import (
+    build_risk_ledger,
+    contested_ids,
+    unexpected_missing_scores,
+)
 from app.agent.trading.domain.risk import PERSONAS, RiskFactor, RiskScore, RiskTurn, RiskTurnPayload
 
 
@@ -218,3 +222,64 @@ def test_a_persona_re_adjudicating_in_round_3_overwrites_its_round_2_score():
     ledger = build_risk_ledger(turns)
 
     assert ledger[0].scores["neutral"] == (4, 4)
+
+
+# ---------------------------------------------------------------------------
+# unexpected_missing_scores — which absences a READER should be told about.
+# The ledger still records every absence; this is the subset nobody asked for.
+# ---------------------------------------------------------------------------
+
+def _scored(factor_id: str, sev: int, lik: int) -> RiskScore:
+    return RiskScore(factor_id=factor_id, severity=sev, likelihood=lik, rationale="r")
+
+
+def _two_panelists(sev_a: int, sev_c: int) -> list[RiskTurn]:
+    """Round 1 as risk_port runs it: neutral enumerates, the other two score."""
+    return [
+        _turn(0, "neutral", proposes=[_factor("RF00")]),
+        _turn(1, "aggressive", scores=[_scored("RF00", sev_a, 3)]),
+        _turn(2, "conservative", scores=[_scored("RF00", sev_c, 3)]),
+    ]
+
+
+def test_the_neutral_not_scoring_an_uncontested_factor_is_not_a_gap():
+    """The adjudicate-phase instruction is "do not score an uncontested id",
+    and risk_port only puts contested ids on the neutral's slate. Every one of
+    the 12 flagged entries in the 2026-08-29 five-run battery was this shape,
+    so every memo told its reader the ledger was incomplete on the factors
+    where the panel had followed its own protocol."""
+    entry = build_risk_ledger(_two_panelists(4, 4))[0]
+
+    assert entry.missing_scores == ["neutral"]      # the ledger still records it
+    assert unexpected_missing_scores(entry) == []   # the reader is not told
+
+
+def test_the_neutral_not_scoring_a_CONTESTED_factor_is_a_gap():
+    """The other half of the same rule: a contested factor IS on the neutral's
+    slate, so its absence is the adjudication that never happened."""
+    entry = build_risk_ledger(_two_panelists(2, 5))[0]
+
+    assert entry.contested is True
+    assert unexpected_missing_scores(entry) == ["neutral"]
+
+
+def test_a_scoring_panelist_omitting_a_factor_is_always_a_gap():
+    """Aggressive and conservative are told to score the whole slate, so
+    neither has a phase in which silence is compliance."""
+    turns = [
+        _turn(0, "neutral", proposes=[_factor("RF00")]),
+        _turn(1, "aggressive", scores=[_scored("RF00", 4, 3)]),
+        _turn(3, "neutral", scores=[_scored("RF00", 4, 4)]),
+    ]
+
+    entry = build_risk_ledger(turns)[0]
+
+    assert unexpected_missing_scores(entry) == ["conservative"]
+
+
+def test_a_factor_no_one_scored_reports_both_scoring_panelists():
+    """Uncontested here means "nothing to compare", not agreement — so the
+    neutral is still excused and the two who were asked are not."""
+    entry = build_risk_ledger([_turn(0, "neutral", proposes=[_factor("RF00")])])[0]
+
+    assert sorted(unexpected_missing_scores(entry)) == ["aggressive", "conservative"]

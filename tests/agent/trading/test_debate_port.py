@@ -696,6 +696,50 @@ def test_quote_matching_tolerates_markdown_emphasis_in_the_report():
     assert port.check_quotes(payload, port.report_texts(state)) == []
 
 
+def test_a_model_written_verbatim_label_is_not_part_of_the_quote():
+    """Found on the NFLX run (2026-08-29): the model labelled its own span,
+    `"Verbatim: Operating cash flow (...) trailed net income (...)"`, and
+    everything after the label was exact. The label alone was the whole
+    reason that claim — the pivot of the debate — was reported as citing a
+    span not in the report."""
+    claim = DebateClaim(
+        claim_id="margin-hold",
+        text="Margin is stable.",
+        evidence_ref="fundamentals",
+        evidence_quote="Verbatim: operating margin of 34.1%",
+    )
+
+    assert claim.evidence_quote == "operating margin of 34.1%"
+
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[claim.model_dump()])
+    )
+    assert port.check_quotes(payload, port.report_texts(_state())) == []
+
+
+def test_the_word_quote_inside_a_span_is_left_alone():
+    """Only a leading label with its colon comes off — the stripping must not
+    reach into the quoted text itself."""
+    claim = DebateClaim(
+        claim_id="margin-hold",
+        text="Margin is stable.",
+        evidence_ref="fundamentals",
+        evidence_quote="Quotes rose while operating margin of 34.1% held",
+    )
+
+    assert claim.evidence_quote.startswith("Quotes rose")
+
+
+def test_the_blank_sentinel_still_normalizes_through_the_label_strip():
+    """Both validators run on one field; 'none' still means absent."""
+    claim = DebateClaim(
+        claim_id="reasoned", text="Follows from the above.",
+        evidence_ref="none", evidence_quote="none",
+    )
+
+    assert claim.evidence_quote == ""
+
+
 def test_stripping_emphasis_does_not_let_a_false_quote_verify():
     """The markers come off BOTH sides, so the check still turns on the
     words: a quote that misstates the report fails whatever its

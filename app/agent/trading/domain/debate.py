@@ -9,6 +9,8 @@ unbounded loop.
 
 from __future__ import annotations
 
+import re
+
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -49,6 +51,26 @@ def _normalize_blank(value: object) -> object:
         return ""
     return value
 
+# The field asks for a verbatim span, and the model sometimes labels the span
+# as one: `"Verbatim: Operating cash flow ($10,149,273k FY2025; ...) trailed
+# net income ..."` (NFLX, 2026-08-29), where everything after the label was
+# exact. `check_quotes` compares the WHOLE field against the report, so four
+# characters of the model's own bookkeeping turned a faithful quote into
+# "cites a report but the quoted span is not in it" — on the claim that
+# debate turned on.
+#
+# Stripped in the domain rather than inside the check, so the transcript and
+# the vault memo show the span the model meant too. Only these labels, only
+# at the start, only with the colon: a report sentence that genuinely opens
+# this way still matches, because the tail is what gets compared either way.
+_QUOTE_LABEL = re.compile(r"^\s*(?:verbatim quote|verbatim|quoted|quote)\s*[:\-\u2014]\s*", re.I)
+
+
+def _strip_quote_label(value: object) -> object:
+    if isinstance(value, str):
+        return _QUOTE_LABEL.sub("", value, count=1)
+    return value
+
 
 class DebateClaim(BaseModel):
     """One atomic assertion, backed by a report or by other claims."""
@@ -75,7 +97,7 @@ class DebateClaim(BaseModel):
     )
 
     _blank = field_validator("evidence_quote", mode="before")(
-        lambda v: _normalize_blank(v)
+        lambda v: _normalize_blank(_strip_quote_label(v))
     )
 
 
