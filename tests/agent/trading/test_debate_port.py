@@ -719,6 +719,114 @@ def test_canonical_claims_of_an_empty_transcript_is_empty():
 
 
 # ---------------------------------------------------------------------------
+# (d2) Direction guard — the figures are right and the sentence is not
+#
+# Every false-positive case below is a real sentence from the vault that an
+# earlier version of this guard flagged. The corpus is the test: over 36
+# transcripts the shipped version returns exactly one finding, the NFLX one.
+# ---------------------------------------------------------------------------
+
+def test_a_trend_word_contradicted_by_its_own_figures_is_flagged():
+    """The finding this exists for, live on two NFLX runs a day apart. Both
+    figures are in the fundamentals memo, so the number guard cleared them and
+    the quote check had nothing to say — and 832 against 1,351 is the gap
+    NARROWING."""
+    found = port._flag_direction_claims(
+        "a persistent OCF/NI gap that is widening — FY2025 gap of $832M "
+        "versus FY2024's $1,351M shortfall."
+    )
+
+    assert found == ["'widening' but FY2025 832M is below FY2024 1,351M"]
+
+
+def test_a_trend_word_its_figures_agree_with_is_silent():
+    assert port._flag_direction_claims(
+        "Revenue grew from $477,839K in H1 2025 to $703,522K in H1 2026."
+    ) == []
+    assert port._flag_direction_claims(
+        "The gap narrowed from $1.351B in FY2024 to $832M in FY2025."
+    ) == []
+
+
+def test_figures_written_before_their_period_still_pair_correctly():
+    """AVGO, 2026-08-29 — a CORRECT claim the first version flagged. Reading
+    only "period then figure" paired FY2024 with the number on the far side of
+    it, and inverted the comparison."""
+    assert port._flag_direction_claims(
+        "Total debt/operating income fell from 5.19x (FY2024) to 2.63x "
+        "(FY2025), below the 3.0x trip-line."
+    ) == []
+
+
+def test_a_deepening_decline_is_not_a_contradiction():
+    """ACN, 2026-08-29 — "bookings declined ~1% FY2025 and 2-3% Q3 FY2026" is
+    a decline getting worse, and its figures rise. A delta carries its
+    direction in the verb."""
+    assert port._flag_direction_claims(
+        "Leading indicator declined ~1% FY2025 and 2-3% Q3 FY2026."
+    ) == []
+    assert port._flag_direction_claims(
+        "The order-book risk is the declining leading indicator "
+        "(bookings \u22121% FY2025, \u22122-3% Q3 FY2026)."
+    ) == []
+
+
+def test_a_verb_governing_a_different_quantity_is_not_read_against_the_years():
+    """FIG, 2026-08-29 — the years carry FCF and "grew" belongs to revenue,
+    which has no year attached. The trend word must PRECEDE the figures it is
+    read against."""
+    assert port._flag_direction_claims(
+        "FCF fell 8.6% YoY (H1 2026 $141.8M vs H1 2025 $155.2M) while revenue "
+        "grew +47.2%."
+    ) == []
+
+
+def test_a_form_name_is_not_a_figure():
+    """NFLX risk panel — "the FY2026 10-K shows" offered 10 as FY2026's
+    figure, against a real $832M for FY2025."""
+    assert port._flag_direction_claims(
+        "If the FY2026 10-K shows OCF trailing NI by less than the FY2025 gap "
+        "of ~$832M, with content cash additions growing no faster than "
+        "amortization, I lower severity."
+    ) == []
+
+
+def test_a_markdown_row_is_not_one_sentence():
+    """FIG, 2026-08-24 — a metrics table joined a revenue figure to a verb
+    from the claim row beneath it."""
+    assert port._flag_direction_claims(
+        "| Revenue FY2025 $1,055.8M For H1 2026 SBC expense: $316.6M | "
+        "`ar-divergence` | Accounts receivable grew 88.8% |"
+    ) == []
+
+
+def test_two_quantities_of_different_units_are_never_compared():
+    assert port._flag_direction_claims(
+        "IC margin fell to 41.3% in FY2026 from revenue of $106,265M in FY2025."
+    ) == []
+
+
+def test_an_ambiguous_direction_word_says_nothing():
+    """A deteriorating ratio falls and a deteriorating gap rises. Neither
+    vocabulary claims it."""
+    assert port._flag_direction_claims(
+        "Earnings quality is deteriorating — FY2025 at $832M against FY2024's "
+        "$1,351M."
+    ) == []
+
+
+def test_four_periods_in_one_sentence_are_left_alone():
+    """Which pair the trend word governs is a question this cannot answer, so
+    it does not try. (A semicolon would split this into two sentences, which
+    is why the real MSFT line — which carries no trend word at all — never
+    reaches the comparison either.)"""
+    assert port._flag_direction_claims(
+        "Margins are falling, with PBP FY2026 at 59.9% vs FY2025 57.8% and IC "
+        "FY2026 at 41.3% vs FY2025 42.0%."
+    ) == []
+
+
+# ---------------------------------------------------------------------------
 # (e) Quote verification
 # ---------------------------------------------------------------------------
 

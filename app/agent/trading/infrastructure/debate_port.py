@@ -788,6 +788,231 @@ def _is_rounding_of(raw: str, known: list[float]) -> bool:
     )
 
 
+# ---------------------------------------------------------------------------
+# Direction guard — the numbers are right and the sentence about them is not
+# ---------------------------------------------------------------------------
+
+# Only words whose direction on the CITED QUANTITY is unambiguous. "improving",
+# "deteriorating", "worsening" are deliberately absent: a deteriorating ratio
+# falls and a deteriorating gap rises, so they say nothing about which way the
+# figures should move. Bare "up"/"down"/"higher"/"lower" are absent too — "up
+# to $80 billion in debt" is not a trend claim, and it is the single most
+# common shape in this feed.
+_TREND_UP = frozenset({
+    "widening", "widened", "rising", "rose", "risen", "growing", "grew",
+    "grown", "increasing", "increased", "accelerating", "accelerated",
+    "expanding", "expanded", "climbing", "climbed",
+})
+_TREND_DOWN = frozenset({
+    "narrowing", "narrowed", "falling", "fell", "fallen", "declining",
+    "declined", "shrinking", "shrank", "shrunk", "contracting", "contracted",
+    "dropping", "dropped", "compressing", "compressed",
+})
+
+# FY2025 / FY 2025 / H1 2026 / Q3 FY2026 / a bare 2025. The lookahead drops
+# the year out of an ISO date (2026-06-30), where the "next number" would be
+# the month.
+_PERIOD_TOKEN = re.compile(
+    r"\b(?:(?:H[12]|Q[1-4])\s+)?(?:FY\s?)?((?:19|20)\d{2})\b(?!\s*[-/]\s*\d)"
+)
+
+# Markdown cells and line breaks end a "sentence" as surely as a full stop:
+# a table row is not prose, and the words either side of a pipe are not one
+# claim. Read without this, one FIG transcript joined a revenue figure from
+# a metrics table to a verb from the claim row beneath it.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\s*\|\s*|\n+")
+
+# "the FY2026 10-K shows ..." must not offer 10 as FY2026's figure.
+_FORM_NAME = re.compile(r"\b(?:10-[KQ]|8-K|S-1|20-F|6-K)\b", re.I)
+
+# A figure ending the text that runs up to a period label belongs to it:
+# "5.19x (FY2024)". Anchored at the end and unit-aware, because searching
+# for the first number instead found "5.19" inside "5.19x", failed to match
+# the text it ended with, and silently fell through to the number on the
+# OTHER side of the year.
+_TRAILING_VALUE = re.compile(
+    r"(?<![\w.%,])-?\d[\d,]*\.?\d*\s*(?:%|x|bp|pp|[KMB]|bn|billion|million|thousand)?\s*$",
+    re.I,
+)
+
+_SCALE_SUFFIX = {
+    "k": 1e3, "thousand": 1e3,
+    "m": 1e6, "mm": 1e6, "million": 1e6,
+    "b": 1e9, "bn": 1e9, "billion": 1e9,
+    "t": 1e12, "trillion": 1e12,
+}
+# A magnitude and a percentage are not comparable, and neither is a ratio.
+_UNIT_MARKER = re.compile(r"\s*(%|x\b|bp\b|pp\b)", re.I)
+
+# Words that can stand between a trend verb and the figure it is the size OF,
+# without another quantity intervening: "declined ~1%", "fell from 5.19x",
+# "grew by 47.2%".
+_DELTA_FILLER = frozenset({
+    "by", "to", "from", "about", "roughly", "approximately", "around",
+    "nearly", "another", "over", "just", "some", "a", "an", "of", "at",
+})
+
+
+def _figure_is_the_change_itself(sentence: str, word: str, first_figure: int) -> bool:
+    """True when the figures are the SIZE of the move, not levels either side.
+
+    "bookings declined ~1% FY2025 and 2-3% Q3 FY2026" is a deepening decline,
+    and reading its figures as levels says the opposite: 1 then 3, rising,
+    contradicting "declined". The same shape covers "grew 47.2%", "fell from
+    5.19x" and "declined $0.8B FY2024-FY2025". A delta carries its direction
+    in the verb, so there is nothing here for this guard to check.
+    """
+    start = sentence.lower().find(word) + len(word)
+    span = sentence[start:first_figure]
+    if _PERIOD_TOKEN.search(span):
+        return False
+    return all(w in _DELTA_FILLER for w in re.findall(r"[a-z]+", span.lower()))
+
+
+def _value_after(text: str) -> tuple[float, str, str] | None:
+    """The first figure in `text`, as (magnitude, unit class, as written).
+
+    The unit class is what stops the comparison reading "41.3%" against
+    "$137,791M" as one quantity moving. The magnitude is scale-normalized so
+    "$1.35B" and "$1,351M" compare; the third element is the figure as the
+    sentence wrote it, because that is what a reader has to find again.
+    """
+    match = _DEBATE_NUMBER.search(text)
+    if match is None:
+        return None
+    try:
+        value = float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+    written = match.group(0).strip()
+    tail = text[match.end():]
+    if match.group(2):                       # the regex's own trailing "%"
+        return value, "percent", written
+
+    unit = _UNIT_MARKER.match(tail)
+    if unit:
+        return value, unit.group(1).lower(), written + unit.group(1)
+
+    scale = re.match(r"\s*([A-Za-z]+)", tail)
+    if scale and scale.group(1).lower() in _SCALE_SUFFIX:
+        return (
+            value * _SCALE_SUFFIX[scale.group(1).lower()],
+            "magnitude",
+            written + scale.group(1),
+        )
+    return value, "magnitude", written
+
+
+def _period_value_pairs(sentence: str) -> list[tuple[int, float, str, str, str]]:
+    """(year, magnitude, unit class, period as written, figure as written).
+
+    Both orders occur and both have to work: "FY2025 gap of $832M" puts the
+    period first, "fell from 5.19x (FY2024) to 2.63x (FY2025)" puts it after.
+    Reading only the first shape mis-paired every figure in the second, which
+    is how the first version of this guard flagged a correct AVGO claim.
+    """
+    pairs: list[tuple[int, float, str, str, str]] = []
+    periods = list(_PERIOD_TOKEN.finditer(sentence))
+    for index, match in enumerate(periods):
+        before = sentence[:match.start()].rstrip(" (")
+        trailing = _TRAILING_VALUE.search(before)
+        attached = _value_after(trailing.group(0)) if trailing else None
+        if attached is None:
+            stop = periods[index + 1].start() if index + 1 < len(periods) else len(sentence)
+            attached = _value_after(sentence[match.end():stop])
+        if attached is None:
+            return []
+        pairs.append(
+            (int(match.group(1)), attached[0], attached[1], match.group(0), attached[2])
+        )
+    return pairs
+
+
+def _flag_direction_claims(text: str) -> list[str]:
+    """Sentences whose trend word contradicts the figures in the same sentence.
+
+    The gap this closes, found on two NFLX runs a day apart: "a persistent
+    OCF/NI gap that is widening — FY2025 gap of $832M versus FY2024's $1,351M
+    shortfall". Both figures are correct and both are in the fundamentals
+    memo, so `_flag_debate_numbers` cleared them and `check_quotes` had
+    nothing to say — and the gap NARROWED. Every other guard here asks where a
+    number came from. None reads what the sentence claims the numbers do,
+    which is the part a memo's reader acts on.
+
+    Narrow on purpose, and measured rather than assumed: the first version of
+    this ran over 36 vault transcripts and returned one true finding and seven
+    false ones — a correct AVGO claim whose figures preceded their years, two
+    FIG sentences whose trend word governed a different quantity than the one
+    the years carried, a markdown table row read as prose, and three risk
+    turns where "FY2026 10-K" gave up "10" as a figure. Every condition below
+    exists because one of those got through:
+
+      - markdown cells and line breaks END a sentence. A table row is not
+        prose and the words either side of a `|` are not one claim.
+      - form names (10-K, 10-Q, 8-K, S-1, 20-F) are struck before scanning,
+        so "the FY2026 10-K shows" does not offer 10 as FY2026's figure.
+      - exactly one direction, from vocabularies that carry one — "improving"
+        and "deteriorating" are absent because a deteriorating ratio falls
+        while a deteriorating gap rises, and bare "up"/"down" are absent
+        because "up to $80 billion" is not a trend claim.
+      - the trend word must come BEFORE the figures it is read against. This
+        is the one that kills the whole "X fell 8.6% (H1 2026 $141.8M vs H1
+        2025 $155.2M) while revenue grew 47.2%" family, where the trailing
+        verb belongs to the quantity that has no years attached.
+      - exactly two distinct periods, each appearing once, each with a figure,
+        the figures sharing a unit class and differing in value.
+      - the figures must be LEVELS, not the size of the move. "bookings
+        declined ~1% FY2025 and 2-3% Q3 FY2026" is a deepening decline whose
+        figures rise; a delta carries its direction in the verb and leaves
+        this guard nothing to check. Signed figures are deltas by the same
+        argument.
+
+    Everything else is left alone, including trends stated without both
+    figures in the same sentence. That silence is the price of a warning a
+    reader can trust; the number guard's own history is what a guard costs
+    when its flags are usually wrong.
+    """
+    findings: list[str] = []
+    # U+2212 before anything else, exactly as `_flag_debate_numbers` does it:
+    # "bookings −1% FY2025" parses as a POSITIVE 1 without this, and the
+    # signed-figure rule below never fires on the one shape it exists for.
+    scanned = _FORM_NAME.sub("", text.replace("−", "-"))
+    for sentence in _SENTENCE_SPLIT.split(scanned):
+        words = re.findall(r"[a-z]+", sentence.lower())
+        up = [w for w in words if w in _TREND_UP]
+        down = [w for w in words if w in _TREND_DOWN]
+        if bool(up) == bool(down):          # neither, or both — say nothing
+            continue
+
+        pairs = _period_value_pairs(sentence)
+        if len(pairs) != 2 or pairs[0][0] == pairs[1][0]:
+            continue
+        if pairs[0][2] != pairs[1][2] or pairs[0][1] == pairs[1][1]:
+            continue
+
+        word = (up or down)[0]
+        first_period = _PERIOD_TOKEN.search(sentence)
+        if first_period is None or sentence.lower().find(word) > first_period.start():
+            continue                        # the verb governs something later
+        if min(pairs[0][1], pairs[1][1]) < 0:
+            continue                        # a signed figure is a change, not a level
+        first_figure = _DEBATE_NUMBER.search(sentence)
+        if first_figure and _figure_is_the_change_itself(sentence, word, first_figure.start()):
+            continue
+
+        earlier, later = sorted(pairs, key=lambda pair: pair[0])
+        actual_up = later[1] > earlier[1]
+        if actual_up == bool(up):
+            continue
+
+        findings.append(
+            f"{word!r} but {later[3]} {later[4]} is "
+            f"{'above' if actual_up else 'below'} {earlier[3]} {earlier[4]}"
+        )
+    return list(dict.fromkeys(findings))
+
+
 # Formatting, not content: quote characters, whitespace, and the markdown
 # markers that carry emphasis rather than meaning ("*", "_", "`").
 # Everything with meaning — digits, letters, and the punctuation that changes
@@ -1201,6 +1426,9 @@ async def run_debate_turn(
         )
         + ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else [])
         + ([f"unresolved_concession: {dropped_concession}"] if dropped_concession else []),
+        direction_flags=_flag_direction_claims(
+            payload.argument + "\n" + "\n".join(c.text for c in payload.claims)
+        ),
         unquoted_evidence=check_quotes(payload, texts),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
@@ -1221,6 +1449,7 @@ def _format_debate_markdown(
 ) -> str:
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
     flagged = [f for t in turns for f in t.guard_flags]
+    directions = [d for t in turns for d in t.direction_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
     drifted = sorted({cid for t in turns for cid in t.claim_text_drift})
     # Split, because the two mean different things and collapsing them is how
@@ -1263,6 +1492,12 @@ def _format_debate_markdown(
             f"may be fabricated: {', '.join(flagged[:10])}. Nothing downstream of "
             f"this debate re-verifies them."
         )
+    if directions:
+        caveats.append(
+            f"**{len(directions)} sentence(s) state a direction their own figures "
+            f"contradict:** {'; '.join(directions[:5])}. The figures are sourced; "
+            f"what is said about them is not."
+        )
     if unquoted:
         caveats.append(
             f"**{len(unquoted)} claim(s) cite a report but the quoted span is not "
@@ -1300,6 +1535,7 @@ def _format_debate_markdown(
         f"| Unproductive turns (no new claim, observational only) | "
         f"{sum(1 for t in turns if not t.productive)} |",
         f"| Flagged figures | {len(flagged)} |",
+        f"| Contradicted directions | {len(directions)} |",
         f"| Unverified quotes | {len(unquoted)} |",
         f"| Reused claim_ids with drifted text | {len(drifted)} |",
         f"| Estimated cost | ${total:.4f} |",
@@ -1336,6 +1572,8 @@ def _format_debate_markdown(
         if turn.guard_flags:
             lines.append("")
             lines.append(f"*Flagged figures:* {', '.join(turn.guard_flags)}")
+        if turn.direction_flags:
+            lines.append(f"*Contradicted direction:* {'; '.join(turn.direction_flags)}")
         if turn.unquoted_evidence:
             lines.append(f"*Unverified quotes:* {', '.join(turn.unquoted_evidence)}")
         if turn.claim_text_drift:

@@ -370,6 +370,17 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             + (f" (+{len(flagged) - 5} more)" if len(flagged) > 5 else "")
         )
 
+    # Listed in full rather than counted: "3 sentence(s) contradicted their
+    # figures" tells a reader nothing they can act on, and the finding is
+    # short enough to print.
+    directions = [d for t in turns for d in t.direction_flags]
+    if directions:
+        gaps.append(
+            f"{len(directions)} sentence(s) in the debate state a direction the "
+            f"cited figures contradict: {'; '.join(directions[:3])}"
+            + (f" (+{len(directions) - 3} more)" if len(directions) > 3 else "")
+        )
+
     unquoted = sorted({c for t in turns for c in t.unquoted_evidence})
     if unquoted:
         gaps.append(

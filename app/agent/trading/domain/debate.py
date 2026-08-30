@@ -185,6 +185,12 @@ class DebateTurn(BaseModel):
     guard_flags: list[str] = Field(default_factory=list)
     unquoted_evidence: list[str] = Field(default_factory=list)
 
+    # Kept out of `guard_flags` deliberately: the synthesizer renders that
+    # list as "figure(s) ... did not appear in any analyst report and may be
+    # fabricated", and a direction finding is the opposite claim — the
+    # figures are in the reports, and the sentence about them is not.
+    direction_flags: list[str] = Field(default_factory=list)
+
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost_usd: float | None = None
