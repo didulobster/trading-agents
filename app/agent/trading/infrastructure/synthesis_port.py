@@ -407,9 +407,13 @@ def compute_evidence_quality(
     coverage = sum(1 for key in ANALYST_OUTPUTS.values() if state.get(key)) / len(ANALYST_OUTPUTS)
     mean_spread = sum(e.normalized_spread for e in ledger) / len(ledger) if ledger else 0.0
     risk_turns: list[RiskTurn] = state.get("risk_turns") or []
-    flags = sum(len(t.guard_flags) for t in debate_turns) + sum(
-        len(t.guard_flags) for t in risk_turns
-    )
+    # Every finding counts, whatever list it lives in. Splitting the debate's
+    # flags by kind (so a dropped rebut stops being described as a fabricated
+    # figure) must not quietly RAISE this score by losing the ones that moved.
+    flags = sum(
+        len(t.guard_flags) + len(t.unresolved_flags) + len(t.direction_flags)
+        for t in debate_turns
+    ) + sum(len(t.guard_flags) for t in risk_turns)
     score = 0.6 * coverage + 0.3 * (1 - mean_spread) + 0.1 * max(0.0, 1 - flags / 10)
     return EvidenceQuality(
         score=round(max(0.0, min(1.0, score)), 2),

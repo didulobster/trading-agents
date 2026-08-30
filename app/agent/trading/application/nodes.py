@@ -370,6 +370,14 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             + (f" (+{len(flagged) - 5} more)" if len(flagged) > 5 else "")
         )
 
+    unresolved = [u for t in turns for u in t.unresolved_flags]
+    if unresolved:
+        gaps.append(
+            f"{len(unresolved)} turn(s) in the debate pointed at something not in "
+            f"the transcript: {', '.join(unresolved[:5])}"
+            + (f" (+{len(unresolved) - 5} more)" if len(unresolved) > 5 else "")
+        )
+
     # Listed in full rather than counted: "3 sentence(s) contradicted their
     # figures" tells a reader nothing they can act on, and the finding is
     # short enough to print.

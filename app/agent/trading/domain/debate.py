@@ -182,7 +182,17 @@ class DebateTurn(BaseModel):
     # node cannot write to a plain overwrite channel without clobbering its
     # own earlier turns, and adding a second reducer would be a second source
     # of truth for the same content. The synthesizer aggregates across turns.
+    # Numeric findings ONLY — figures that are not in any analyst report. The
+    # synthesizer and the transcript both render this list under that
+    # sentence, so anything else put here is described to the reader as a
+    # possibly fabricated figure. Live on FIG (2026-08-30): "may be
+    # fabricated: unresolved_rebuts: fig-share-count", which is not a figure.
     guard_flags: list[str] = Field(default_factory=list)
+
+    # Structural findings about the turn's own bookkeeping: a `rebuts` naming
+    # a claim_id nobody made, a concession pointing at nothing.
+    unresolved_flags: list[str] = Field(default_factory=list)
+
     unquoted_evidence: list[str] = Field(default_factory=list)
 
     # Kept out of `guard_flags` deliberately: the synthesizer renders that
