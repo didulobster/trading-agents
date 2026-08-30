@@ -217,7 +217,10 @@ async def test_partial_concession_to_your_own_claim_is_dropped_and_flagged():
     )
 
     assert turn.payload.concession_trigger == ""
-    assert turn.guard_flags == ["unresolved_concession: margin-hold"]
+    # A concession pointing at nothing is a structural finding, not a figure:
+    # it must not reach the list the memo renders as "may be fabricated".
+    assert turn.unresolved_flags == ["unresolved_concession: margin-hold"]
+    assert turn.guard_flags == []
 
 
 def test_partial_concession_to_an_invented_claim_is_dropped():
@@ -358,8 +361,9 @@ async def test_run_debate_turn_survives_a_hallucinated_rebuttal_and_flags_it():
     )
 
     assert turn.payload.rebuts == []
-    assert any("unresolved_rebuts" in f for f in turn.guard_flags)
-    assert any("invented-id" in f for f in turn.guard_flags)
+    assert any("unresolved_rebuts" in f for f in turn.unresolved_flags)
+    assert any("invented-id" in f for f in turn.unresolved_flags)
+    assert turn.guard_flags == []
 
 
 # ---------------------------------------------------------------------------
@@ -716,6 +720,56 @@ def test_canonical_claims_covers_every_id_across_every_turn():
 
 def test_canonical_claims_of_an_empty_transcript_is_empty():
     assert canonical_claims([]) == {}
+
+
+def test_the_fabricated_figure_list_holds_only_figures():
+    """Live on FIG (2026-08-30), where the memo told its reader:
+
+        1 mention(s) of 1 figure(s) in the debate did not appear in any
+        analyst report and may be fabricated: unresolved_rebuts:
+        fig-share-count
+
+    which is not a figure and was never claimed to be one. `guard_flags` is
+    rendered under that sentence by both the memo and the transcript, so a
+    structural finding placed in it is described to the reader as a possible
+    fabrication."""
+    from app.agent.trading.domain.debate import DebateTurn
+
+    turn = DebateTurn(
+        turn_index=0, round_num=1, side="bull",
+        payload=DebateTurnPayload.model_validate(_payload()),
+        guard_flags=["71.4"],
+        unresolved_flags=["unresolved_rebuts: fig-share-count"],
+    )
+
+    assert turn.guard_flags == ["71.4"]
+    assert "fig-share-count" not in " ".join(turn.guard_flags)
+
+
+def test_splitting_the_kinds_does_not_raise_evidence_quality():
+    """The count behind `evidence_quality` is "how many findings", not "how
+    many findings of one kind". Moving entries into their own list must not
+    make a memo look better sourced than it was."""
+    from app.agent.trading.domain.debate import DebateTurn
+    from app.agent.trading.infrastructure.synthesis_port import compute_evidence_quality
+
+    payload = DebateTurnPayload.model_validate(_payload())
+    everything_in_one_list = DebateTurn(
+        turn_index=0, round_num=1, side="bull", payload=payload,
+        guard_flags=["71.4", "unresolved_rebuts: x", "'widening' but ..."],
+    )
+    split_by_kind = DebateTurn(
+        turn_index=0, round_num=1, side="bull", payload=payload,
+        guard_flags=["71.4"],
+        unresolved_flags=["unresolved_rebuts: x"],
+        direction_flags=["'widening' but ..."],
+    )
+
+    before = compute_evidence_quality(_state(), [], [everything_in_one_list])
+    after = compute_evidence_quality(_state(), [], [split_by_kind])
+
+    assert after.guard_flags == before.guard_flags == 3
+    assert after.score == before.score
 
 
 # ---------------------------------------------------------------------------

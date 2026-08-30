@@ -1423,9 +1423,11 @@ async def run_debate_turn(
         guard_flags=_flag_debate_numbers(
             payload.argument + "\n" + "\n".join(c.text for c in payload.claims),
             pack,
-        )
-        + ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else [])
-        + ([f"unresolved_concession: {dropped_concession}"] if dropped_concession else []),
+        ),
+        unresolved_flags=(
+            ([f"unresolved_rebuts: {', '.join(dropped_rebuts)}"] if dropped_rebuts else [])
+            + ([f"unresolved_concession: {dropped_concession}"] if dropped_concession else [])
+        ),
         direction_flags=_flag_direction_claims(
             payload.argument + "\n" + "\n".join(c.text for c in payload.claims)
         ),
@@ -1449,6 +1451,7 @@ def _format_debate_markdown(
 ) -> str:
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
     flagged = [f for t in turns for f in t.guard_flags]
+    unresolved = [u for t in turns for u in t.unresolved_flags]
     directions = [d for t in turns for d in t.direction_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
     drifted = sorted({cid for t in turns for cid in t.claim_text_drift})
@@ -1491,6 +1494,11 @@ def _format_debate_markdown(
             f"**{len(flagged)} figure(s) did not appear in any analyst report** and "
             f"may be fabricated: {', '.join(flagged[:10])}. Nothing downstream of "
             f"this debate re-verifies them."
+        )
+    if unresolved:
+        caveats.append(
+            f"**{len(unresolved)} turn(s) pointed at something that is not in the "
+            f"transcript:** {', '.join(unresolved[:10])}."
         )
     if directions:
         caveats.append(
@@ -1535,6 +1543,7 @@ def _format_debate_markdown(
         f"| Unproductive turns (no new claim, observational only) | "
         f"{sum(1 for t in turns if not t.productive)} |",
         f"| Flagged figures | {len(flagged)} |",
+        f"| Unresolved references | {len(unresolved)} |",
         f"| Contradicted directions | {len(directions)} |",
         f"| Unverified quotes | {len(unquoted)} |",
         f"| Reused claim_ids with drifted text | {len(drifted)} |",
@@ -1572,6 +1581,8 @@ def _format_debate_markdown(
         if turn.guard_flags:
             lines.append("")
             lines.append(f"*Flagged figures:* {', '.join(turn.guard_flags)}")
+        if turn.unresolved_flags:
+            lines.append(f"*Unresolved references:* {', '.join(turn.unresolved_flags)}")
         if turn.direction_flags:
             lines.append(f"*Contradicted direction:* {'; '.join(turn.direction_flags)}")
         if turn.unquoted_evidence:
