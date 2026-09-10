@@ -200,6 +200,15 @@ uv run python -m app.agent.researcher AVGO --news "AVGO announces 10B buyback"
 
 Tool traces go to stderr, the memo to stdout — `2>/dev/null` yields a clean memo.
 
+**News mode reads `watchlist.yaml`** from the repo root — per-ticker `thesis`,
+`key_metrics` and `risks_watching` that the headline is assessed against, currently six
+tickers (AVGO, ACN, NFLX, FIG, ASML, MSFT). A ticker that is not listed falls back to
+generic framing, and so does *every* ticker if the file cannot be found: `_load_watchlist`
+returns an empty list and warns on stderr rather than failing. The path is relative to the
+working directory, so run these commands from the repo root — from anywhere else the
+assessment still produces a confident-looking verdict, with none of the thesis context it
+claims to be checking against.
+
 ### 4. Run the trading pipeline
 
 ```bash
@@ -332,6 +341,9 @@ Named, not hidden. The significant ones:
 - **The verifier answers "does this literal exist in the source", not "is this claim true".**
   Fabricated causation has no literal to check, and a real figure attributed to the wrong
   fiscal year passes.
+- **A missing `watchlist.yaml` degrades silently.** News assessment falls back to generic
+  framing with only an stderr warning, so the failure looks like a completed run. The path
+  is resolved against the working directory, not the module.
 
 **Operating envelope for readers of the output:** retrieved and cited figures are reliable;
 computed figures are reliable when produced by `calculate`; period labels and causal
