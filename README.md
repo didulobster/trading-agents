@@ -68,7 +68,9 @@ Three design rules recur throughout:
 
 ## Prerequisites
 
-- **Python 3.13+**
+- **Python 3.13** — pinned in `.python-version`. Not "3.13 or newer": `tiktoken==0.8.0`
+  has no wheel for 3.14, and without the pin `uv` picks the newest interpreter it can find
+  and falls back to a source build that needs a Rust toolchain.
 - **[uv](https://docs.astral.sh/uv/)** — the lockfile (`uv.lock`) is committed
 - **Docker** (for Postgres 16 + pgvector)
 - API keys: **Anthropic** and/or **DeepSeek** (LLM roles), **OpenAI** (embeddings),
@@ -81,23 +83,24 @@ Three design rules recur throughout:
 # 1. Dependencies
 uv sync
 
-# 2. Database (Postgres 16 + pgvector, exposed on host port 6432)
+# 2. Configuration — before the schema step, which reads POSTGRES_DATABASE_URL from it
+cp .env.example .env    # then fill in the keys
+
+# 3. Database (Postgres 16 + pgvector, exposed on host port 6432)
 docker compose up -d
 
-# 3. Schema
+# 4. Schema
 uv run alembic upgrade head
-
-# 4. Configuration — create .env in the repo root, see the table below
 ```
 
-There is no committed `.env.example`; `.env` is gitignored, so nothing in the repository
-lists what it must contain. The table below is that list.
+`.env.example` lists every variable with a comment; `.env` itself is gitignored.
 
-> **`.env` is required, and two of its variables are read at import time.**
-> `LOOP_MAX_TURNS` and `MEMO_DIR` are read via `os.environ[...]` in
-> `app/agent/researcher.py`, which is imported by `fundamentals_port` → `nodes` → `graph`.
-> A missing value fails the **entire trading CLI** with a bare `KeyError` before argument
-> parsing. If you get `KeyError: 'LOOP_MAX_TURNS'`, that is what happened.
+> **`.env` is required, and three of its variables are read at import time.**
+> `LLM_CLAUDE_MODEL` (via `model_for`), `LOOP_MAX_TURNS` and `MEMO_DIR` are read with
+> `os.environ[...]` in `app/agent/researcher.py` and `app/infrastructure/llm/models.py`,
+> both reached by `fundamentals_port` → `nodes` → `graph`. A missing value fails the
+> **entire trading CLI** with a bare `KeyError` before argument parsing. If you get
+> `KeyError: 'LLM_CLAUDE_MODEL'`, that is what happened.
 
 ## Configuration
 
@@ -263,12 +266,24 @@ that held was that the value must have literally appeared in a tool output durin
 ## Tests
 
 ```bash
-uv run pytest
+uv run pytest -q -rs
 ```
 
-612 test functions, 464 of them under `tests/agent/trading/`. The pure-function design is
-what makes this affordable: routers, guards and domain rules are exhaustively testable in
-milliseconds at zero API cost.
+612 test functions (702 cases after parametrization), 464 of them under
+`tests/agent/trading/`. The whole suite runs in **under 15 seconds**, reaches no provider
+and spends nothing — `tests/conftest.py` injects a placeholder credential for every
+non-Anthropic provider, since the client layer validates keys at construction rather than
+at first call.
+
+Four environment variables are enough to run it: `LLM_CLAUDE_MODEL`, `LOOP_MAX_TURNS`,
+`MEMO_DIR`, and a Postgres URL. Without a database the suite still passes, skipping five
+checkpoint tests — but those five are the ones guarding a *delayed* failure, where an
+unregistered domain type serializes fine in-process and breaks only when another process
+reads the checkpoint back. Skipped, they read as passing, so **CI runs them against a real
+pgvector service** (`.github/workflows/tests.yml`).
+
+The pure-function design is what makes this affordable: routers, guards and domain rules
+are exhaustively testable in milliseconds at zero API cost.
 
 ## Repository layout
 
@@ -284,6 +299,8 @@ app/
       application/           nodes, routers, guards
       infrastructure/        LLM ports, graph, checkpointer, cost log
   infrastructure/llm/        provider routing, model table, pricing
+.github/workflows/tests.yml   CI: pytest against a real pgvector service
+.env.example                 every variable, commented
 eval/                        retrieval evaluation harness
 migrations/                  Alembic
 scripts/                     validation batteries and probes
