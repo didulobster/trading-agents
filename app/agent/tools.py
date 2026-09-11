@@ -593,8 +593,16 @@ async def _dispatch(name: str, inputs: dict) -> str:
             _record_delegated_usage(resp)
 
             data = resp.json()
+            # Cosine similarity, not the fused RRF score in `similarity`,
+            # which read as ~0.016 on every line and told the agent nothing.
+            # A chunk only the keyword search found has no cosine score.
             citations = "\n".join(
-                f"  [{c['citation']}] sim={c['similarity']:.3f}"
+                f"  [{c['citation']}] "
+                + (
+                    f"sim={c['vector_similarity']:.3f}"
+                    if c.get("vector_similarity") is not None
+                    else "keyword match"
+                )
                 for c in data.get("chunks", [])
             )
             out = f"{data['answer']}\n\nSources:\n{citations}"
