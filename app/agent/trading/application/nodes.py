@@ -18,6 +18,7 @@ from app.agent.trading.application.risk_ledger import (
     unexpected_missing_scores,
 )
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
+from app.agent.trading.domain.budget import NodeBudgetExceeded, RunTermination
 from app.agent.trading.domain.decision_memo import Verdict
 from app.agent.trading.domain.news_digest import (
     AGGREGATED_RELEVANCE,
@@ -75,8 +76,12 @@ async def graceful_abort_node(state: TradingState) -> dict:
     debate_terminated_by/risk_terminated_by, one level up.
     """
     events = state.get("cost_events") or []
-    budget = state["budget"]
-    terminated_by = check_run_guards(events, budget, datetime.now(timezone.utc))
+    if state.get("node_budget_breach"):
+        # A port's own cap tripped (graph.py's _contain_node_budget) — the
+        # run-level budget may well be intact, so it is not re-derived here.
+        terminated_by = RunTermination.NODE_BUDGET_EXCEEDED
+    else:
+        terminated_by = check_run_guards(events, state["budget"], datetime.now(timezone.utc))
     if terminated_by is None:
         # Only reachable if a guard edge routed here without the guard
         # actually tripping — a wiring bug, named here rather than silently
@@ -642,6 +647,8 @@ async def synthesizer_node(state: TradingState) -> dict:
     # citations as unresolved — the context has to travel with its memo.
     contexts: list[tuple[dict, list]] = []
     dropped: list[str] = []
+    # Samples that failed with any other error — see the except below.
+    errored: list[str] = []
     # Every trial's cost is real regardless of whether its memo survives to
     # the vote — a dropped trial still spent real tokens (see
     # SynthesisFabricationError/SynthesisReferenceError's cost_events, which
@@ -674,22 +681,25 @@ async def synthesizer_node(state: TradingState) -> dict:
                 )
                 skipped = RISK_VERDICT_SAMPLES - i
                 break
-        if i == 0:
-            # The first trial reuses the graph-checkpointed panel already in
-            # `state`/`ledger` rather than sampling a fresh one — same as
-            # before this change.
-            sample_ledger, sample_state, sample_client = ledger, state, None
-        else:
-            sample_turns, sample_cost_events = await _sample_additional_risk_panel(state)
-            all_cost_events.extend(sample_cost_events)
-            sample_ledger = build_risk_ledger(sample_turns)
-            sample_state = {**state, "risk_turns": sample_turns}
-            sample_client = client
         try:
+            if i == 0:
+                # The first trial reuses the graph-checkpointed panel already
+                # in `state`/`ledger` rather than sampling a fresh one — same
+                # as before this change.
+                sample_ledger, sample_state, sample_client = ledger, state, None
+            else:
+                sample_turns, sample_cost_events = await _sample_additional_risk_panel(state)
+                all_cost_events.extend(sample_cost_events)
+                sample_ledger = build_risk_ledger(sample_turns)
+                sample_state = {**state, "risk_turns": sample_turns}
+                sample_client = client
             memo = await run_synthesis(
                 sample_state, ledger=sample_ledger, base_gaps=base_gaps,
                 base_evidence=base_evidence, as_of=as_of, client=sample_client,
             )
+        except NodeBudgetExceeded:
+            # A node's own cap is a run-level stop, not one bad sample.
+            raise
         except (SynthesisFabricationError, SynthesisReferenceError) as exc:
             print(
                 f"[synthesizer] sample {i + 1}/{RISK_VERDICT_SAMPLES} dropped by "
@@ -697,6 +707,19 @@ async def synthesizer_node(state: TradingState) -> dict:
             )
             dropped.append(str(exc))
             all_cost_events.extend(exc.cost_events)
+            continue
+        except Exception as exc:
+            # Anything else — a second schema failure, a provider error, a
+            # risk turn that raised inside an extra panel — used to escape the
+            # node and discard every sample already paid for, including ones
+            # that had passed. It is one failed vote. Its spend is on disk
+            # (log_cost writes first) and in the run summary via the disk
+            # reconciliation, though not in this node's cost_events.
+            print(
+                f"[synthesizer] sample {i + 1}/{RISK_VERDICT_SAMPLES} failed and "
+                f"was dropped: {type(exc).__name__}: {exc}"
+            )
+            errored.append(f"{type(exc).__name__}: {exc}")
             continue
         memos.append(memo)
         contexts.append((sample_state, sample_ledger))
@@ -710,6 +733,14 @@ async def synthesizer_node(state: TradingState) -> dict:
         # EVERY one of RISK_VERDICT_SAMPLES trials to trip the guard, at a
         # measured ~1-in-8 per-call rate, and the run already fails outright
         # in this case regardless of Phase 8.
+        if errored:
+            raise RuntimeError(
+                f"no risk-verdict sample for {state['ticker']} survived — "
+                f"{len(dropped)} dropped by the citation/fabrication guard, "
+                f"{len(errored)} failed with an error"
+                + (f", the rest skipped on {budget_stop.value}" if budget_stop else "")
+                + f": {dropped + errored}"
+            )
         if budget_stop is not None:
             raise SynthesisFabricationError(
                 f"no risk-verdict sample for {state['ticker']} survived — "
@@ -752,6 +783,12 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"dropped by the citation/fabrication guard before voting (untrustworthy "
             f"output, not counted) — this verdict reflects only the surviving "
             f"{len(memos)} sample(s), a weaker signal than a full {RISK_VERDICT_SAMPLES}-way vote"
+        )
+    if errored:
+        extra_gaps.append(
+            f"{len(errored)} of {RISK_VERDICT_SAMPLES} risk-verdict sample(s) failed "
+            f"with an error and were dropped before voting — this verdict reflects "
+            f"only the surviving {len(memos)} sample(s): {'; '.join(errored)[:300]}"
         )
     if budget_stop is not None:
         extra_gaps.append(

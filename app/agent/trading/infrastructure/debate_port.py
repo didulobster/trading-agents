@@ -43,6 +43,7 @@ from typing import Any
 
 # create_with_temperature_fallback lives with the clients now, so the query
 # decomposer can use it too; re-exported for risk_port and synthesis_port.
+from app.agent.trading.domain.budget import NodeBudgetExceeded
 from app.infrastructure.llm import LLMClient, create_with_temperature_fallback, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
@@ -1285,7 +1286,7 @@ def _assert_within_budget(ticker: str, turns: list[DebateTurn], this_turn: float
     """
     total = sum(t.estimated_cost_usd or 0.0 for t in turns) + (this_turn or 0.0)
     if total > DEBATE_BUDGET_USD:
-        raise AssertionError(
+        raise NodeBudgetExceeded(
             f"debate cost ${total:.4f} for {ticker} exceeds the "
             f"${DEBATE_BUDGET_USD:.2f} per-debate budget after "
             f"{len(turns) + 1} turn(s) — check DEBATE_MODEL routing and the "

@@ -35,6 +35,10 @@ class TradingState(TypedDict, total=False):
     # distinction is exactly what keeps this independent of
     # debate_terminated_by/risk_terminated_by below).
     run_terminated_by: RunTermination | None
+    # Set by graph.py's node wrapper when a node's own spending cap trips
+    # (NodeBudgetExceeded): the message, for the abort artifact. Every guarded
+    # edge routes to graceful_abort once it is set.
+    node_budget_breach: str | None
     fundamentals_report: FundamentalsReport
     technical_report: TechnicalReport
     news_digest: NewsDigest
