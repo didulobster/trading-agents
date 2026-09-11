@@ -74,6 +74,25 @@ class ChunkRepository:
 
         return results
 
+    async def delete_for_sections(self, section_ids: list[int]) -> int:
+        """Delete every chunk of these sections. Returns how many went.
+
+        What makes re-chunking idempotent: IngestionService._chunk clears a
+        document's chunks before inserting, so a run that died after the
+        insert but before the filing was marked CHUNKED re-chunks cleanly
+        instead of adding a second copy of every chunk.
+        """
+        if not section_ids:
+            return 0
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM chunks WHERE section_id = ANY(%s)", (section_ids,)
+                )
+                deleted = cur.rowcount
+                await conn.commit()
+        return deleted
+
     async def list_without_embeddings(
         self,
         filing_id: int | None = None,

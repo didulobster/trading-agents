@@ -120,9 +120,12 @@ def ingest_cmd(
     form_type: str = typer.Option("10-K", "--type"),
     limit: int = typer.Option(4, "--limit"),
     since_year: int | None = typer.Option(None, "--since"),
+    retry_failed: bool = typer.Option(
+        False, "--retry-failed", help="Re-run filings a previous ingest marked FAILED."
+    ),
 ):
     """Run the full ingestion pipeline for one ticker."""
-    asyncio.run(_ingest(ticker, form_type, limit, since_year))
+    asyncio.run(_ingest(ticker, form_type, limit, since_year, retry_failed))
 
 @app.command(name="corpus-status")
 def corpus_status_cmd(
@@ -349,7 +352,8 @@ def _print_per_filing(rows: list[FilingDetail]) -> None:
         )
 
 async def _ingest(
-    ticker: str, form_type: str, limit: int, since_year: int | None
+    ticker: str, form_type: str, limit: int, since_year: int | None,
+    retry_failed: bool = False,
 ) -> None:
     user_agent = os.environ["EDGAR_USER_AGENT"]
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -379,6 +383,7 @@ async def _ingest(
                 form_types=[form_type],
                 limit=limit,
                 since=since,
+                retry_failed=retry_failed,
             )
     finally:
         await close_pool()
