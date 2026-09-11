@@ -125,10 +125,12 @@ async def test_a_breach_before_the_first_turn_spends_only_the_memo_call(agent):
 
 
 @pytest.mark.anyio
-async def test_a_breach_mid_turn_refuses_the_remaining_tool_calls(agent):
+async def test_a_breach_mid_turn_refuses_the_remaining_tool_calls(agent, monkeypatch):
     """One turn can carry several tool calls (gpt-5.6-luna sent 6-7
     ask_edgar calls per turn on 2026-09-11), each with its own server-side
-    spend — so the check runs per call, not only per turn."""
+    spend — so the check runs before each wave of calls, not only per turn.
+    At concurrency 1 a wave is one call: the strictest setting."""
+    monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 1)
     agent.client.tools_per_turn = 3
     stop = lambda usage: "budget_exceeded" if agent.executed else None
 

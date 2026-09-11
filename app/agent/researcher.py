@@ -413,6 +413,62 @@ def _strip_preamble(text: str) -> str:
 
 StopCheck = Callable[[UsageSummary], "str | None"]
 
+# How many of one turn's tool calls run at once. The calls in a turn are
+# independent — the model issued them together, before seeing any result —
+# and one turn routinely carries several: gpt-5.6-luna sent 6-8 ask_edgar
+# calls per turn on 2026-09-11, each waiting 10-40 s on the server's own
+# retrieval and LLM calls. Run one after another, they made wall clock, not
+# cost, the binding constraint on a run. Not unlimited, because the run's
+# budget is re-checked before each wave: an overshoot is bounded by one wave,
+# not one turn. Set 1 for the old one-at-a-time behaviour.
+TOOL_CONCURRENCY = max(1, int(os.getenv("AGENT_TOOL_CONCURRENCY", "4")))
+# Tools that change what the others would read run alone, in call order.
+_SEQUENTIAL_TOOLS = frozenset({"ingest_ticker"})
+
+
+def _refusal(reason: str) -> str:
+    return (
+        f"RUN BUDGET REACHED: {reason}. This tool call was not made. Write the "
+        f"memo from what you have already gathered, and record anything "
+        f"incomplete under Data Gaps."
+    )
+
+
+async def _run_tool_calls(
+    blocks: list, stop_check: StopCheck | None, usage: UsageSummary
+) -> list[str]:
+    """One turn's tool calls, in waves of up to TOOL_CONCURRENCY, results in
+    call order (every tool_use needs its tool_result).
+
+    The stop check runs before each wave; once it fires, every call not yet
+    made is answered with the reason instead. A wave never spans an
+    ingest_ticker, which runs on its own.
+    """
+    results: list[str] = []
+    i = 0
+    while i < len(blocks):
+        refused = _stop_reason(stop_check, usage)
+        if refused:
+            for block in blocks[i:]:
+                _trace(f"  [tool refused] {block.name}: {refused}")
+                results.append(_refusal(refused))
+            break
+        wave = [blocks[i]]
+        if blocks[i].name not in _SEQUENTIAL_TOOLS:
+            j = i + 1
+            while (
+                j < len(blocks)
+                and len(wave) < TOOL_CONCURRENCY
+                and blocks[j].name not in _SEQUENTIAL_TOOLS
+            ):
+                wave.append(blocks[j])
+                j += 1
+        results.extend(
+            await asyncio.gather(*(execute_tool(b.name, b.input) for b in wave))
+        )
+        i += len(wave)
+    return results
+
 
 def _stop_reason(stop_check: StopCheck | None, usage: UsageSummary) -> str | None:
     return stop_check(usage) if stop_check is not None else None
@@ -552,30 +608,12 @@ async def run_agent(
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
 
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                # Asked per call, not per turn: one turn can carry several
-                # tool calls, and each ask_edgar runs its own LLM calls
-                # server-side. Every tool_use still needs a tool_result, so
-                # a refused call answers with the reason instead.
-                refused = _stop_reason(stop_check, usage)
-                if refused:
-                    result = (
-                        f"RUN BUDGET REACHED: {refused}. This tool call was not "
-                        f"made. Write the memo from what you have already "
-                        f"gathered, and record anything incomplete under Data Gaps."
-                    )
-                    _trace(f"  [tool refused] {block.name}: {refused}")
-                else:
-                    result = await execute_tool(block.name, block.input)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    }
-                )
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        results = await _run_tool_calls(tool_blocks, stop_check, usage)
+        tool_results = [
+            {"type": "tool_result", "tool_use_id": block.id, "content": result}
+            for block, result in zip(tool_blocks, results)
+        ]
 
         messages.append({"role": "assistant", "content": response.content})
         # Tool-result blocks must come first in a user message; a trailing
