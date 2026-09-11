@@ -453,6 +453,18 @@ class OpenAICompatClient:
             request["extra_body"] = {self._thinking_param: thinking}
         if self._reasoning_effort_models and model.startswith(self._reasoning_effort_models):
             effort = _translate_reasoning_effort(kwargs)
+            if tools and effort != "none":
+                # Live 400 on gpt-5.6-luna (2026-09-11): "Function tools with
+                # reasoning_effort are not supported ... in
+                # /v1/chat/completions". Unset is no escape — the default is
+                # not "none" — so tools pin it, as a forced tool pins
+                # DeepSeek's thinking off.
+                _warn_once(
+                    f"{self._provider}:reasoning-vs-tools",
+                    f"{self._provider}: reasoning_effort forced to 'none' on calls "
+                    f"with tools — chat completions rejects the combination.",
+                )
+                effort = "none"
             if effort is not None:
                 request["reasoning_effort"] = effort
 
