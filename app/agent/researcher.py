@@ -33,6 +33,7 @@ from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
+from app.domain.values import normalize_ticker
 from app.infrastructure.llm import MODEL_PRICING, get_client
 from app.infrastructure.llm.models import model_for
 
@@ -64,6 +65,14 @@ MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]
 # under the old name so the three ports and the budget assertions that import
 # `_MODEL_PRICING` from here keep working.
 _MODEL_PRICING = MODEL_PRICING
+
+
+def _ticker_arg(value: str) -> str:
+    """argparse `type=` for a ticker: normalized, or a clean usage error."""
+    try:
+        return normalize_ticker(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 def _trace(msg: str) -> None:
@@ -220,6 +229,11 @@ def _save_output(
         content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
     # Inside a run, every path is derived from the instant the RUN started,
     # not the instant this file happens to be written.
+    # The ticker becomes a directory name. Every entry point validates it,
+    # but this is where a bad one would do damage — `MEMO_DIR / "../../x"`
+    # writes outside the vault — so the sink checks too.
+    if normalize_ticker(ticker) != ticker:
+        raise ValueError(f"refusing to write a vault artifact for ticker {ticker!r}")
     now = _RUN_STAMP or datetime.now()
     stem = _MODE_STEMS.get(mode)
     parent = MEMO_DIR / ticker
@@ -645,7 +659,7 @@ async def run_agent(
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDGAR research agent")
     parser.add_argument(
-        "ticker", nargs="?", help="Ticker to research (omit with --test)"
+        "ticker", nargs="?", type=_ticker_arg, help="Ticker to research (omit with --test)"
     )
     parser.add_argument(
         "--test",
