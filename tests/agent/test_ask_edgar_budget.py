@@ -61,6 +61,24 @@ def test_the_budget_is_announced_in_the_tool_description():
     assert "BUDGETED" in description
 
 
+def test_the_description_asks_for_one_question_per_call():
+    """Retrieval embeds the question as a whole, so a compound question lands
+    between its topics and matches none of them. Measured 2026-09-12 on ACN's
+    re-chunked FY2025 10-K: the agent's own three-part question (ICFR
+    conclusion + auditor identity + related-party transactions) did not
+    retrieve the Item 9A chunk in the top 8, while "Did management conclude
+    that internal control over financial reporting was effective as of the
+    end of fiscal 2025?" ranked that same chunk first.
+
+    The description used to say the opposite — "ask one broad question that
+    covers several checklist items" — which is where the compound questions
+    came from."""
+    description = next(t for t in tools.TOOLS if t["name"] == "ask_edgar")["description"]
+
+    assert "ONE QUESTION PER CALL" in description
+    assert "one broad question" not in description
+
+
 def test_the_counter_is_per_run():
     """Fenced by the same call that fences every other per-run accumulator
     in this module, or run two starts already spent."""

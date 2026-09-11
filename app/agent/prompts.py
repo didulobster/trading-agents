@@ -120,6 +120,13 @@ Work through these twelve analyses in order. For each, call ask_edgar with a
 well-formed question, read the result, then move on. Do not skip an item; if
 the corpus can't answer it, note that explicitly and continue.
 
+Several of the items below ask for more than one thing (item 10 wants the
+ICFR conclusion, the auditor's identity AND related-party transactions).
+Those are separate ask_edgar calls. Fusing them into one question makes
+retrieval miss all of them — measured on ACN, a question covering all three
+did not retrieve the Item 9A excerpt at all, while the ICFR question on its
+own ranked it first.
+
 Retrieval priority: never spend a retrieval call on prior-prior-year data
 (e.g. FY2023 when FY2024 and FY2025 are the current comparison years) while
 the current or prior year's equivalent figure for that same item is still
