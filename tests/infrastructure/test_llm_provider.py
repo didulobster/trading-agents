@@ -632,6 +632,25 @@ async def test_gpt_5x_carries_a_requested_effort_through(openai_capture):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("output_config", [{"effort": "low"}, None])
+async def test_gpt_5x_with_tools_pins_reasoning_effort_none(openai_capture, output_config):
+    """Live 400 on gpt-5.6-luna: "Function tools with reasoning_effort are
+    not supported ... in /v1/chat/completions". Every port calls with
+    tools, so a requested effort must not reach the wire — and neither may
+    an unset one, because the default is not "none"."""
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model="gpt-5.6-luna", max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "auto"},
+        thinking={"type": "adaptive"},
+        output_config=output_config,
+    )
+    assert sent["reasoning_effort"] == "none"
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("model", ["gpt-4.1-nano", "gpt-5", "gpt-5-mini"])
 async def test_models_without_reasoning_effort_none_are_not_sent_it(openai_capture, model):
     """gpt-4.1 rejects `reasoning_effort` outright and the original gpt-5
