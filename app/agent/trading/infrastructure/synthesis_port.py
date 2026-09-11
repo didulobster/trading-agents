@@ -49,6 +49,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 
+from app.agent.trading.domain.budget import NodeBudgetExceeded
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
@@ -753,7 +754,7 @@ async def _resolve_with_retry(
 
 def _assert_within_budget(ticker: str, total_cost: float) -> None:
     if total_cost > SYNTHESIS_BUDGET_USD:
-        raise AssertionError(
+        raise NodeBudgetExceeded(
             f"synthesis cost ${total_cost:.4f} for {ticker} exceeds the "
             f"${SYNTHESIS_BUDGET_USD:.2f} combined Research Manager + Risk Judge "
             f"budget — check the model routing and evidence pack size before rerunning"

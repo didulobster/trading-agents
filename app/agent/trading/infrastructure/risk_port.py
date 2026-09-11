@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+from app.agent.trading.domain.budget import NodeBudgetExceeded
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
@@ -458,7 +459,7 @@ def _retry_messages(messages: list[dict], response, error: Exception) -> list[di
 def _assert_within_budget(ticker: str, turns: list[RiskTurn], this_turn: float | None) -> None:
     total = sum(t.estimated_cost_usd or 0.0 for t in turns) + (this_turn or 0.0)
     if total > RISK_BUDGET_USD:
-        raise AssertionError(
+        raise NodeBudgetExceeded(
             f"risk panel cost ${total:.4f} for {ticker} exceeds the "
             f"${RISK_BUDGET_USD:.2f} per-panel budget after {len(turns) + 1} "
             f"turn(s) — check RISK_MODEL routing and the evidence pack size "
