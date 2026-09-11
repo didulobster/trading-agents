@@ -110,6 +110,10 @@ class QueryDecomposer:
         self._model = model or model_for("decomposer")
         self._client = get_client(self._model)
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def needs_rewrite(self, query: str) -> str | None:
         """Stage 1: cheap detection.
             Returns 'decompose', 'expand', or None.

@@ -45,17 +45,30 @@ async def get_fundamentals_report(
     # reached neither the cost log nor `check_run_guards`. Logged as its own
     # line and its own CostEvent, under a distinct mode, so the two kinds of
     # spend stay tellable apart in `docs/cost-log.jsonl`.
-    tool_usage = get_delegated_usage()
-    tool_event = None
-    if not tool_usage.is_empty:
+    #
+    # One event per model that spent it, each priced at its own rate. The
+    # server's models need not be the agent's, and pricing a deepseek-served
+    # /ask at a gpt-5.6-luna agent's rate under-counted it by ~44% on
+    # 2026-09-11 — the budget guard waved through the difference.
+    tool_events = []
+    for model, tool_usage in get_delegated_usage().items():
+        if tool_usage.is_empty:
+            continue
+        if model is None:
+            print(
+                f"[fundamentals] server reported tool usage without a model — "
+                f"pricing it at {AGENT_MODEL}, which is wrong if the server's "
+                f"answer/extraction models differ. Restart the API server."
+            )
+            model = AGENT_MODEL
         tool_event_id = new_event_id("fundamentals-tools")
         tool_cost = log_cost(
-            ticker, "trading-fundamentals-tools", tool_usage,
+            ticker, "trading-fundamentals-tools", tool_usage, model,
             run_id=run_id, event_id=tool_event_id,
         )
-        tool_event = record_cost_event(
-            tool_event_id, "fundamentals-tools", tool_usage, AGENT_MODEL, tool_cost
-        )
+        tool_events.append(record_cost_event(
+            tool_event_id, "fundamentals-tools", tool_usage, model, tool_cost
+        ))
 
     report = FundamentalsReport(
         ticker=ticker,
@@ -66,7 +79,7 @@ async def get_fundamentals_report(
         output_tokens=usage.output_tokens,
         generated_at=today,
         cost_event=record_cost_event(event_id, "fundamentals", usage, AGENT_MODEL, cost),
-        tool_cost_event=tool_event,
+        tool_cost_events=tool_events,
     )
 
     _CACHE_DIR.mkdir(exist_ok=True)

@@ -102,7 +102,7 @@ async def fundamentals_node(state: TradingState) -> dict:
     # exceed its budget without `check_run_guards` ever seeing it.
     events = []
     if report:
-        events = [e for e in (report.cost_event, report.tool_cost_event) if e]
+        events = [e for e in (report.cost_event, *report.tool_cost_events) if e]
     return {"fundamentals_report": report, "cost_events": events}
 
 
