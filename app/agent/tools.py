@@ -558,7 +558,11 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
     # STEP 2: real HTTP calls. Un-stub by setting USE_STUBS = False and
     # confirming each endpoint below matches your FastAPI routes.
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
+    # The server's optional shared secret (see main.require_api_key). Sent
+    # only when configured, so an unauthenticated local server is unchanged.
+    api_key = os.getenv("APP_API_KEY")
+    headers = {"X-API-Key": api_key} if api_key else {}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as http:
         if name == "check_corpus":
             # STEP 2: confirm this route/param exists, or add it to main.py
             resp = await http.get(

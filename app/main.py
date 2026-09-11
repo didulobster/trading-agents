@@ -7,7 +7,12 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 
+import secrets
+
+from fastapi import Depends, Header
+
 from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
+from app.domain.values import Ticker, normalize_ticker
 from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,9 +70,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RAG Skeleton", lifespan=lifespan)
 
+# Browsers may call this API only from these origins. It was "*", which let
+# ANY page open in the user's browser send requests to localhost:8000 — and
+# /ask, /extract, /ingest, /news-assess and /trading/analyze all spend API
+# credits. The default is the Vite dev server the removed edgar-ui ran on;
+# set CORS_ALLOW_ORIGINS (comma-separated) for anything else, or to "" to
+# allow no browser origin at all.
+CORS_ALLOW_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten to your actual origin once you know it
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -77,7 +96,7 @@ app.add_middleware(
 class AskRequest(BaseModel):
     question: str
     k: int = 8
-    tickers: list[str] | None = None
+    tickers: list[Ticker] | None = None
     filing_types: list[str] | None = None
     filed_after: date | None = None
     filed_before: date | None = None
@@ -106,7 +125,7 @@ class AskResponse(BaseModel):
     chunks: list[RetrievedChunkResponse]
 
 class ExtractRequest(BaseModel):
-    ticker: str
+    ticker: Ticker
     fiscal_period: str          # "Q1 2026" — you supply this, it's not extracted
     filing_type: str            # "10-Q"
     filed_date: date
@@ -120,7 +139,7 @@ class FinancialMetricsResponse(BaseModel):
     citations: list[str]
 
 class NewsAssessRequest(BaseModel):
-    ticker: str
+    ticker: Ticker
     headline: str
 
 class NewsAssessResponse(BaseModel):
@@ -129,7 +148,7 @@ class NewsAssessResponse(BaseModel):
     assessment: str
 
 class IngestRequest(BaseModel):
-    ticker: str
+    ticker: Ticker
     # None = auto-detect: 10-K for a domestic filer, 20-F for a foreign
     # private issuer (see EdgarClient.default_form_types). Pass explicitly
     # to override, e.g. "10-Q" or "6-K".
@@ -138,7 +157,7 @@ class IngestRequest(BaseModel):
     since_year: int | None = None
 
 class LatestFilingsRequest(BaseModel):
-    ticker: str
+    ticker: Ticker
     # None = auto-detect the filer's form-type family (see IngestRequest).
     form_types: list[str] | None = None
     since_year: int | None = None
@@ -150,6 +169,30 @@ class LatestFilingsRequest(BaseModel):
     # for the rest of the run. Ignored when `form_types` is given explicitly:
     # a caller naming its forms has already said what it wants.
     periodic_only: bool = True
+
+# ---- Auth ----
+API_KEY_HEADER = "X-API-Key"
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Opt-in shared secret for the endpoints that spend money.
+
+    Unset `APP_API_KEY` leaves them open — the previous behaviour, and fine
+    for a server bound to 127.0.0.1 (uvicorn's default). Set it whenever the
+    server is reachable by anything but you: every spending endpoint then
+    needs a matching `X-API-Key` header, and the research agent's own tool
+    calls send it automatically (app/agent/tools.py reads the same variable).
+    Read per request so a test or a restart-free change can move it.
+    """
+    expected = os.getenv("APP_API_KEY")
+    if not expected:
+        return
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(401, f"missing or invalid {API_KEY_HEADER} header")
+
+
+SPENDS_MONEY = [Depends(require_api_key)]
+
 
 # ---- Endpoint ----
 def _report_usage(response: Response, *usages: tuple[str, TokenUsage]) -> None:
@@ -172,7 +215,7 @@ def _report_usage(response: Response, *usages: tuple[str, TokenUsage]) -> None:
     response.headers[USAGE_HEADER] = encode_usage_header(usages)
 
 
-@app.post("/ask",  response_model=AskResponse)
+@app.post("/ask",  response_model=AskResponse, dependencies=SPENDS_MONEY)
 async def ask(req: AskRequest, response: Response) -> AskResponse:
     if not req.question.strip():
         raise HTTPException(400, "question must not be empty")
@@ -230,7 +273,7 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
     )
 
 
-@app.post("/extract", response_model=FinancialMetrics)
+@app.post("/extract", response_model=FinancialMetrics, dependencies=SPENDS_MONEY)
 async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     embedder = EmbeddingService()
     chunk_repo = ChunkRepository()
@@ -286,6 +329,11 @@ async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, fil
 
 @app.get("/corpus-status")
 async def corpus_status_endpoint(ticker: str | None = None):
+    if ticker is not None:
+        try:
+            ticker = normalize_ticker(ticker)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
     query = CorpusStatusQuery()
     summary = await query.summary(ticker)
     if not summary:
@@ -300,7 +348,7 @@ async def corpus_status_endpoint(ticker: str | None = None):
         "per_filing": [asdict(d) for d in per_filing],
     }
 
-@app.post("/ingest")
+@app.post("/ingest", dependencies=SPENDS_MONEY)
 async def ingest_endpoint(req: IngestRequest):
     user_agent = os.environ["EDGAR_USER_AGENT"]
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -390,7 +438,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
     }
 
 
-@app.post("/news-assess", response_model=NewsAssessResponse)
+@app.post("/news-assess", response_model=NewsAssessResponse, dependencies=SPENDS_MONEY)
 async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
     if not req.headline.strip():
         raise HTTPException(400, "headline must not be empty")
@@ -412,7 +460,7 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
 
 
 class TradingAnalysisRequest(BaseModel):
-    ticker: str
+    ticker: Ticker
     thread_id: str | None = None
     # Same defaults as the CLI. `as_of_date` falls back to today HERE, at the
     # boundary — never inside a node (see TradingState.as_of_date). All three
@@ -431,7 +479,7 @@ class TradingAnalysisResponse(BaseModel):
     run_terminated_by: str | None = None
 
 
-@app.post("/trading/analyze", response_model=TradingAnalysisResponse)
+@app.post("/trading/analyze", response_model=TradingAnalysisResponse, dependencies=SPENDS_MONEY)
 async def trading_analyze(req: TradingAnalysisRequest) -> TradingAnalysisResponse:
     """Run the trading pipeline for one ticker, exactly as the CLI does.
 
