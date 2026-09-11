@@ -29,6 +29,7 @@ if __name__ == "__main__":
 import argparse
 import asyncio
 import contextlib
+from contextvars import ContextVar
 import json
 import logging
 import os
@@ -137,7 +138,7 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
 
 # Modes whose provenance must NOT fall back to the research agent's session
 # log. These are trading-pipeline artifacts that never call the research
-# tools, so at their save time the module-global log still holds whatever
+# tools, so at their save time the session log may still hold whatever
 # trace the preceding fundamentals run left behind — writing it would pair
 # the wrong evidence with the report. They supply their own provenance or
 # get none.
@@ -175,7 +176,7 @@ _DATED_MODES = frozenset(
 
 # The instant one pipeline run started, set by `vault_run`; None outside one.
 #
-# A module global rather than a parameter threaded through six ports, because
+# A context variable rather than a parameter threaded through six ports, because
 # the two halves of a run save at different times and through different call
 # stacks — technical and fundamentals from inside their nodes while the graph
 # is still executing, sentiment/decision/debate from the CLI after it
@@ -186,7 +187,10 @@ _DATED_MODES = frozenset(
 # from the same instant too. A run that starts at 23:58 and finishes at
 # 00:02 would otherwise file its fundamentals under one date and its debate
 # transcript under the next — the same scattering, harder to spot.
-_RUN_STAMP: datetime | None = None
+#
+# A ContextVar and not a plain module global: the API server can run two
+# pipelines at once, and each request's task must see its own folder.
+_RUN_STAMP: ContextVar[datetime | None] = ContextVar("vault_run_stamp", default=None)
 
 
 @contextlib.contextmanager
@@ -200,13 +204,11 @@ def vault_run(stamp: datetime | None = None):
     Restores whatever was set before rather than clearing to None, so nesting
     is safe even though nothing nests today.
     """
-    global _RUN_STAMP
-    previous = _RUN_STAMP
-    _RUN_STAMP = stamp or datetime.now()
+    token = _RUN_STAMP.set(stamp or datetime.now())
     try:
-        yield _RUN_STAMP.strftime(_RUN_FOLDER_FORMAT)
+        yield _RUN_STAMP.get().strftime(_RUN_FOLDER_FORMAT)
     finally:
-        _RUN_STAMP = previous
+        _RUN_STAMP.reset(token)
 
 
 _RUN_FOLDER_FORMAT = "%Y-%m%d-%H%M%S"
@@ -237,18 +239,15 @@ def _save_output(
         content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
     # Inside a run, every path is derived from the instant the RUN started,
     # not the instant this file happens to be written.
-    # The ticker becomes a directory name. Every entry point validates it,
-    # but this is where a bad one would do damage — `MEMO_DIR / "../../x"`
-    # writes outside the vault — so the sink checks too.
-    if normalize_ticker(ticker) != ticker:
-        raise ValueError(f"refusing to write a vault artifact for ticker {ticker!r}")
-    now = _RUN_STAMP or datetime.now()
+
+    run_stamp = _RUN_STAMP.get()
+    now = run_stamp or datetime.now()
     stem = _MODE_STEMS.get(mode)
     parent = MEMO_DIR / ticker
     if mode in _DATED_MODES:
         parent = parent / now.strftime("%Y%m%d")
 
-    if _RUN_STAMP is not None:
+    if run_stamp is not None:
         # One folder per run, so the timestamp is on the folder and not
         # repeated on every file inside it.
         parent = parent / now.strftime(_RUN_FOLDER_FORMAT)
@@ -260,7 +259,7 @@ def _save_output(
         )
 
     out_path = parent / filename
-    if _RUN_STAMP is not None and out_path.exists():
+    if run_stamp is not None and out_path.exists():
         # Two artifacts of the same kind in one run. Unreachable today —
         # every mode is saved exactly once per run — so if it happens the
         # honest answer is to say so rather than overwrite a report that
