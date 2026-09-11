@@ -278,7 +278,7 @@ All three High PRs merged together pass 750 tests (1 skipped).
 
 ### Medium
 - [x] #4 Validate the ticker at every entry point; restrict CORS; shared-secret header on endpoints that spend money; bind Postgres to 127.0.0.1 — **PR #87, merged.** The vault writer's check was lost when #92 landed on top of it; restored in PR #95
-- [x] #5 Table-aware chunking (repeat table title and header row); give the F-pages block its own section — **PR #94, open.** Tables render one row per line; an oversized table splits on row boundaries with its caption, units line and column headings repeated on every piece; the audited statements get their own `Item 8` section (they were filed under `Item 16 / Form 10-K Summary` and the like in 9 of 16 annual filings). 7 of 44 cached filings change, none loses a section
+- [x] #5 Table-aware chunking (repeat table title and header row); give the F-pages block its own section — **PR #94, merged.** Tables render one row per line; an oversized table splits on row boundaries with its caption, units line and column headings repeated on every piece; the audited statements get their own `Item 8` section (they were filed under `Item 16 / Form 10-K Summary` and the like in 9 of 16 annual filings). 7 of 44 cached filings change, none loses a section
 - [x] #6 One shared number-matching module (token-anchored); point the `calculate` checks at it — **PR #91, merged**
 - [x] #7 `--retry-failed` through the domain state machine; idempotent `_chunk`; unique index on `(section_id, chunk_index)`; one transaction per filing — **PR #89, merged.** Needs `uv run alembic upgrade head`
 - [x] #8 Drop a synthesis sample on any exception and keep its cost; per-port budget breach becomes a graceful abort — **PR #88, merged**
