@@ -128,3 +128,13 @@ def test_reconciliation_never_undercounts_relative_to_disk(tmp_path):
 
     summary = _last_line(path)
     assert summary["total_usd"] >= 0.01
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+def test_the_summary_says_whether_it_covers_a_resumed_run(resumed):
+    cost_log.log_run_summary(
+        run_id="run-r", ticker="ACN", as_of_date=date(2026, 8, 26),
+        events=[], budget=_budget(), terminated_by=RunTermination.COMPLETED,
+        wall_clock_s=1.0, resumed=resumed,
+    )
+    assert _last_line(cost_log._COST_LOG_PATH)["resumed"] is resumed

@@ -122,6 +122,7 @@ def log_run_summary(
     budget: RunBudget,
     terminated_by: RunTermination,
     wall_clock_s: float,
+    resumed: bool = False,
 ) -> None:
     """Written exactly once per run — completed or aborted — right after the
     vault artifacts save in cli.py. That one-line-per-run invariant is what
@@ -170,6 +171,10 @@ def log_run_summary(
         "cache_read_ratio": _cache_read_ratio(events),
         "n_events": n_events,
         "wall_clock_s": round(wall_clock_s, 3),
+        # A resumed run's summary covers the whole run's spend (the disk
+        # reconciliation above sums every attempt), but its wall clock is the
+        # resumed attempt's alone. Flagged so a query can tell the two apart.
+        "resumed": resumed,
     }
     _COST_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _COST_LOG_PATH.open("a") as f:
