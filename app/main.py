@@ -67,10 +67,28 @@ claude_model = model_for("answer")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    # Built once and shared, instead of per request: every /ask and /extract
+    # used to construct a fresh OpenAI client and a fresh decomposer client,
+    # so no HTTP connection was ever reused. Best-effort — a missing key or
+    # provider config leaves them unset and the endpoints build their own,
+    # failing then with the same error they always did.
+    for name, factory in (("embedder", EmbeddingService), ("decomposer", QueryDecomposer)):
+        try:
+            setattr(app.state, name, factory())
+        except Exception as exc:
+            logging.warning("not sharing a %s client: %s", name, exc)
     async with build_checkpointer() as checkpointer:
         app.state.trading_graph = build_trading_graph(checkpointer)
         yield
     await close_pool()
+
+
+def _embedder() -> EmbeddingService:
+    return getattr(app.state, "embedder", None) or EmbeddingService()
+
+
+def _decomposer() -> QueryDecomposer:
+    return getattr(app.state, "decomposer", None) or QueryDecomposer()
 
 app = FastAPI(title="RAG Skeleton", lifespan=lifespan)
 
@@ -227,9 +245,9 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
     if not req.question.strip():
         raise HTTPException(400, "question must not be empty")
 
-    embedder = EmbeddingService()
+    embedder = _embedder()
     chunk_repo = ChunkRepository()
-    decomposer = QueryDecomposer()
+    decomposer = _decomposer()
     retrieval = RetrievalService(
         embedding_service=embedder, 
         chunk_repo=chunk_repo,
@@ -282,9 +300,9 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
 
 @app.post("/extract", response_model=FinancialMetrics, dependencies=SPENDS_MONEY)
 async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
-    embedder = EmbeddingService()
+    embedder = _embedder()
     chunk_repo = ChunkRepository()
-    decomposer = QueryDecomposer()
+    decomposer = _decomposer()
     retrieval = RetrievalService(
         embedding_service=embedder, 
         chunk_repo=chunk_repo,
@@ -366,7 +384,7 @@ async def ingest_endpoint(req: IngestRequest):
 
     async with EdgarClient(user_agent, cache_root / "filings") as edgar:
         resolver = TickerResolver(user_agent, cache_root / "company_tickers.json")
-        embedder = EmbeddingService()
+        embedder = _embedder()
         service = IngestionService(
             edgar_client=edgar,
             ticker_resolver=resolver,

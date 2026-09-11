@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 import logging
 
@@ -104,8 +105,11 @@ class RetrievalService:
 
         # Retrieve per sub-query, merge results
         all_chunks: dict[int, RetrievedChunk] = {}  # chunk_id -> best result
-        for sub_q in decomposition.sub_queries:
-            sub_results = await self.retrieve(sub_q, k=k, filters=filters)
+        # Sub-queries are independent; retrieved concurrently (see retrieve_full).
+        per_query = await asyncio.gather(
+            *(self.retrieve(sub_q, k=k, filters=filters) for sub_q in decomposition.sub_queries)
+        )
+        for sub_results in per_query:
             for chunk in sub_results:
                 existing = all_chunks.get(chunk.chunk.id)
                 if existing is None or chunk.similarity > existing.similarity:
@@ -265,8 +269,14 @@ class RetrievalService:
     
         # Hybrid-retrieve per sub-query, merge
         all_chunks: dict[int, RetrievedChunk] = {}
-        for sub_q in decomposition.sub_queries:
-            sub_results = await self.retrieve_hybrid(sub_q, k=k, filters=filters)
+        # Independent of each other, so concurrent: each sub-query is an
+        # embedding call plus two SQL searches, and a decomposed question has
+        # 2-4 of them. One after another they added up on every /ask the
+        # agent made. Merged in sub-query order, so the result is unchanged.
+        per_query = await asyncio.gather(
+            *(self.retrieve_hybrid(sub_q, k=k, filters=filters) for sub_q in decomposition.sub_queries)
+        )
+        for sub_results in per_query:
             for chunk in sub_results:
                 existing = all_chunks.get(chunk.chunk.id)
                 if existing is None or chunk.similarity > existing.similarity:
