@@ -96,11 +96,13 @@ uv run alembic upgrade head
 `.env.example` lists every variable with a comment; `.env` itself is gitignored.
 
 > **`.env` is required, and three of its variables are read at import time.**
-> `LLM_CLAUDE_MODEL` (via `model_for`), `LOOP_MAX_TURNS` and `MEMO_DIR` are read with
-> `os.environ[...]` in `app/agent/researcher.py` and `app/infrastructure/llm/models.py`,
-> both reached by `fundamentals_port` → `nodes` → `graph`. A missing value fails the
-> **entire trading CLI** with a bare `KeyError` before argument parsing. If you get
-> `KeyError: 'LLM_CLAUDE_MODEL'`, that is what happened.
+> `LLM_CLAUDE_MODEL` (via `model_for`), `LOOP_MAX_TURNS` and `MEMO_DIR`. A missing one
+> stops the process before argument parsing with `MissingSetting: <NAME> is not set…`.
+>
+> **Precedence:** a variable already set in the environment wins over `.env`, which only
+> fills in what is unset. Entry points (the API server, both CLIs, the researcher script)
+> load `.env` before anything else; see `app/config.py`. The `scripts/` battery tools
+> still load it with `override=True`, so inside them `.env` wins.
 
 ## Configuration
 

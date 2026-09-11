@@ -1,3 +1,10 @@
+if __name__ == "__main__":
+    # Entry point: .env first, before the imports below read their settings.
+    # Imported for its helpers (tests), it loads nothing. See app/config.py.
+    from app.config import load_env
+
+    load_env()
+
 import argparse
 import asyncio
 import json

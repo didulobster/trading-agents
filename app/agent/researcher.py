@@ -16,7 +16,16 @@ Usage:
     uv run python -m app.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
 """
 
-from __future__ import annotations  
+from __future__ import annotations
+
+if __name__ == "__main__":
+    # Run as a script, this module is its own entry point: load .env before
+    # the imports below read their settings. Imported as a library it leaves
+    # that to whichever entry point imported it (see app/config.py).
+    from app.config import load_env
+
+    load_env()
+
 import argparse
 import asyncio
 import contextlib
@@ -28,7 +37,6 @@ import sys
 from typing import Callable
 import yaml
 
-from dotenv import load_dotenv
 from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
@@ -36,12 +44,12 @@ from app.application.memo_verifier import verify_memo
 from app.domain.values import normalize_ticker
 from app.infrastructure.llm import MODEL_PRICING, get_client
 from app.infrastructure.llm.models import model_for
+from app.config import require_env
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
 AGENT_MODEL = model_for("agent")
-MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
+MAX_TURNS = int(require_env("LOOP_MAX_TURNS"))
 # How many turns out from the cap the agent starts being told to wrap up.
 # Phase 9 measured 2 of 3 fundamentals runs hitting MAX_TURNS exactly and
 # ending on "forcing memo from gathered data" — the agent had no idea the
@@ -57,7 +65,7 @@ TURN_WARN_AT = 8
 # the non-streaming client's read timeout.
 AGENT_MAX_TOKENS = 16000
 WATCHLIST_PATH = Path("watchlist.yaml")
-MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]
+MEMO_DIR = Path.home() / require_env("MEMO_DIR")
 
 # Cost config — per million tokens. The table moved to
 # app/infrastructure/llm/pricing.py when the provider layer landed, because

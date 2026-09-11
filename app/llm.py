@@ -1,5 +1,4 @@
 import logging
-from dotenv import load_dotenv
 
 from app.domain.token_usage import TokenUsage
 from dataclasses import dataclass, field
@@ -8,8 +7,6 @@ from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 from app.application.citations import format_citation_tag, format_context_block
 from app.infrastructure.llm import get_client
 from app.infrastructure.llm.models import model_for
-
-load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
