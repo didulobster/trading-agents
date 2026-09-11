@@ -7,7 +7,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 
-from app.domain.token_usage import USAGE_HEADER, TokenUsage
+from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,7 +141,7 @@ class LatestFilingsRequest(BaseModel):
     periodic_only: bool = True
 
 # ---- Endpoint ----
-def _report_usage(response: Response, *usages: TokenUsage) -> None:
+def _report_usage(response: Response, *usages: tuple[str, TokenUsage]) -> None:
     """Tell the caller what this request spent, in a header.
 
     A header and not a body field: the research agent copies tool-result
@@ -154,11 +154,11 @@ def _report_usage(response: Response, *usages: TokenUsage) -> None:
     The caller does the logging, not this server: only it knows the run_id,
     and only its TradingState feeds `check_run_guards`. See
     domain/token_usage.py.
+
+    Each usage is paired with the model that spent it, so the caller can
+    price it at that model's rate rather than its own.
     """
-    total = TokenUsage()
-    for usage in usages:
-        total = total + usage
-    response.headers[USAGE_HEADER] = total.model_dump_json()
+    response.headers[USAGE_HEADER] = encode_usage_header(usages)
 
 
 @app.post("/ask",  response_model=AskResponse)
@@ -189,7 +189,9 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
         chunks=chunks,
         model=claude_model)
     # BOTH calls: the decomposer's rewrite is billed just like the answer.
-    _report_usage(response, result.usage, decomposition.usage)
+    _report_usage(
+        response, (claude_model, result.usage), (decomposer.model, decomposition.usage)
+    )
 
     report = verify_answer(
         result.answer,
@@ -239,7 +241,7 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     # only the extraction call is reported. Under-reporting by the
     # decomposer's share is the conservative direction and is noted rather
     # than silently accepted -- see trading-agent-known-gaps.md.
-    _report_usage(response, extractor.last_usage)
+    _report_usage(response, (extractor.llm_model, extractor.last_usage))
     from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
     row = MetricsRow(
         ticker=req.ticker,

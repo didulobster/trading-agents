@@ -12,7 +12,7 @@ import sys
 import httpx
 from pydantic import ValidationError
 
-from app.domain.token_usage import USAGE_HEADER, TokenUsage
+from app.domain.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
 
 
 # Base URL of your running FastAPI server. Override when you wire step 2.
@@ -812,17 +812,18 @@ _CALC_RESULTS: list[float] = []
 _REJECTED_CALC_ATTEMPTS: list[dict] = []
 _SESSION_LOG: list[str] = []
 
-_DELEGATED_USAGE = TokenUsage()
+# Keyed by the model that spent it; None for a server too old to say.
+_DELEGATED_USAGE: dict[str | None, TokenUsage] = {}
 
 
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
-    global _DELEGATED_USAGE, _ASK_EDGAR_CALLS
+    global _ASK_EDGAR_CALLS
     _RETRIEVED_TEXT.clear()
     _CALC_RESULTS.clear()
     _REJECTED_CALC_ATTEMPTS.clear()
     _SESSION_LOG.clear()
-    _DELEGATED_USAGE = TokenUsage()
+    _DELEGATED_USAGE.clear()
     _ASK_EDGAR_CALLS = 0
     _CALC_CACHE.clear()
 
@@ -842,19 +843,23 @@ def _record_delegated_usage(resp) -> None:
     an older server, or one of the endpoints that spends nothing, should not
     break a run over accounting.
     """
-    global _DELEGATED_USAGE
     raw = resp.headers.get(USAGE_HEADER)
     if not raw:
         return
     try:
-        _DELEGATED_USAGE = _DELEGATED_USAGE + TokenUsage.model_validate_json(raw)
-    except ValidationError:
+        reported = decode_usage_header(raw)
+    except (ValueError, ValidationError):
         logger.warning("ignoring malformed %s header: %r", USAGE_HEADER, raw[:120])
+        return
+    for model, usage in reported.items():
+        _DELEGATED_USAGE[model] = _DELEGATED_USAGE.get(model, TokenUsage()) + usage
 
 
-def get_delegated_usage() -> TokenUsage:
-    """Total server-side spend since the last `reset_run_provenance()`."""
-    return _DELEGATED_USAGE
+def get_delegated_usage() -> dict[str | None, TokenUsage]:
+    """Server-side spend since the last `reset_run_provenance()`, by the
+    model that spent it. The key is None for usage from a server that did
+    not name its model."""
+    return dict(_DELEGATED_USAGE)
 
 def record_log_line(text: str) -> None:
     """Append a line to the run's session log — the full terminal trace

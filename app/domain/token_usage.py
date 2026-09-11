@@ -16,6 +16,9 @@ it to the run's ledger — this type is what crosses that boundary.
 
 from __future__ import annotations
 
+import json
+from typing import Iterable
+
 from pydantic import BaseModel
 
 
@@ -62,3 +65,39 @@ class TokenUsage(BaseModel):
 # numbers that could then "back" a figure in a memo. The header keeps the
 # agent-visible bytes identical to what they were.
 USAGE_HEADER = "X-LLM-Usage"
+
+
+def encode_usage_header(usages: Iterable[tuple[str, TokenUsage]]) -> str:
+    """`{"by_model": {model: usage}}`, summing repeats of the same model.
+
+    Keyed by model because the caller prices it, and the server's models
+    need not be the caller's: with `/ask` and `/extract` on deepseek-v4-flash
+    under a gpt-5.6-luna agent (2026-09-11), a bare token total priced at the
+    agent's rate logged $0.0375 for ~$0.0666 of real spend. `/ask` mixes two
+    models in one request (answer + decomposer), so the split has to happen
+    here, before summing — the caller cannot undo a sum.
+    """
+    by_model: dict[str, TokenUsage] = {}
+    for model, usage in usages:
+        if usage.is_empty:
+            continue
+        by_model[model] = by_model.get(model, TokenUsage()) + usage
+    return json.dumps({"by_model": {m: u.model_dump() for m, u in by_model.items()}})
+
+
+def decode_usage_header(raw: str) -> dict[str | None, TokenUsage]:
+    """Inverse of `encode_usage_header`.
+
+    A header in the pre-2026-09-11 flat shape (one `TokenUsage`, no model)
+    comes back under the key None, for the caller to price at its own
+    model as it always did. Raises ValueError on anything else.
+    """
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("usage header is not a JSON object")
+    if "by_model" not in data:
+        return {None: TokenUsage.model_validate(data)}
+    by_model = data["by_model"]
+    if not isinstance(by_model, dict):
+        raise ValueError("usage header `by_model` is not a JSON object")
+    return {str(m): TokenUsage.model_validate(u) for m, u in by_model.items()}
