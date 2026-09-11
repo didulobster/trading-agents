@@ -82,6 +82,9 @@ class RetrievedChunkResponse(BaseModel):
     citation: str
     section_path: list[str]
     similarity: float
+    # Cosine similarity when the vector search found the chunk; None when only
+    # the keyword search did. `similarity` is the fused ranking score.
+    vector_similarity: float | None = None
     ticker: str
     filing_type: str
     filed_date: date
@@ -208,6 +211,7 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
                 citation=format_citation_tag(c),
                 section_path=c.chunk.section_path,
                 similarity=c.similarity,
+                vector_similarity=c.vector_similarity,
                 ticker=c.chunk.ticker,
                 filing_type=c.chunk.filing_type,
                 filed_date=c.chunk.filed_date,
