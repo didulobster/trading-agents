@@ -306,6 +306,31 @@ def _translate_thinking(kwargs: dict[str, Any], forces_a_tool: bool) -> dict[str
     return out
 
 
+# OpenAI's reasoning_effort values that have an Anthropic `effort` of the
+# same name. "xhigh" and "max" do not line up and are left to the default.
+_OPENAI_REASONING_EFFORTS = frozenset({"low", "medium", "high"})
+
+
+def _translate_reasoning_effort(kwargs: dict[str, Any]) -> str | None:
+    """OpenAI's top-level `reasoning_effort`, or None to leave the default.
+
+    Same rule as `_translate_thinking`, for the same reason: no `thinking`
+    means reasoning OFF, sent explicitly. Reasoning tokens are billed as
+    output against `max_completion_tokens` — the budget that emptied the
+    technical node and the news digest on DeepSeek.
+
+    It also decides whether `temperature` works. Live on gpt-5.6-luna
+    (2026-09-11): temperature 0 and 0.2 are both accepted alongside
+    reasoning_effort="none" and both rejected without it — which also shows
+    the default is not "none".
+    """
+    thinking = kwargs.get("thinking")
+    if not thinking or thinking.get("type") == "disabled":
+        return "none"
+    effort = (kwargs.get("output_config") or {}).get("effort")
+    return effort if effort in _OPENAI_REASONING_EFFORTS else None
+
+
 # Anthropic-only request parameters, and what happens to each. Warned about
 # once per process rather than per call — a per-call warning on a 45-turn
 # loop is noise nobody reads, and silence is how a dropped parameter turns
@@ -357,11 +382,15 @@ class OpenAICompatClient:
         max_output_tokens: int | None = None,
         provider: str = "openai-compatible",
         thinking_param: str | None = None,
+        max_tokens_param: str = "max_tokens",
+        reasoning_effort_models: tuple[str, ...] = (),
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._max_output_tokens = max_output_tokens
         self._provider = provider
         self._thinking_param = thinking_param
+        self._max_tokens_param = max_tokens_param
+        self._reasoning_effort_models = reasoning_effort_models
         self.messages = _Messages(self)
 
     async def _create(self, **kwargs: Any) -> ShimResponse:
@@ -405,7 +434,7 @@ class OpenAICompatClient:
             "messages": _translate_messages(kwargs.get("system"), kwargs["messages"]),
         }
         if max_tokens:
-            request["max_tokens"] = max_tokens
+            request[self._max_tokens_param] = max_tokens
         if tools:
             request["tools"] = tools
         if tool_choice is not None:
@@ -422,6 +451,10 @@ class OpenAICompatClient:
             # extra_body, not a top-level kwarg: the OpenAI SDK raises
             # TypeError on parameters it does not know.
             request["extra_body"] = {self._thinking_param: thinking}
+        if self._reasoning_effort_models and model.startswith(self._reasoning_effort_models):
+            effort = _translate_reasoning_effort(kwargs)
+            if effort is not None:
+                request["reasoning_effort"] = effort
 
         try:
             completion = await self._client.chat.completions.create(**request)
