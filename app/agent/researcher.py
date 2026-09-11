@@ -234,7 +234,11 @@ def _save_output(
 
     Outside one — the standalone research CLI, which writes a single report —
     the old flat layout is kept, timestamp in the filename.
+
+    The ticker becomes a directory name, so it is validated here as well as at
+    the entry points — this is the last place that can stop a traversal.
     """
+    ticker = normalize_ticker(ticker)
     if cost_usd is not None:
         content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
     # Inside a run, every path is derived from the instant the RUN started,
