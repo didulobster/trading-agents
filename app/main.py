@@ -136,6 +136,9 @@ class IngestRequest(BaseModel):
     form_type: str | None = None
     limit: int = 3
     since_year: int | None = None
+    # Re-run filings a previous ingest marked FAILED (they are skipped
+    # otherwise). See IngestionService.ingest_security.
+    retry_failed: bool = False
 
 class LatestFilingsRequest(BaseModel):
     ticker: str
@@ -324,6 +327,7 @@ async def ingest_endpoint(req: IngestRequest):
             form_types=[req.form_type] if req.form_type else None,
             limit=req.limit,
             since=since,
+            retry_failed=req.retry_failed,
         )
 
     return {"status": "ok", "ticker": req.ticker, "limit": req.limit}
