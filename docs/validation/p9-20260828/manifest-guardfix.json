@@ -1,0 +1,84 @@
+{
+  "battery_id": "p9-20260828",
+  "as_of_date": "2026-08-28",
+  "git_sha": "2ce63a876f07a3efef386ccef2fb460341a1ce56",
+  "git_dirty": false,
+  "model_ids": {
+    "LLM_CLAUDE_MODEL": "deepseek-v4-flash",
+    "LLM_ANSWER_MODEL": "deepseek-v4-flash",
+    "LLM_DECOMPOSER_MODEL": "deepseek-v4-flash",
+    "LLM_EXTRACTION_MODEL": "deepseek-v4-flash",
+    "TRADING_NEWS_DIGEST_MODEL": "deepseek-v4-flash",
+    "TRADING_TECHNICAL_MODEL": "deepseek-v4-flash",
+    "TRADING_DEBATE_MODEL": "deepseek-v4-flash",
+    "TRADING_RISK_MODEL": "deepseek-v4-flash",
+    "TRADING_RESEARCH_MANAGER_MODEL": "deepseek-v4-flash",
+    "TRADING_RISK_JUDGE_MODEL": "deepseek-v4-flash",
+    "OPENAI_MODEL": "gpt-4.1-nano",
+    "EMBEDDING_MODEL": "text-embedding-3-small"
+  },
+  "package_versions": {
+    "langgraph": "1.2.11",
+    "pandas-ta-classic": "0.6.52",
+    "anthropic": "0.122.0",
+    "pydantic": "2.9.0"
+  },
+  "max_usd": 0.75,
+  "wall_clock_timeout_s": 1800.0,
+  "runs": [
+    {
+      "ticker": "NFLX",
+      "thread_id": "trading-NFLX-p9-20260828-guardfix",
+      "as_of_date": "2026-08-28",
+      "started_at": "2026-08-30T01:00:25.122690+00:00",
+      "finished_at": "2026-08-30T01:10:01.393248+00:00",
+      "exit_code": 0,
+      "exit_status": "ok",
+      "error_repr": null,
+      "run_folder": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/NFLX/20260830/2026-0830-090025",
+      "memo_md_path": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/NFLX/20260830/2026-0830-090025/NFLX-decision.md",
+      "memo_verification_failed": false,
+      "total_usd": 0.240015,
+      "cost_ledger_gap_usd": 0.0,
+      "cache_read_ratio": 0.6758,
+      "wall_clock_s": 574.998,
+      "verdict": "hold",
+      "verdict_samples": [
+        "hold",
+        "hold",
+        "sell"
+      ],
+      "evidence_quality": 0.91,
+      "verdict_agreement": 0.67,
+      "data_as_of_date": "2026-08-28",
+      "n_data_gaps": 7
+    },
+    {
+      "ticker": "MSFT",
+      "thread_id": "trading-MSFT-p9-20260828-guardfix",
+      "as_of_date": "2026-08-28",
+      "started_at": "2026-08-30T01:10:01.399036+00:00",
+      "finished_at": "2026-08-30T01:18:01.453102+00:00",
+      "exit_code": 0,
+      "exit_status": "ok",
+      "error_repr": null,
+      "run_folder": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/MSFT/20260830/2026-0830-091002",
+      "memo_md_path": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/MSFT/20260830/2026-0830-091002/MSFT-decision.md",
+      "memo_verification_failed": false,
+      "total_usd": 0.243111,
+      "cost_ledger_gap_usd": 0.0,
+      "cache_read_ratio": 0.6791,
+      "wall_clock_s": 478.792,
+      "verdict": "hold",
+      "verdict_samples": [
+        "hold",
+        "hold",
+        "hold"
+      ],
+      "evidence_quality": 0.96,
+      "verdict_agreement": 1.0,
+      "data_as_of_date": "2026-08-28",
+      "n_data_gaps": 5
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "battery_id": "p9-20260828",
+  "as_of_date": "2026-08-28",
+  "git_sha": "f5cd094532d18894fc2ba31ac4b0d304f64261fc",
+  "git_dirty": false,
+  "model_ids": {
+    "LLM_CLAUDE_MODEL": "deepseek-v4-flash",
+    "LLM_ANSWER_MODEL": "deepseek-v4-flash",
+    "LLM_DECOMPOSER_MODEL": "deepseek-v4-flash",
+    "LLM_EXTRACTION_MODEL": "deepseek-v4-flash",
+    "TRADING_NEWS_DIGEST_MODEL": "deepseek-v4-flash",
+    "TRADING_TECHNICAL_MODEL": "deepseek-v4-flash",
+    "TRADING_DEBATE_MODEL": "deepseek-v4-flash",
+    "TRADING_RISK_MODEL": "deepseek-v4-flash",
+    "TRADING_RESEARCH_MANAGER_MODEL": "deepseek-v4-flash",
+    "TRADING_RISK_JUDGE_MODEL": "deepseek-v4-flash",
+    "OPENAI_MODEL": "gpt-4.1-nano",
+    "EMBEDDING_MODEL": "text-embedding-3-small"
+  },
+  "package_versions": {
+    "langgraph": "1.2.11",
+    "pandas-ta-classic": "0.6.52",
+    "anthropic": "0.122.0",
+    "pydantic": "2.9.0"
+  },
+  "max_usd": 1.4,
+  "wall_clock_timeout_s": 1800.0,
+  "runs": [
+    {
+      "ticker": "AVGO",
+      "thread_id": "trading-AVGO-p9-20260828-ds2",
+      "as_of_date": "2026-08-28",
+      "started_at": "2026-08-29T05:55:27.110578+00:00",
+      "finished_at": "2026-08-29T06:04:43.603338+00:00",
+      "exit_code": 0,
+      "exit_status": "ok",
+      "error_repr": null,
+      "run_folder": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/AVGO/20260829/2026-0829-135527",
+      "memo_md_path": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/AVGO/20260829/2026-0829-135527/AVGO-decision.md",
+      "memo_verification_failed": false,
+      "total_usd": 0.265604,
+      "cost_ledger_gap_usd": 0.0,
+      "cache_read_ratio": 0.6934,
+      "wall_clock_s": 555.233,
+      "verdict": "hold",
+      "verdict_samples": [
+        "hold",
+        "hold",
+        "hold"
+      ],
+      "confidence": 0.95,
+      "data_as_of_date": "2026-08-28",
+      "n_data_gaps": 5
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "battery_id": "p9-20260826",
+  "as_of_date": "2026-08-26",
+  "git_sha": "e1c876ac07b0d0b7a7fa9f845e265107e9874d3e",
+  "git_dirty": false,
+  "model_ids": {
+    "LLM_CLAUDE_MODEL": "claude-haiku-4-5-20251001",
+    "TRADING_RESEARCH_MANAGER_MODEL": "claude-haiku-4-5-20251001",
+    "TRADING_RISK_MODEL": "claude-haiku-4-5-20251001",
+    "RISK_MODEL": "claude-haiku-4-5-20251001",
+    "RISK_JUDGE_MODEL": "claude-haiku-4-5-20251001",
+    "OPENAI_MODEL": "gpt-4.1-nano",
+    "EMBEDDING_MODEL": "text-embedding-3-small"
+  },
+  "package_versions": {
+    "langgraph": "1.2.11",
+    "pandas-ta-classic": "0.6.52",
+    "anthropic": "0.122.0",
+    "pydantic": "2.9.0"
+  },
+  "max_usd": 1.4,
+  "wall_clock_timeout_s": 1800.0,
+  "runs": [
+    {
+      "ticker": "MSFT",
+      "thread_id": "trading-MSFT-p9-20260826-r3",
+      "as_of_date": "2026-08-26",
+      "started_at": "2026-08-27T23:01:33.939355+00:00",
+      "finished_at": "2026-08-27T23:13:38.968426+00:00",
+      "exit_code": 0,
+      "exit_status": "ok",
+      "error_repr": null,
+      "run_folder": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/MSFT/20260828/2026-0828-070134",
+      "memo_md_path": "~/Documents/Obsidian Vault/EDGAR-MEMO/memos/MSFT/20260828/2026-0828-070134/MSFT-decision.md",
+      "memo_verification_failed": false,
+      "total_usd": 1.037692,
+      "cost_ledger_gap_usd": 0.0,
+      "cache_read_ratio": 0.7371,
+      "wall_clock_s": 724.116,
+      "verdict": "hold",
+      "verdict_samples": [
+        "hold",
+        "hold",
+        "hold"
+      ],
+      "confidence": 0.88,
+      "data_as_of_date": "2026-08-26",
+      "n_data_gaps": 7
+    }
+  ]
+}
