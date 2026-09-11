@@ -1,6 +1,11 @@
 
-import asyncio
-from dataclasses import asdict
+# Entry point: .env first, before any app import reads its settings.
+from app.config import load_env
+
+load_env()
+
+import asyncio  # noqa: E402
+from dataclasses import asdict  # noqa: E402
 import json
 import logging
 import os
@@ -8,7 +13,6 @@ from datetime import date, datetime
 from pathlib import Path
 
 import typer
-from dotenv import load_dotenv
 
 from app.application.embedding_service import EmbeddingService
 from app.application.extraction_service import MetricsExtractor
@@ -31,7 +35,6 @@ from app.infrastructure.repositories.section_repo import SectionRepository
 from eval.extraction_report import serialize_extraction_result
 from eval.runner import serialize_result
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = typer.Typer()
@@ -120,9 +123,12 @@ def ingest_cmd(
     form_type: str = typer.Option("10-K", "--type"),
     limit: int = typer.Option(4, "--limit"),
     since_year: int | None = typer.Option(None, "--since"),
+    retry_failed: bool = typer.Option(
+        False, "--retry-failed", help="Re-run filings a previous ingest marked FAILED."
+    ),
 ):
     """Run the full ingestion pipeline for one ticker."""
-    asyncio.run(_ingest(ticker, form_type, limit, since_year))
+    asyncio.run(_ingest(ticker, form_type, limit, since_year, retry_failed))
 
 @app.command(name="corpus-status")
 def corpus_status_cmd(
@@ -349,7 +355,8 @@ def _print_per_filing(rows: list[FilingDetail]) -> None:
         )
 
 async def _ingest(
-    ticker: str, form_type: str, limit: int, since_year: int | None
+    ticker: str, form_type: str, limit: int, since_year: int | None,
+    retry_failed: bool = False,
 ) -> None:
     user_agent = os.environ["EDGAR_USER_AGENT"]
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -379,6 +386,7 @@ async def _ingest(
                 form_types=[form_type],
                 limit=limit,
                 since=since,
+                retry_failed=retry_failed,
             )
     finally:
         await close_pool()

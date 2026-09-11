@@ -175,18 +175,22 @@ def test_all_three_risk_nodes_carry_the_full_route_map():
 
 
 def test_the_post_risk_chain_is_still_linear():
-    """risk_close -> synthesizer is now GUARDED (Phase 8) — synthesizer is
-    an LLM-calling node, so its entry edge goes through the same
-    budget/deadline check every other LLM node's entry does. Only
-    synthesizer -> __end__ and graceful_abort -> __end__, where there is no
-    further LLM call to protect, stay plain edges."""
+    """risk_close -> synthesizer is GUARDED (Phase 8) — synthesizer is an
+    LLM-calling node, so its entry edge goes through the same budget/deadline
+    check every other LLM node's entry does. synthesizer's EXIT is
+    conditional too, but only on its own per-node spending cap
+    (NodeBudgetExceeded → node_budget_breach): a run-level breach caused by
+    the synthesizer's own spend happens after the memo exists and must not
+    relabel a delivered memo as aborted. graceful_abort -> __end__ stays a
+    plain edge."""
     graph = build_trading_graph(InMemorySaver()).get_graph()
     linear = {(e.source, e.target) for e in graph.edges if not e.conditional}
     conditional = {(e.source, e.target) for e in graph.edges if e.conditional}
 
     assert ("risk_close", "synthesizer") in conditional
     assert ("risk_close", "graceful_abort") in conditional
-    assert ("synthesizer", "__end__") in linear
+    assert ("synthesizer", "__end__") in conditional
+    assert ("synthesizer", "graceful_abort") in conditional
     assert ("graceful_abort", "__end__") in linear
     # and debate_close -> risk is NOT linear — it's the risk panel's
     # conditional entry edge, asserted above

@@ -15,6 +15,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.domain.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
+from app.application.number_matching import value_in_text, value_spans
 
 
 # Base URL of your running FastAPI server. Override when you wire step 2.
@@ -340,9 +341,11 @@ def _strictify(schema: dict) -> dict:
     recovered tool call still costs a turn against LOOP_MAX_TURNS — which
     the priciest runs already exhaust.
 
-    An optional property becomes `["<type>", "null"]`, and the dispatch
-    code reads those through `.get()`, so an explicit null behaves exactly
-    as the previously-absent key did.
+    An optional property becomes `["<type>", "null"]`, so a model that
+    leaves one unset sends an explicit null rather than omitting the key.
+    Dispatch code must read optional arguments as `inputs.get(k) or default`:
+    `inputs.get(k, default)` returns the None, not the default, and that is
+    how `ingest_ticker` came to send `limit: null` to /ingest.
     """
     if schema.get("type") != "object":
         return schema
@@ -560,7 +563,11 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
     # STEP 2: real HTTP calls. Un-stub by setting USE_STUBS = False and
     # confirming each endpoint below matches your FastAPI routes.
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
+    # The server's optional shared secret (see main.require_api_key). Sent
+    # only when configured, so an unauthenticated local server is unchanged.
+    api_key = os.getenv("APP_API_KEY")
+    headers = {"X-API-Key": api_key} if api_key else {}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as http:
         if name == "check_corpus":
             # STEP 2: confirm this route/param exists, or add it to main.py
             resp = await http.get(
@@ -572,8 +579,12 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return resp.text
 
         if name == "ingest_ticker":
-            payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit", 3)}
-            if "form_type" in inputs:
+            # `or`, not `.get(key, default)`: strict tool calling makes every
+            # optional argument required-but-nullable, so a model that leaves
+            # `limit` unset sends `"limit": null`. `.get("limit", 3)` returned
+            # None for that, and /ingest's `limit: int` rejected it with a 422.
+            payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit") or 3}
+            if inputs.get("form_type"):
                 payload["form_type"] = inputs["form_type"]
             resp = await http.post(f"{API_BASE}/ingest", json=payload)
             if resp.status_code != 200:
@@ -956,25 +967,13 @@ def _provenance_corpus() -> str:
 # Number matching — a tool returns "€11,384.0 million"; calculate gets 11384.0
 # ---------------------------------------------------------------------------
  
-def _variants(value: float) -> set[str]:
-    """String forms a tool output might use for this value."""
-    out: set[str] = set()
-    if value == int(value):
-        n = int(value)
-        out.update({str(n), f"{n:,}"})
-        # a tool may render a whole number with one decimal
-        out.update({f"{n}.0", f"{n:,}.0"})
-    else:
-        out.update({
-            f"{value}", f"{value:,}",
-            f"{value:.1f}", f"{value:,.1f}",
-            f"{value:.2f}", f"{value:,.2f}",
-        })
-    return out
- 
- 
 def _appears_in_output(value: float, corpus: str) -> bool:
-    return any(v in corpus for v in _variants(value))
+    """Token-anchored (app/application/number_matching.py). This was a
+    substring search, so a declared input counted as "retrieved" whenever its
+    digits sat inside any larger number — every two-digit integer inside a
+    year ("12" in "2012"), "7.4" inside "17.45". The memo verifier had
+    already been moved off that rule for the same reason; this check had not."""
+    return value_in_text(value, corpus)
 
 
 # ---------------------------------------------------------------------------
@@ -995,17 +994,9 @@ def _fiscal_year(fiscal_period: str) -> str | None:
 
 
 def _occurrence_spans(value: float, text: str) -> list[tuple[int, int]]:
-    """Every (start, end) span where some string form of `value` occurs."""
-    spans: list[tuple[int, int]] = []
-    for v in _variants(value):
-        start = 0
-        while True:
-            idx = text.find(v, start)
-            if idx == -1:
-                break
-            spans.append((idx, idx + len(v)))
-            start = idx + len(v)
-    return spans
+    """Every (start, end) span of a numeric token in `text` that `value`
+    matches — the same token-anchored rule as `_appears_in_output`."""
+    return value_spans(value, text)
 
 
 def _year_near_any_occurrence(value: float, year: str, outputs: list[str]) -> bool:

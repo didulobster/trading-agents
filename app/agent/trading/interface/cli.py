@@ -1,10 +1,17 @@
+if __name__ == "__main__":
+    # Entry point: .env first, before the imports below read their settings.
+    # Imported for its helpers (tests), it loads nothing. See app/config.py.
+    from app.config import load_env
+
+    load_env()
+
 import argparse
 import asyncio
 import json
 import sys
 from datetime import date
 
-from app.agent.researcher import vault_run
+from app.agent.researcher import _ticker_arg, vault_run
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
 from app.agent.trading.infrastructure.run_log import capture_terminal_log
@@ -183,7 +190,7 @@ async def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the trading pipeline for a single ticker")
-    parser.add_argument("ticker")
+    parser.add_argument("ticker", type=_ticker_arg)
     parser.add_argument("--thread-id", default=None)
     parser.add_argument(
         "--as-of",
