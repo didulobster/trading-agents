@@ -4,12 +4,22 @@ Deliberately calls the same path as `python -m app.agent.researcher TICKER`
 """
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-from app.agent.researcher import AGENT_MODEL, _save_output, log_cost, run_agent
+from app.agent.researcher import (
+    AGENT_MODEL,
+    StopCheck,
+    UsageSummary,
+    _compute_cost,
+    _save_output,
+    log_cost,
+    run_agent,
+)
 from app.agent.tools import get_delegated_usage
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT
+from app.agent.trading.application.guards import check_run_guards
+from app.agent.trading.domain.budget import CostEvent, RunBudget
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 
@@ -21,8 +31,64 @@ def _cache_path(ticker: str) -> Path:
     return _CACHE_DIR / f"{ticker.upper()}.json"
 
 
+def _spend_so_far(usage: UsageSummary) -> float:
+    """The agent loop's own spend plus what its tools spent server-side so
+    far, each priced at the model that spent it (a server that did not name
+    its model is priced at the agent's, as the final accounting does)."""
+    total = _compute_cost(usage, AGENT_MODEL) or 0.0
+    for model, tool_usage in get_delegated_usage().items():
+        total += _compute_cost(tool_usage, model or AGENT_MODEL) or 0.0
+    return total
+
+
+def budget_stop_check(
+    budget: RunBudget | None, prior_events: list[CostEvent] | None = None
+) -> StopCheck | None:
+    """A `run_agent` stop check that applies the run's budget and deadline
+    INSIDE the fundamentals node.
+
+    The graph checks `check_run_guards` only on its edges, and this node is
+    one edge's worth of work: up to LOOP_MAX_TURNS model calls plus up to 30
+    ask_edgar/extract_metrics calls, each with its own server-side LLM
+    calls. Built on `check_run_guards` itself, over the run's earlier events
+    plus one in-flight event for this loop, so a breach here means exactly
+    what a breach on an edge means. None when the run has no budget (tests
+    and the standalone research CLI), which keeps the loop unguarded as
+    before.
+    """
+    if budget is None:
+        return None
+    prior = list(prior_events or [])
+
+    def check(usage: UsageSummary) -> str | None:
+        spent = _spend_so_far(usage)
+        in_flight = CostEvent(
+            event_id="fundamentals:in-flight",
+            node="fundamentals",
+            model=AGENT_MODEL,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_creation_input_tokens=usage.cache_write_tokens,
+            cache_read_input_tokens=usage.cache_read_tokens,
+            usd=spent,
+        )
+        termination = check_run_guards([*prior, in_flight], budget, datetime.now(timezone.utc))
+        if termination is None:
+            return None
+        return (
+            f"{termination.value}: ~${spent:.4f} spent in this node against a "
+            f"${budget.max_usd:.2f} run budget, deadline {budget.deadline_utc.isoformat()}"
+        )
+
+    return check
+
+
 async def get_fundamentals_report(
-    ticker: str, run_id: str | None = None
+    ticker: str,
+    run_id: str | None = None,
+    *,
+    budget: RunBudget | None = None,
+    prior_events: list[CostEvent] | None = None,
 ) -> FundamentalsReport:
     cached = _cache_path(ticker)
 
@@ -34,7 +100,9 @@ async def get_fundamentals_report(
 
     today = date.today()
     task = f"Today's date is {today.isoformat()}. Run the full research checklist for {ticker}."
-    result, usage = await run_agent(task, ANALYST_SYSTEM_PROMPT)
+    result, usage = await run_agent(
+        task, ANALYST_SYSTEM_PROMPT, stop_check=budget_stop_check(budget, prior_events)
+    )
 
     event_id = new_event_id("fundamentals")
     cost = log_cost(ticker, "trading-fundamentals", usage, run_id=run_id, event_id=event_id)

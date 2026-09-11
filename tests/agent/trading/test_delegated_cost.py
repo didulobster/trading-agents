@@ -137,7 +137,7 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
     from app.agent.researcher import UsageSummary, _compute_cost
     from app.agent.trading.infrastructure import fundamentals_port as port
 
-    async def fake_run_agent(task, system_prompt):
+    async def fake_run_agent(task, system_prompt, **_):
         return "# memo", UsageSummary()
 
     logged = []
@@ -171,7 +171,7 @@ async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
     from app.agent.researcher import UsageSummary
     from app.agent.trading.infrastructure import fundamentals_port as port
 
-    async def fake_run_agent(task, system_prompt):
+    async def fake_run_agent(task, system_prompt, **_):
         return "# memo", UsageSummary()
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
