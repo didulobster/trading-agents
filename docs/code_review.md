@@ -277,16 +277,18 @@ Full runs take 350–920 s against an 1800 s deadline (cost has ample headroom; 
 All three High PRs merged together pass 750 tests (1 skipped).
 
 ### Medium
-- [ ] #4 Validate the ticker at every entry point; restrict CORS; shared-secret header on endpoints that spend money; bind Postgres to 127.0.0.1
-- [ ] #5 Table-aware chunking (repeat table title and header row); give the F-pages block its own section; re-chunk ACN; compare eval results
-- [ ] #6 One shared number-matching module (token-anchored); point the `calculate` checks at it
-- [ ] #7 `--retry-failed` through the domain state machine; idempotent `_chunk`; unique index on `(section_id, chunk_index)`; one transaction per filing
-- [ ] #8 Drop a synthesis sample on any exception and keep its cost; per-port budget breach becomes a graceful abort
-- [ ] #9 Read optional tool arguments as `inputs.get(k) or default`; honour or remove the `extract_metrics` date bounds; fix the stale comment
-- [ ] #10 Write a `run_summary` for resumed runs
-- [ ] #11 `RunContext` object instead of module globals; reject overlapping agent runs in the server until then
-- [ ] #12 One `load_dotenv` per entry point; settings validated at startup; wire or remove `EMBEDDING_MODEL`/`OPENAI_MODEL`; fix `model_for` and the "7-item" note
-- [ ] #13 Gather same-turn tool calls, synthesis samples and sub-query retrievals; build clients once at startup
+- [x] #4 Validate the ticker at every entry point; restrict CORS; shared-secret header on endpoints that spend money; bind Postgres to 127.0.0.1 — **PR #87, merged.** The vault writer's check was lost when #92 landed on top of it; restored in PR #95
+- [x] #5 Table-aware chunking (repeat table title and header row); give the F-pages block its own section — **PR #94, open.** Tables render one row per line; an oversized table splits on row boundaries with its caption, units line and column headings repeated on every piece; the audited statements get their own `Item 8` section (they were filed under `Item 16 / Form 10-K Summary` and the like in 9 of 16 annual filings). 7 of 44 cached filings change, none loses a section
+- [x] #6 One shared number-matching module (token-anchored); point the `calculate` checks at it — **PR #91, merged**
+- [x] #7 `--retry-failed` through the domain state machine; idempotent `_chunk`; unique index on `(section_id, chunk_index)`; one transaction per filing — **PR #89, merged.** Needs `uv run alembic upgrade head`
+- [x] #8 Drop a synthesis sample on any exception and keep its cost; per-port budget breach becomes a graceful abort — **PR #88, merged**
+- [x] #9 Read optional tool arguments as `inputs.get(k) or default`; honour or remove the `extract_metrics` date bounds; fix the stale comment — **PR #86, merged**
+- [x] #10 Write a `run_summary` for resumed runs — **PR #85, merged**
+- [x] #11 `RunContext` object instead of module globals; reject overlapping agent runs in the server until then — **PR #92, merged.** Per-run state moved into ContextVars, so overlapping runs no longer need rejecting
+- [x] #12 One `load_dotenv` per entry point; settings validated at startup; wire or remove `EMBEDDING_MODEL`/`OPENAI_MODEL`; fix `model_for` and the "7-item" note — **PR #90, merged**
+- [x] #13 Gather same-turn tool calls, synthesis samples and sub-query retrievals; build clients once at startup — **PR #93, merged.** Tool calls run in waves and clients are built once; parallelising the synthesizer's verdict samples is still open
+
+**Left open by the Medium pass:** re-chunk and re-embed the corpus once #94 merges — nothing in the database changes until the affected filings are re-ingested; run the synthesizer's verdict samples concurrently; give `ask_edgar` a filing-type and date filter; run `/trading/analyze` in the background behind a job id.
 
 ### Low
 - [ ] Delete the dead PDF-pipeline modules, `app/__init__.pyc` (add `*.pyc` to `.gitignore`) and unused symbols
