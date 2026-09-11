@@ -7,7 +7,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 
-from app.domain.token_usage import USAGE_HEADER, TokenUsage
+from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 from pydantic import BaseModel, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.trading.domain.decision_memo import DecisionMemo
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.graph import build_trading_graph
+from app.agent.trading.interface.runner import (
+    DEFAULT_MAX_USD,
+    DEFAULT_WALL_CLOCK_TIMEOUT_S,
+    default_thread_id,
+    save_vault_artifacts,
+    start_or_resume,
+)
+from app.agent.researcher import vault_run
 from app.application.citations import format_citation_tag
 from app.application.citation_verifier import verify_answer
 from app.application.embedding_service import EmbeddingService
@@ -82,6 +90,9 @@ class RetrievedChunkResponse(BaseModel):
     citation: str
     section_path: list[str]
     similarity: float
+    # Cosine similarity when the vector search found the chunk; None when only
+    # the keyword search did. `similarity` is the fused ranking score.
+    vector_similarity: float | None = None
     ticker: str
     filing_type: str
     filed_date: date
@@ -141,7 +152,7 @@ class LatestFilingsRequest(BaseModel):
     periodic_only: bool = True
 
 # ---- Endpoint ----
-def _report_usage(response: Response, *usages: TokenUsage) -> None:
+def _report_usage(response: Response, *usages: tuple[str, TokenUsage]) -> None:
     """Tell the caller what this request spent, in a header.
 
     A header and not a body field: the research agent copies tool-result
@@ -154,11 +165,11 @@ def _report_usage(response: Response, *usages: TokenUsage) -> None:
     The caller does the logging, not this server: only it knows the run_id,
     and only its TradingState feeds `check_run_guards`. See
     domain/token_usage.py.
+
+    Each usage is paired with the model that spent it, so the caller can
+    price it at that model's rate rather than its own.
     """
-    total = TokenUsage()
-    for usage in usages:
-        total = total + usage
-    response.headers[USAGE_HEADER] = total.model_dump_json()
+    response.headers[USAGE_HEADER] = encode_usage_header(usages)
 
 
 @app.post("/ask",  response_model=AskResponse)
@@ -189,7 +200,9 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
         chunks=chunks,
         model=claude_model)
     # BOTH calls: the decomposer's rewrite is billed just like the answer.
-    _report_usage(response, result.usage, decomposition.usage)
+    _report_usage(
+        response, (claude_model, result.usage), (decomposer.model, decomposition.usage)
+    )
 
     report = verify_answer(
         result.answer,
@@ -206,6 +219,7 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
                 citation=format_citation_tag(c),
                 section_path=c.chunk.section_path,
                 similarity=c.similarity,
+                vector_similarity=c.vector_similarity,
                 ticker=c.chunk.ticker,
                 filing_type=c.chunk.filing_type,
                 filed_date=c.chunk.filed_date,
@@ -239,7 +253,7 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     # only the extraction call is reported. Under-reporting by the
     # decomposer's share is the conservative direction and is noted rather
     # than silently accepted -- see trading-agent-known-gaps.md.
-    _report_usage(response, extractor.last_usage)
+    _report_usage(response, (extractor.llm_model, extractor.last_usage))
     from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
     row = MetricsRow(
         ticker=req.ticker,
@@ -400,38 +414,57 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
 class TradingAnalysisRequest(BaseModel):
     ticker: str
     thread_id: str | None = None
+    # Same defaults as the CLI. `as_of_date` falls back to today HERE, at the
+    # boundary — never inside a node (see TradingState.as_of_date). All three
+    # apply only to a NEW run: a resume inherits its checkpoint's values.
+    as_of_date: date | None = None
+    max_usd: float = Field(DEFAULT_MAX_USD, gt=0)
+    wall_clock_timeout_s: float = Field(DEFAULT_WALL_CLOCK_TIMEOUT_S, gt=0)
 
 class TradingAnalysisResponse(BaseModel):
     ticker: str
     thread_id: str
     status: Literal["completed", "resumed", "started"]
-    decision_memo: DecisionMemo
+    # None when the run-level budget or deadline guard stopped the run before
+    # synthesis; `run_terminated_by` then says which one.
+    decision_memo: DecisionMemo | None = None
+    run_terminated_by: str | None = None
 
 
 @app.post("/trading/analyze", response_model=TradingAnalysisResponse)
 async def trading_analyze(req: TradingAnalysisRequest) -> TradingAnalysisResponse:
+    """Run the trading pipeline for one ticker, exactly as the CLI does.
+
+    Blocks for the whole run (minutes). The run lifecycle — initial state,
+    budget, recursion limit, stale-resume refusal, run summary, vault
+    artifacts — is `interface.runner`'s, shared with the CLI, so the two
+    entry points cannot drift apart again.
+    """
     if not req.ticker.strip():
         raise HTTPException(400, "ticker must not be empty")
 
     ticker = req.ticker.strip().upper()
-    thread_id = req.thread_id or f"trading-{ticker}"
+    thread_id = req.thread_id or default_thread_id(ticker)
+    as_of = req.as_of_date or date.today()
     graph = app.state.trading_graph
-    config = {"configurable": {"thread_id": thread_id}}
-    state = await graph.aget_state(config)
 
-    if state.values and not state.next:
-        status: Literal["completed", "resumed", "started"] = "completed"
-        result = state.values
-    elif state.next:
-        status = "resumed"
-        result = await graph.ainvoke(None, config=config)
-    else:
-        status = "started"
-        result = await graph.ainvoke({"ticker": ticker}, config=config)
+    with vault_run():
+        outcome = await start_or_resume(
+            graph, ticker, thread_id, as_of,
+            max_usd=req.max_usd, wall_clock_timeout_s=req.wall_clock_timeout_s,
+        )
+        if outcome.status == "refused":
+            raise HTTPException(409, outcome.refusal)
+        # No terminal capture in a server process — it would interleave every
+        # concurrent request's output — so the artifacts carry no run log.
+        save_vault_artifacts(outcome.result, run_log="")
 
+    result = outcome.result
+    terminated_by = result.get("run_terminated_by")
     return TradingAnalysisResponse(
         ticker=ticker,
         thread_id=thread_id,
-        status=status,
-        decision_memo=result["decision_memo"],
+        status=outcome.status,
+        decision_memo=result.get("decision_memo"),
+        run_terminated_by=terminated_by.value if terminated_by else None,
     )

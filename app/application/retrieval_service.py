@@ -202,6 +202,9 @@ class RetrievalService:
             RetrievedChunk(
                 chunk=chunk_map[cid].chunk,
                 similarity=score,  # RRF score, not cosine similarity
+                # Carried through from the vector side (None if only BM25
+                # found it) — see RetrievedChunk.
+                vector_similarity=chunk_map[cid].vector_similarity,
             )
             for cid, score in ranked
         ]

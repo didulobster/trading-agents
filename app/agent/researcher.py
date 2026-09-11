@@ -25,6 +25,7 @@ import logging
 import os
 from pathlib import Path
 import sys
+from typing import Callable
 import yaml
 
 from dotenv import load_dotenv
@@ -410,11 +411,33 @@ def _strip_preamble(text: str) -> str:
     return text
 
 
-async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSummary]:
+StopCheck = Callable[[UsageSummary], "str | None"]
+
+
+def _stop_reason(stop_check: StopCheck | None, usage: UsageSummary) -> str | None:
+    return stop_check(usage) if stop_check is not None else None
+
+
+async def run_agent(
+    user_task: str,
+    system_prompt: str,
+    *,
+    stop_check: StopCheck | None = None,
+) -> tuple[str, UsageSummary]:
     """
     Run the agent loop: send task, process tool calls, return final text
     and accumulated token usage.
     Tool traces go to stderr; only the final output goes to stdout.
+
+    `stop_check`, when given, is asked before every model turn and every
+    tool call whether the run may keep spending; a non-None answer is the
+    reason it may not. The graph's budget and deadline guard only runs
+    BETWEEN nodes, and this loop — up to MAX_TURNS model calls plus every
+    server-side call its tools make — is one node, so without this the
+    guard could not see any of it until the loop ended. A stop ends the
+    loop the way MAX_TURNS does: one final call writes the memo from what
+    was gathered, so the run keeps its fundamentals artifact and overshoots
+    by that one call, the same bound the edge guard documents.
     """
     reset_run_provenance()
     client = get_client(AGENT_MODEL)
@@ -436,8 +459,12 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         ),
     }]
     usage = UsageSummary()
+    stopped_by: str | None = None
 
     for turn in range(MAX_TURNS):
+        stopped_by = _stop_reason(stop_check, usage)
+        if stopped_by:
+            break
         _trace(f"\n--- turn {turn + 1} ---")
         _roll_cache_breakpoint(messages)
         response = await client.messages.create(
@@ -528,7 +555,20 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                result = await execute_tool(block.name, block.input)
+                # Asked per call, not per turn: one turn can carry several
+                # tool calls, and each ask_edgar runs its own LLM calls
+                # server-side. Every tool_use still needs a tool_result, so
+                # a refused call answers with the reason instead.
+                refused = _stop_reason(stop_check, usage)
+                if refused:
+                    result = (
+                        f"RUN BUDGET REACHED: {refused}. This tool call was not "
+                        f"made. Write the memo from what you have already "
+                        f"gathered, and record anything incomplete under Data Gaps."
+                    )
+                    _trace(f"  [tool refused] {block.name}: {refused}")
+                else:
+                    result = await execute_tool(block.name, block.input)
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -560,16 +600,24 @@ async def run_agent(user_task: str, system_prompt: str) -> tuple[str, UsageSumma
         messages.append({"role": "user", "content": content})
 
     # Budget exhausted — force a memo from whatever was gathered.
-    _trace("\n[MAX_TURNS reached — forcing memo from gathered data]")
-    messages.append({
-        "role": "user",
-        "content": (
+    if stopped_by:
+        _trace(f"\n[run budget reached ({stopped_by}) — forcing memo from gathered data]")
+        budget_note = (
+            f"The run's spending or time budget has been reached ({stopped_by}). "
+            f"Write the memo now using only data you have already retrieved. "
+            f"For any checklist item you could not complete, list it under "
+            f"Data Gaps and note that the run budget was reached. Do not call "
+            f"any more tools."
+        )
+    else:
+        _trace("\n[MAX_TURNS reached — forcing memo from gathered data]")
+        budget_note = (
             "You have exhausted your tool-call budget. Write the memo now "
             "using only data you have already retrieved. For any checklist "
             "item you could not complete, list it under Data Gaps and note "
             "that the tool budget was exhausted. Do not call any more tools."
-        ),
-    })
+        )
+    messages.append({"role": "user", "content": budget_note})
     response = await client.messages.create(
         model=AGENT_MODEL,
         max_tokens=AGENT_MAX_TOKENS,

@@ -93,7 +93,14 @@ async def graceful_abort_node(state: TradingState) -> dict:
 
 async def fundamentals_node(state: TradingState) -> dict:
     print(f"[fundamentals] running for {state['ticker']}")
-    report = await get_fundamentals_report(state["ticker"], run_id=state.get("run_id"))
+    # The budget and the run's earlier spend go in so the agent loop can stop
+    # itself: the edge guard around this node cannot see inside it.
+    report = await get_fundamentals_report(
+        state["ticker"],
+        run_id=state.get("run_id"),
+        budget=state.get("budget"),
+        prior_events=state.get("cost_events") or [],
+    )
     # cost_event is None on a cache hit — nothing was spent this run. report
     # itself can be None too (a test double simulating "analyst did not
     # run"; the real port never returns None).
@@ -102,7 +109,7 @@ async def fundamentals_node(state: TradingState) -> dict:
     # exceed its budget without `check_run_guards` ever seeing it.
     events = []
     if report:
-        events = [e for e in (report.cost_event, report.tool_cost_event) if e]
+        events = [e for e in (report.cost_event, *report.tool_cost_events) if e]
     return {"fundamentals_report": report, "cost_events": events}
 
 
@@ -647,7 +654,26 @@ async def synthesizer_node(state: TradingState) -> dict:
     # run_synthesis, which uses it for BOTH the Research Manager and the
     # Risk Judge, and those read two different model env vars.
     client = get_client()
+    # Checked before each EXTRA sample. Samples 2 and 3 each run a fresh
+    # 9-turn risk panel plus the Research Manager and Risk Judge, all inside
+    # this one node, where the edge guard cannot see them. The first sample
+    # needs no check: the guard on the edge into this node just ran.
+    budget = state.get("budget")
+    budget_stop = None
     for i in range(RISK_VERDICT_SAMPLES):
+        if i > 0 and budget is not None:
+            budget_stop = check_run_guards(
+                [*(state.get("cost_events") or []), *all_cost_events],
+                budget,
+                datetime.now(timezone.utc),
+            )
+            if budget_stop is not None:
+                print(
+                    f"[synthesizer] {budget_stop.value} before sample {i + 1}/"
+                    f"{RISK_VERDICT_SAMPLES} — skipping the remaining sample(s)"
+                )
+                skipped = RISK_VERDICT_SAMPLES - i
+                break
         if i == 0:
             # The first trial reuses the graph-checkpointed panel already in
             # `state`/`ledger` rather than sampling a fresh one — same as
@@ -684,6 +710,12 @@ async def synthesizer_node(state: TradingState) -> dict:
         # EVERY one of RISK_VERDICT_SAMPLES trials to trip the guard, at a
         # measured ~1-in-8 per-call rate, and the run already fails outright
         # in this case regardless of Phase 8.
+        if budget_stop is not None:
+            raise SynthesisFabricationError(
+                f"no risk-verdict sample for {state['ticker']} survived — "
+                f"{len(dropped)} dropped by the citation/fabrication guard, the "
+                f"rest skipped on {budget_stop.value} — no memo produced: {dropped}"
+            )
         raise SynthesisFabricationError(
             f"all {RISK_VERDICT_SAMPLES} risk-verdict samples for {state['ticker']} "
             f"were dropped by the citation/fabrication guard — no memo produced: {dropped}"
@@ -720,6 +752,13 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"dropped by the citation/fabrication guard before voting (untrustworthy "
             f"output, not counted) — this verdict reflects only the surviving "
             f"{len(memos)} sample(s), a weaker signal than a full {RISK_VERDICT_SAMPLES}-way vote"
+        )
+    if budget_stop is not None:
+        extra_gaps.append(
+            f"{skipped} of {RISK_VERDICT_SAMPLES} risk-verdict sample(s) were skipped "
+            f"because the run's {budget_stop.value.replace('_', ' ')} was reached — "
+            f"this verdict reflects only {len(memos)} sample(s), a weaker signal "
+            f"than a full {RISK_VERDICT_SAMPLES}-way vote"
         )
 
     final = final.model_copy(update={

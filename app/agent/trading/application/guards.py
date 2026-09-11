@@ -28,11 +28,19 @@ from app.agent.trading.domain.budget import CostEvent, RunBudget, RunTermination
 def check_run_guards(
     events: list[CostEvent], budget: RunBudget, now: datetime
 ) -> RunTermination | None:
-    """Checked before every LLM-calling node (see graph.py's `guarded()`).
+    """Checked before every LLM-calling node (see graph.py's `guarded()`),
+    and — because an edge check cannot see inside a node — also from inside
+    the two nodes that make many calls: the fundamentals agent loop (per
+    model turn and per tool call, via `fundamentals_port.budget_stop_check`)
+    and the synthesizer (before each extra verdict sample).
 
-    Ordering means a run can overshoot `max_usd` by at most one call's
-    cost — the check runs BEFORE the next call, not after, so it cannot see
-    that call's spend coming. Pre-call token estimation would close that gap
+    Ordering means a run can overshoot `max_usd` by about one call's cost —
+    the check runs BEFORE the next call, not after, so it cannot see that
+    call's spend coming. For the fundamentals loop "one call" is the forced
+    memo turn after a stop, plus whatever a tool call already in flight
+    spends server-side. Until the in-node checks existed, the edge check
+    alone let the fundamentals node spend its whole loop — dozens of
+    calls — unseen. Pre-call token estimation would close that gap
     only by guessing, which is a worse failure mode than a small, bounded
     overshoot: `max_usd` is set below any real pain threshold precisely to
     absorb it. This is the direct fix for the failure mode a ledger checked
