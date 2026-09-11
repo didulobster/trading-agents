@@ -1,6 +1,11 @@
 
-import asyncio
-from dataclasses import asdict
+# Entry point: .env first, before any app import reads its settings.
+from app.config import load_env
+
+load_env()
+
+import asyncio  # noqa: E402
+from dataclasses import asdict  # noqa: E402
 import json
 import logging
 import os
@@ -8,7 +13,6 @@ from datetime import date, datetime
 from pathlib import Path
 
 import typer
-from dotenv import load_dotenv
 
 from app.application.embedding_service import EmbeddingService
 from app.application.extraction_service import MetricsExtractor
@@ -31,7 +35,6 @@ from app.infrastructure.repositories.section_repo import SectionRepository
 from eval.extraction_report import serialize_extraction_result
 from eval.runner import serialize_result
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = typer.Typer()

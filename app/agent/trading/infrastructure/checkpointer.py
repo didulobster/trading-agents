@@ -1,9 +1,5 @@
 import os
 
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
-
 # Best-effort only, and deliberately placed above the langgraph imports:
 # langgraph.checkpoint.serde._msgpack freezes STRICT_MSGPACK_ENABLED into a
 # module-level constant at import time, so setting this afterwards does

@@ -1,10 +1,15 @@
-from contextlib import asynccontextmanager
+# Entry point (uvicorn app.main:app): .env first, before any app import reads
+# its settings. See app/config.py.
+from app.config import load_env
+
+load_env()
+
+from contextlib import asynccontextmanager  # noqa: E402
 from dataclasses import asdict
 import logging
 import os
 from pathlib import Path
 from typing import Literal
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
 
 from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
@@ -51,7 +56,6 @@ from app.infrastructure.repositories.metrics_repo import MetricsRepository
 from app.llm import answer_question
 
 
-load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
 claude_model = model_for("answer")
 
