@@ -128,6 +128,18 @@ def _run_summary(run_id: str) -> dict | None:
     return found
 
 
+def _quality_and_agreement(memo: dict) -> tuple[float | None, float | None]:
+    """(evidence_quality score, verdict agreement) from a raw memo dict.
+
+    Falls back to the pre-2026-08-29 `confidence` key so memos already in the
+    vault still read — the batteries this gate scores were run before the
+    rename, and a manifest rebuilt from them must not silently report None.
+    """
+    quality = memo.get("evidence_quality")
+    if isinstance(quality, dict):
+        return quality.get("score"), memo.get("verdict_agreement")
+    return memo.get("confidence"), memo.get("verdict_agreement")
+
 def _memo_from_vault(folder: Path, ticker: str) -> tuple[Path | None, dict | None, bool]:
     """Returns (path, memo, verification_failed).
 
@@ -201,13 +213,14 @@ def run_one(ticker: str, thread_id: str, as_of: date, out_dir: Path,
         if memo is not None:
             record.verdict = memo.get("verdict")
             record.verdict_samples = memo.get("verdict_samples") or []
-            record.confidence = memo.get("confidence")
+            record.evidence_quality, record.verdict_agreement = _quality_and_agreement(memo)
             record.data_as_of_date = memo.get("data_as_of_date")
             record.n_data_gaps = len(memo.get("data_gaps") or [])
 
     print(
         f"--- {ticker}: exit={record.exit_code} status={record.exit_status} "
-        f"verdict={record.verdict} conf={record.confidence} "
+        f"verdict={record.verdict} quality={record.evidence_quality} "
+        f"agreement={record.verdict_agreement} "
         f"usd={record.total_usd} wall={record.wall_clock_s}s",
         flush=True,
     )

@@ -63,7 +63,8 @@ class RunRecord(BaseModel):
     # battery already did once.
     verdict: str | None = None
     verdict_samples: list[str] = Field(default_factory=list)
-    confidence: float | None = None
+    evidence_quality: float | None = None
+    verdict_agreement: float | None = None
     data_as_of_date: date | None = None
     n_data_gaps: int | None = None
 

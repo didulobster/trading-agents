@@ -32,6 +32,7 @@ connection_kwargs = {"autocommit": True, "prepare_threshold": 0}
 ALLOWED_MSGPACK_MODULES = [
     ("app.agent.trading.domain.decision_memo", "Verdict"),
     ("app.agent.trading.domain.decision_memo", "DecisionMemo"),
+    ("app.agent.trading.domain.decision_memo", "EvidenceQuality"),
     ("app.agent.trading.domain.fundamentals_report", "FundamentalsReport"),
     ("app.agent.trading.domain.technical_report", "TechnicalReport"),
     ("app.agent.trading.domain.technical_report", "TechnicalIndicators"),

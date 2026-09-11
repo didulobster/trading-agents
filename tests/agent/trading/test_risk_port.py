@@ -463,3 +463,19 @@ async def test_system_prompt_is_identical_across_phases_for_the_same_persona():
     # not silently dropped in the move.
     assert "THIS TURN: enumerate" in client.messages.calls[0]["messages"][0]["content"]
     assert "THIS TURN: you are the neutral moderator" in client.messages.calls[1]["messages"][0]["content"]
+
+
+def test_a_verbatim_label_on_a_risk_factor_quote_is_stripped_too():
+    """The panel's `evidence_quote` is checked by the same `_norm`
+    containment as a debate claim, so it is reachable by the same
+    model-written label — see domain/debate.py's `_QUOTE_LABEL`."""
+    factor = RiskFactor(
+        factor_id="RF00",
+        text="x",
+        trigger="closes below 100",
+        horizon="weeks",
+        evidence_ref="fundamentals",
+        evidence_quote="Verbatim: operating margin of 34.1%",
+    )
+
+    assert factor.evidence_quote == "operating margin of 34.1%"

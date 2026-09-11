@@ -13,7 +13,10 @@ from datetime import date, datetime, timezone
 from app.infrastructure.llm import get_client
 
 from app.agent.trading.application.guards import check_run_guards
-from app.agent.trading.application.risk_ledger import build_risk_ledger
+from app.agent.trading.application.risk_ledger import (
+    build_risk_ledger,
+    unexpected_missing_scores,
+)
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.decision_memo import Verdict
 from app.agent.trading.domain.news_digest import (
@@ -35,6 +38,7 @@ from app.agent.trading.infrastructure.synthesis_port import (
     SynthesisFabricationError,
     SynthesisReferenceError,
     run_synthesis,
+    verdict_agreement,
     verify_decision_memo,
 )
 from app.agent.trading.infrastructure.decision_memo_port import (
@@ -366,6 +370,25 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             + (f" (+{len(flagged) - 5} more)" if len(flagged) > 5 else "")
         )
 
+    unresolved = [u for t in turns for u in t.unresolved_flags]
+    if unresolved:
+        gaps.append(
+            f"{len(unresolved)} turn(s) in the debate pointed at something not in "
+            f"the transcript: {', '.join(unresolved[:5])}"
+            + (f" (+{len(unresolved) - 5} more)" if len(unresolved) > 5 else "")
+        )
+
+    # Listed in full rather than counted: "3 sentence(s) contradicted their
+    # figures" tells a reader nothing they can act on, and the finding is
+    # short enough to print.
+    directions = [d for t in turns for d in t.direction_flags]
+    if directions:
+        gaps.append(
+            f"{len(directions)} sentence(s) in the debate state a direction the "
+            f"cited figures contradict: {'; '.join(directions[:3])}"
+            + (f" (+{len(directions) - 3} more)" if len(directions) > 3 else "")
+        )
+
     unquoted = sorted({c for t in turns for c in t.unquoted_evidence})
     if unquoted:
         gaps.append(
@@ -395,11 +418,31 @@ def _debate_caveats(state: TradingState) -> tuple[list[str], list[str]]:
             f"a truncated argument, not a concluded one"
         )
 
-    concessions = [t for t in turns if t.payload.stance == "concede"]
+    # Counts BOTH shapes — a full concession (stance='concede') and a partial
+    # one (an opposing claim_id named in `concession_trigger` on a hold or
+    # sharpen turn). Counting only the first is what made this line read
+    # "0 structurally-justified concession(s)" for every debate the pipeline
+    # has ever run: see check_concession's docstring for why no turn was ever
+    # stance='concede'.
+    concessions = [
+        t for t in turns
+        if t.payload.stance == "concede" or t.payload.concession_trigger
+    ]
     evidence.append(
         f"{len(turns)}-turn bull/bear debate over the analyst reports; "
         f"{len(concessions)} structurally-justified concession(s)"
     )
+    # Zero is reported as a gap, not as a finding. It means no turn NAMED an
+    # opposing claim_id, which is not the same as neither side moving — a
+    # concession written only in the argument prose is invisible here, and the
+    # memo must not read this count as "the debate was unmoved".
+    if turns and not concessions:
+        gaps.append(
+            "no turn named an opposing claim_id in `concession_trigger`, so no "
+            "concession is recorded structurally — this is not evidence that "
+            "neither side moved, since a concession made only in the argument "
+            "prose is not counted"
+        )
     return gaps, evidence
 
 
@@ -443,7 +486,11 @@ def _risk_caveats(state: TradingState) -> tuple[list[str], list[str], list]:
             + (f" (+{len(unquoted) - 5} more)" if len(unquoted) > 5 else "")
         )
 
-    missing_any = [e for e in ledger if e.missing_scores]
+    # Only the absences nobody asked for — see `unexpected_missing_scores`.
+    # Counting every gap in `missing_scores` reported the neutral's
+    # protocol-required silence on uncontested factors as a defect, in every
+    # run of the 2026-08-29 battery.
+    missing_any = [e for e in ledger if unexpected_missing_scores(e)]
     if missing_any:
         gaps.append(
             f"{len(missing_any)} of {len(ledger)} risk factor(s) are missing a "
@@ -677,6 +724,11 @@ async def synthesizer_node(state: TradingState) -> dict:
 
     final = final.model_copy(update={
         "verdict_samples": verdicts,
+        # Reported beside `evidence_quality`, never folded into it: one is
+        # agreement about the VERDICT across trials, the other is coverage
+        # and within-trial factor agreement. Conflating them is what made a
+        # 2-1 split able to report 0.97. See `verdict_agreement`.
+        "verdict_agreement": verdict_agreement(verdicts),
         "data_gaps": final.data_gaps + extra_gaps,
     })
 

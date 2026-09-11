@@ -18,7 +18,36 @@ Contract, the part worth reading twice:
 
 from __future__ import annotations
 
-from app.agent.trading.domain.risk import PERSONAS, RiskLedgerEntry, RiskTurn
+from app.agent.trading.domain.risk import PERSONAS, Persona, RiskLedgerEntry, RiskTurn
+
+def unexpected_missing_scores(entry: RiskLedgerEntry) -> list[Persona]:
+    """`entry.missing_scores`, minus the absences the panel's own protocol
+    requires.
+
+    The neutral scores in the ADJUDICATE phase, and that phase's instruction
+    is "do not score an uncontested id" (risk_port._PHASE_INSTRUCTIONS);
+    risk_port only ever puts contested ids on its slate. So a neutral absence
+    on an uncontested factor is compliance, not a gap — while an absence on a
+    CONTESTED factor is a real one, because the neutral was asked for it.
+
+    The other two personas score the whole slate in round 1, so any absence of
+    theirs stays a gap.
+
+    Split out from `missing_scores` rather than folded into it: the ledger's
+    contract is that a persona which did not score a factor is recorded as
+    absent and never imputed, and that stays true whatever the reason. This
+    answers the different question a READER has — is anything missing that
+    should be here — which the 2026-08-29 battery showed matters: all 12
+    flagged entries across its five runs were the by-design neutral absence,
+    so every memo reported its ledger as incomplete on exactly the factors
+    where the panel did what it was told.
+    """
+    return [
+        persona
+        for persona in entry.missing_scores
+        if persona != "neutral" or entry.contested
+    ]
+
 
 CONTESTED_THRESHOLD = 2  # either spread >= this marks the factor contested (display only)
 MAX_SPREAD = 4           # severity/likelihood each range 1-5; widest possible spread

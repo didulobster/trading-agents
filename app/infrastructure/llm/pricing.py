@@ -89,6 +89,22 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
         "cache_write": 0.0,
         "cache_read": 0.044,
     },
+    # GPT-5.6 Luna, routed to OpenAI by the `gpt-` prefix. Standard-context
+    # rates; above an unpublished context threshold OpenAI bills a long-context
+    # tier of $0.40/$1.80 with $0.04 cache reads and $0.50 cache writes.
+    #
+    # OpenAI bills cache writes for this family, but `_translate_usage` in
+    # the shim reports zero cache-creation tokens and leaves writes inside
+    # `input`, so they price at $0.20 rather than $0.25. `cache_write` holds
+    # the real rate anyway, ready for when the shim starts reporting writes.
+    #
+    # Verified 2026-09-11 against https://developers.openai.com/api/docs/pricing
+    "gpt-5.6-luna": {
+        "input": 0.20,
+        "output": 1.20,
+        "cache_write": 0.25,
+        "cache_read": 0.02,
+    },
 }
 
 _REQUIRED_KEYS = frozenset({"input", "output", "cache_write", "cache_read"})

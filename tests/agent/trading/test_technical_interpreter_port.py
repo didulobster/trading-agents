@@ -448,6 +448,88 @@ def test_relations_skip_indicators_that_were_not_computed():
     assert "50-day average" in rel
 
 
+def test_relations_state_how_far_price_sits_from_the_breached_band():
+    """From the FIG run (2026-08-29): the bear's technical leg was "3.5% above
+    the upper Bollinger band", a figure the relations did not state, so the
+    model derived it from two pack values and the numeric guard reported it
+    as possibly fabricated. It was neither — it was the distance measured
+    against the CLOSE, where the phrase means against the band."""
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper = 22.6721, 29.53888645766271
+    ind.last_close = 30.6200008392334
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "is ABOVE the upper band" in rel
+    assert "price is 3.66% ABOVE the upper band" in rel
+    assert "as a percentage of that band" in rel
+
+
+def test_a_breakout_does_not_state_the_far_band_s_distance():
+    """Every number here is one more value the containment guard has to hold,
+    and how far a breakout sits from the band it did NOT breach is not a fact
+    anyone argues from."""
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper = 22.6721, 29.53888645766271
+    ind.last_close = 30.6200008392334
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "lower band" not in rel.split("is ABOVE the upper band")[1]
+
+
+def test_within_the_bands_both_distances_are_stated():
+    """"Near the upper band" is a claim debaters make constantly, and it needs
+    the same grounding as a breakout."""
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper = 470.444580120834, 510.08392329713473
+    ind.last_close = 505.05999755859375
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "is WITHIN the bands" in rel
+    assert "price is 0.98% BELOW the upper band" in rel
+    assert "7.36% ABOVE the lower band" in rel
+
+
+def test_a_break_below_is_measured_against_the_lower_band():
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper, ind.last_close = 80.0, 100.0, 76.0
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "price is 5.00% BELOW the lower band" in rel
+    assert "upper band (as a percentage" not in rel
+
+
+def test_the_stated_distance_clears_the_numeric_guard():
+    """The point of the change: the figure is citable, so a debater quoting it
+    is no longer reported as possibly fabricating it — while a differently
+    derived variant of the same fact still is."""
+    from app.agent.trading.infrastructure.debate_port import _flag_debate_numbers
+
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper = 22.6721, 29.53888645766271
+    ind.last_close = 30.6200008392334
+    pack = "\n".join(derive_relations(ind))
+
+    assert _flag_debate_numbers("price closed 3.66% above the upper band", pack) == []
+    assert _flag_debate_numbers("price closed 3.5% above the upper band", pack) == ["3.5%"]
+
+
+def test_a_band_that_cannot_be_a_denominator_drops_only_its_own_side():
+    """bb_lower = mid − 2σ can go non-positive on a volatile enough series,
+    and a percentage of it means nothing. The upper distance is still a fact,
+    so it is still stated."""
+    ind = _msft_indicators()
+    ind.bb_lower, ind.bb_upper, ind.last_close = -2.0, 12.0, 6.0
+
+    rel = "\n".join(derive_relations(ind))
+
+    assert "price is 50.00% BELOW the upper band (as a percentage of that band)" in rel
+    assert "ABOVE the lower band" not in rel
+
+
 def test_relations_report_rsi_band_and_volume_side():
     ind = _msft_indicators()
     rel = "\n".join(derive_relations(ind))

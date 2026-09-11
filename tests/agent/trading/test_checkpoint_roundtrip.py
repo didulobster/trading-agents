@@ -51,7 +51,7 @@ import app.agent.trading.application.nodes as nodes
 import app.agent.trading.application.risk_nodes as risk_nodes
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
-from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict, EvidenceQuality
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.domain.risk import PERSONAS, RiskTurn, RiskTurnPayload
@@ -604,7 +604,7 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
             reasoning="stub reasoning",
             watch_items=[],
             verdict=Verdict.HOLD,
-            confidence=0.0,
+            evidence_quality=EvidenceQuality(score=0.0, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0),
             data_as_of_date=as_of,
             data_gaps=base_gaps,
             assumptions=[],

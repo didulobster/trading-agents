@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
+from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict, EvidenceQuality
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
 from app.agent.trading.infrastructure.decision_memo_port import _format_memo_markdown
 from app.agent.trading.infrastructure.news_digest_port import _format_sentiment_markdown
@@ -148,7 +148,7 @@ def _memo(**over) -> DecisionMemo:
         reasoning="STUB — synthesis logic not yet implemented.",
         watch_items=[],
         verdict=Verdict.HOLD,
-        confidence=0.0,
+        evidence_quality=EvidenceQuality(score=0.0, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0),
         data_as_of_date=AS_OF,
         data_gaps=["debate/risk nodes are still stubs"],
         assumptions=[],
@@ -175,7 +175,7 @@ def test_zero_confidence_memo_carries_an_extreme_caution_warning():
     assert "0.00" in md
 
     real = _format_memo_markdown(
-        _memo(confidence=0.72, reasoning="Cash generation is durable.")
+        _memo(evidence_quality=EvidenceQuality(score=0.72, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0), reasoning="Cash generation is durable.")
     )
     assert "extreme caution" not in real
 
@@ -191,15 +191,46 @@ def test_raw_json_block_preserves_the_unedited_memo():
     assert json.loads(block)["bull_case"] == "STUB"
 
 
-def test_confidence_is_shown_as_a_band_alongside_the_raw_float():
-    low = _format_memo_markdown(_memo(confidence=0.1))
-    medium = _format_memo_markdown(_memo(confidence=0.5))
-    high = _format_memo_markdown(_memo(confidence=0.9))
+def test_evidence_quality_is_shown_with_its_components_not_as_a_band():
+    """The old line read `**Confidence:** HIGH (0.93)`. Both halves invited a
+    reader to take an input-quality score for a probability the verdict is
+    right — see `EvidenceQuality`. It now names what it measures and shows
+    the three terms, so a reader can see that analyst coverage is pinned at
+    1.00 on every full run and carries 0.6 of the composite."""
+    rendered = _format_memo_markdown(
+        _memo(evidence_quality=EvidenceQuality(
+            score=0.93, analyst_coverage=1.0, panel_dispersion=0.08, guard_flags=2
+        ))
+    )
 
-    assert "LOW (0.10)" in low
-    assert "MEDIUM (0.50)" in medium
-    assert "HIGH (0.90)" in high
+    assert "**Evidence quality:** 0.93" in rendered
+    assert "analyst coverage 1.00" in rendered
+    assert "panel dispersion 0.08" in rendered
+    assert "2 guard flags" in rendered
+    assert "Confidence" not in rendered
+    assert "HIGH" not in rendered
 
+
+def test_verdict_agreement_is_rendered_beside_evidence_quality_when_a_vote_happened():
+    voted = _format_memo_markdown(
+        _memo(
+            evidence_quality=EvidenceQuality(
+                score=0.97, analyst_coverage=1.0, panel_dispersion=0.05, guard_flags=1
+            ),
+            verdict_samples=["sell", "hold", "sell"],
+            verdict_agreement=0.67,
+        )
+    )
+    assert "**Verdict agreement:** 2 of 3 (0.67)" in voted
+    # Shown side by side and NOT reconciled: 0.97 evidence quality on a 2-1
+    # split is exactly the pair that used to be one self-contradictory number.
+    assert "**Evidence quality:** 0.97" in voted
+
+    # None is not 1.0: a memo whose verdict was never put to a vote has not
+    # achieved unanimity, and the line is omitted rather than faked.
+    unvoted = _format_memo_markdown(_memo())
+    assert "Verdict agreement" not in unvoted
+    assert "1 guard flag)" in voted and "1 guard flags" not in voted
 
 def test_gaps_are_rendered_and_counted():
     md = _format_memo_markdown(_memo(data_gaps=["a", "b"]))

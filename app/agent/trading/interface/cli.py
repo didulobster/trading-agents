@@ -262,6 +262,10 @@ async def run(
                 print(f"    · {claim.claim_id} [{claim.evidence_ref}] {claim.text}")
             if turn.guard_flags:
                 print(f"    [flagged numbers] {turn.guard_flags}")
+            if turn.unresolved_flags:
+                print(f"    [unresolved references] {turn.unresolved_flags}")
+            if turn.direction_flags:
+                print(f"    [contradicted direction] {turn.direction_flags}")
             if turn.unquoted_evidence:
                 print(f"    [unverified quotes] {turn.unquoted_evidence}")
         total = sum(t.estimated_cost_usd or 0.0 for t in turns)

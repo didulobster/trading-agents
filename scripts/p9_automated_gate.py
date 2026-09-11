@@ -164,19 +164,19 @@ def main() -> int:
     print("\nper-run (for §6 audit ordering and §7 ticker selection):")
     print(f"{'ticker':7}{'verdict':11}{'direction':11}{'conf':>6}{'gaps':>6}{'usd':>8}"
           f"{'cache':>7}{'wall_s':>8}  samples")
-    for run in sorted(manifest.runs, key=lambda r: (r.confidence is None, r.confidence)):
+    for run in sorted(manifest.runs, key=lambda r: (r.evidence_quality is None, r.evidence_quality)):
         print(
             f"{run.ticker:7}{str(run.verdict):11}{verdict_direction(run.verdict):11}"
-            f"{run.confidence if run.confidence is not None else float('nan'):>6.2f}"
+            f"{run.evidence_quality if run.evidence_quality is not None else float('nan'):>6.2f}"
             f"{run.n_data_gaps if run.n_data_gaps is not None else -1:>6}"
             f"{run.total_usd or 0.0:>8.4f}{run.cache_read_ratio or 0.0:>7.2f}"
             f"{run.wall_clock_s or 0.0:>8.1f}  {','.join(run.verdict_samples)}"
         )
-    lowest = min((r for r in manifest.runs if r.confidence is not None),
-                 key=lambda r: r.confidence, default=None)
+    lowest = min((r for r in manifest.runs if r.evidence_quality is not None),
+                 key=lambda r: r.evidence_quality, default=None)
     if lowest:
-        print(f"\n§7 stability re-runs: {lowest.ticker} (lowest confidence "
-              f"{lowest.confidence:.2f}) and NFLX (least-tested input).")
+        print(f"\n§7 stability re-runs: {lowest.ticker} (lowest evidence quality "
+              f"{lowest.evidence_quality:.2f}) and NFLX (least-tested input).")
 
     return gate.report()
 

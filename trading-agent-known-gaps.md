@@ -182,6 +182,14 @@ of the debate*, which the exit criteria do not test.
    field is not dead weight. The concession guard has still never fired in
    production, so its correctness rests entirely on unit tests.
 
+   **[Diagnosed 2026-08-29 — see "The concession channel has never fired"
+   below.]** Re-measured at 42 transcripts / 249 turns, still 0 `concede`.
+   The cause is not that a justified concession is unattractive: it was not
+   expressible. `stance` is per-turn, concession is per-claim, and the guard
+   raised on a `concession_trigger` set outside `stance='concede'` — so the
+   only shape that occurs (accept one point, hold the rest) was a hard error.
+   Debaters conceded in prose instead, where nothing counted it.
+
    **[Investigated 2026-08-24, falsified] Read against claim volume, this
    looked like it might be worse than "rare concessions": 145 claims / 30
    turns = 4.83 per turn against a `max_length=5` cap — the schema is binding
@@ -2423,3 +2431,653 @@ AVGO verdict instability.
 **Phase 9 does not close.** Criteria 6 and 9 fail on their own terms, and 2
 fails by decision. Criterion 8 is unmeasured. Per §8 the ceiling breach
 governs: characterize the gap rather than patch and re-run.
+
+
+## deepseek-v4-flash vs Haiku 4.5: memos are 4x less numeric (2026-08-29)
+
+Four `deepseek-v4-flash` runs, made outside the Phase 9 battery and checked
+against its exit criteria afterwards. Not a battery — three tickers, two
+`as_of` dates, ad-hoc run ids — so the scoring below is per-criterion rather
+than a phase verdict.
+
+| run_id | ticker | as_of | verdict | conf | samples | cost | wall |
+|---|---|---|---|---|---|---|---|
+| deepseek-v4-verify-3 | MSFT | **2026-08-28** | hold | 0.94 | hold x3 | $0.2817 | 922s |
+| deepseek-acn-fixed-1 | ACN | 2026-08-29 | hold | 0.96 | hold x3 | $0.2487 | 561s |
+| deepseek-asml-1 | ASML | 2026-08-29 | hold | 0.94 | hold x3 | $0.2346 | 511s |
+| deepseek-asml-fixed-1 | ASML | 2026-08-29 | hold | 0.97 | hold x3 | $0.1964 | 422s |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS for the 3 tickers used |
+| 2 | 6/6 runs complete | **FAIL** — 4 runs, 3 tickers; NFLX/AVGO/FIG absent |
+| 3 | Schema-valid | PASS 4/4 |
+| 4 | Verifier clean (in-band) | PASS 4/4; `debate_originated` empty on all four |
+| 5 | Zero Class A/B/E | PASS on the defect-signature pass |
+| 6 | C/D ceiling | **PASS — zero notation defects** |
+| 7 | `as_of_date` integrity | **FAIL** — MSFT 2026-08-28, ACN/ASML 2026-08-29 |
+| 8 | Verdict stability | partial — the ASML pair agrees, see caveat |
+| 9 | Cost | PASS — $0.9615 total, $0.2404/run |
+
+Criterion 7 is the only structural failure: two `as_of` dates means
+cross-ticker comparison is contaminated by construction, which is what Gate
+C exists to prevent. Individual memos are unaffected; the four cannot be
+read as one battery.
+
+### Why criterion 6 passes: there is far less to get wrong
+
+Numbers written inline in the narrative fields (`reasoning`,
+`research_thesis`, `risk_debate_summary`, `bull_case`, `bear_case`):
+
+| model | numbers per 1k chars | worst case |
+|---|---|---|
+| deepseek-v4-flash | 0.37 – 1.87 | MSFT: **2 numbers in 5,385 chars** |
+| claude-haiku-4-5 | 4.05 – 7.03 | MSFT: **43 numbers in 6,118 chars** |
+
+**This is not information loss.** Citation counts (32–52 vs Haiku's 23–40)
+and rendered evidence lines (27–35 vs 24–36) are at least as high. The
+figures moved into the Python-rendered Evidence section, which is exactly
+what rule 1 of both synthesis prompts asks for: *"never retype a figure
+already established elsewhere."*
+
+**deepseek-v4-flash complies with the memo design that Haiku routinely
+violates.** The clearest instance is the same sentence, same ticker, both
+models:
+
+- Haiku: *"net cash of $6.3B and leverage of 0.50x"* — logged as Class D,
+  since the corpus labels 0.50x explicitly as GROSS and FY2025 net leverage
+  is (0.62)x, i.e. negative.
+- DeepSeek: *"gross leverage is trivial and net cash is roughly $6.3B"* —
+  correctly labelled, and it declines to restate the ratio at all.
+
+So the entire notation defect class that failed criterion 6 on the Haiku
+battery (4 defects, 3 of them unit/ratio-label errors) does not arise here.
+That is a real advantage, and it is an advantage of restraint rather than of
+better arithmetic — worth distinguishing, because the two would be fixed by
+different things.
+
+### Three caveats before reading this as a win
+
+1. **Confidence runs high and flat.** 0.94–0.97 against Haiku's 0.88–0.93,
+   consistent with the standing observation that deepseek reports ~0.05–0.10
+   more confidence and that it does not move with evidence quality. A memo
+   with two numbers in it reporting 0.94 confidence is the combination most
+   worth distrusting.
+2. **All four verdicts are unanimous `hold`.** Haiku produced one
+   `unresolved` (AVGO, from a 2-sample split). Four runs cannot distinguish
+   "less noise" from "less discrimination".
+3. **The ASML pair is NOT a determinism pair.** `deepseek-asml-1` (11:09)
+   and `deepseek-asml-fixed-1` (12:27) straddle the fixes merged as PRs
+   #63/#64 — the mis-named tool argument, the `thinking` translation, and
+   the wrapped digest batch. Same ticker, same `as_of`, agreeing direction,
+   different code. It is the closest thing to criterion 8 evidence this
+   project has and it still is not criterion 8.
+
+### Six-ticker battery at one as_of (2026-08-29, `p9-20260828`)
+
+Criterion 2 and 7 were the two failures above, so the battery was re-run at
+a single `as_of` of **2026-08-28 (Friday)** — deliberately NOT the
+2026-08-29 the earlier ACN/ASML runs used, which is a **Saturday**: a
+non-trading `as_of` leaves technicals on the prior close and ends the news
+window on a day with no market. Five fresh runs plus the existing MSFT run,
+which already sat at 2026-08-28. **Total $1.4160.**
+
+| ticker | verdict | conf | samples | cost | wall |
+|---|---|---|---|---|---|
+| ASML | hold | 0.97 | hold x3 | $0.2309 | 489s |
+| ACN | hold | 0.94 | hold x3 | $0.2138 | 494s |
+| MSFT | hold | 0.94 | hold x3 | $0.2817 | 922s |
+| FIG | hold | 0.93 | hold x3 | $0.2795 | 613s |
+| NFLX | hold | 0.92 | hold x3 | $0.2515 | 500s |
+| AVGO | **crashed** | — | — | $0.1586 wasted | — |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS |
+| 2 | 6/6 runs complete | **FAIL** — 5/6, AVGO crashed (mechanical, below) |
+| 3 | Schema-valid | PASS on 5/5 produced |
+| 4 | Verifier clean (in-band) | PASS — 0 `decision_failed`, `debate_originated` empty on all |
+| 5 | Zero Class A/B/E | **PASS** — every prose number traces to grounded |
+| 6 | C/D within ceiling | **PASS — zero notation defects** |
+| 7 | `as_of_date` integrity | **PASS** — all six at 2026-08-28 |
+| 8 | Verdict stability | NOT RUN |
+| 9 | Cost | PASS — $1.2574 logged, $4.00 ceiling |
+
+### AVGO: the `rebuts` validator is a hard stop, and deepseek trips it
+
+AVGO died in debate turn 1. The bear emitted
+`rebuts: ['technical-contained-uptrend']`, an id present nowhere in the
+transcript (the opposing claims were `icfr-effective`, `no-maturity-wall`,
+`ocf-covers-ni`, `rpo-books-demand`, `segment-margins-up`) — it appears to
+have reached for a technical-report-style name instead of a debate claim id.
+`validate_rebuts` (debate_port.py) raises `ValueError`, which kills the run:
+**$0.1586 spent, no memo, and no `run_summary`** since the process died
+before one could be written.
+
+**This is a model-behaviour difference, not a regression.** The check was
+added after measuring **95 of 95** rebutted ids resolving correctly across
+five Haiku transcripts. deepseek-v4-flash hallucinated one on its second
+debate turn.
+
+The fix has direct precedent in this repo: commit `e7c82b8` softened the
+synthesis fabrication guard from *kill the run* to *drop the trial*. The
+same reasoning applies — a `rebuts` pointing at a nonexistent claim is bad
+debate hygiene, not a corrupted artifact. The turn's argument and claims
+remain usable, and `DebateTurn.guard_flags` already exists as the mechanism.
+Drop the bad ids, flag them, continue. **Not yet done.**
+
+Worth noting the pattern: this is the second guard written against Haiku's
+failure modes whose response to a deepseek deviation is to destroy an
+expensive run outright.
+
+### AVGO re-run after softening the guard: 6/6, automated gate clean
+
+`check_rebuts` was changed from raise to drop-and-flag (see the entry
+above), and AVGO was re-run on a fresh thread — not a resume, because the
+crashed thread's deadline had expired and the resume guard correctly
+refused it. **hold, confidence 0.95, $0.2656, 555s.**
+
+**The guard fix was not exercised.** No `unresolved_rebuts` flag fired: the
+debate ran six clean turns and the model simply did not hallucinate an id
+this time. So the crash was stochastic, not deterministic, and the softening
+is proven by unit tests rather than by a live catch. Worth stating, because
+"we fixed it and the re-run passed" would imply a causal link the evidence
+does not support.
+
+Final battery, all six tickers at `as_of=2026-08-28`, **$1.6816 total
+including the $0.1586 lost to the crash**:
+
+| ticker | verdict | conf | samples | cost |
+|---|---|---|---|---|
+| ASML | hold | 0.97 | hold x3 | $0.2309 |
+| AVGO | hold | 0.95 | hold x3 | $0.2656 |
+| ACN | hold | 0.94 | hold x3 | $0.2138 |
+| MSFT | hold | 0.94 | hold x3 | $0.2817 |
+| FIG | hold | 0.93 | hold x3 | $0.2795 |
+| NFLX | hold | 0.92 | hold x3 | $0.2515 |
+
+| # | criterion | result |
+|---|---|---|
+| 1 | Corpus coverage | PASS |
+| 2 | 6/6 runs complete | **PASS** |
+| 3 | Schema-valid | **PASS** 6/6 |
+| 4 | Verifier clean (in-band) | **PASS** — 0 `decision_failed` |
+| 5 | Zero Class A/B/E | **PASS** |
+| 6 | C/D within ceiling | **PASS** — zero notation defects |
+| 7 | `as_of_date` integrity | **PASS** |
+| 8 | Verdict-direction stability | NOT RUN |
+| 9 | Cost | **PASS** — $1.5231 logged vs $4.00 |
+
+**Eight of nine pass. Criterion 8 is the only one not run.** On the Haiku
+battery the same criteria came out 5 pass / 3 fail / 1 not run.
+
+AVGO's memo audits clean: every prose number traces to grounded, and its one
+ratio sentence is *"the de-leveraging to **2.63x** is partly
+purchase-accounting, not organic"* — correct unit and no currency sign,
+which is the third measured Haiku defect avoided like-for-like (Haiku's AVGO
+memo wrote "$2.80x" and "$2.61x").
+
+### The unanimity question now has an answer, and it is not reassuring
+
+**All six verdicts are `hold`, every one unanimous 3/3.** That now includes
+AVGO — the ticker Haiku split `sell`/`hold` across three separate
+measurements (Phase 6 determinism work, Phase 8's injection canary, and the
+Phase 9 battery, where a dropped trial left 2 samples that disagreed and
+produced `unresolved`).
+
+Two readings, and this battery cannot separate them:
+
+- deepseek is genuinely less noisy on a debate Haiku finds genuinely
+  ambiguous; or
+- deepseek is less discriminating, and six unanimous `hold`s across six
+  materially different companies — a monopoly toolmaker, a hypergrowth
+  design SaaS, an IT-services bellwether, a streamer, a semi conglomerate
+  and a hyperscaler — is a signal about the model, not about the companies.
+
+The second reading is worth taking seriously precisely because confidence
+also runs high and flat (0.92–0.97) and does not track evidence quality. A
+system that returns the same verdict at high confidence for every input has
+excellent-looking criteria and no discriminating power, and the exit
+criteria as written cannot tell that apart from a system that is right.
+**Criterion 8 is the test that would separate them, and it is the one
+criterion never run in either battery.**
+
+### Numeric density, now measured across five tickers
+
+| ticker | deepseek numbers/1k | haiku numbers/1k |
+|---|---|---|
+| MSFT | 0.37 | 7.03 |
+| FIG | 0.36 | 5.07 |
+| ACN | 0.52 | 4.09 |
+| ASML | 1.09 | — |
+| NFLX | 1.69 | 4.05 |
+| AVGO | 2.38 | 5.32 |
+
+**~4-6x sparser, on every ticker measured**, while carrying MORE citations
+(38–49 vs Haiku's 23–40) and comparable-or-more rendered evidence lines
+(25–30 vs 24–36). The earlier four-run reading holds at six.
+
+The like-for-like case is NFLX, the same ticker whose Haiku memo produced
+the battery's most serious notation defect:
+
+- **Haiku:** *"leverage fell **41 basis points** gross and 34 basis points
+  net"* — turns reported as basis points, wrong by two orders of magnitude.
+- **deepseek:** *"a clean credit profile at **1.09x gross debt/operating
+  income**"* — correct unit, and `gross` stated explicitly, which is the
+  other defect (ACN's unlabelled gross ratio) avoided in the same phrase.
+
+Every number in NFLX's prose (1.09, 12, 18, 200, 24, 50) appears in the
+grounded corpus. ASML's 2027/2028 mentions, flagged by the gate as a
+lookahead lead, are its real backlog horizon and present in the corpus.
+
+### What this does and does not establish
+
+It establishes that the notation defect class which failed criterion 6 on
+Haiku does not arise here, across six tickers at one `as_of`, and that the
+restraint is genuine compliance rather than information loss.
+
+It does **not** establish that deepseek reasons better. Confidence still
+runs high and flat (0.92–0.97 against Haiku's 0.88–0.93) and still does not
+track evidence quality. **All five verdicts are unanimous `hold`** — and the
+one ticker that would have tested whether that is less noise or less
+discrimination is AVGO, which is precisely the run that crashed. Haiku split
+AVGO `sell/hold` three separate times; deepseek has never completed it.
+
+### Readability, unstated
+
+A memo carrying 2 numbers in 5,385 characters is more compliant and harder
+to act on directly: the reader must cross-reference the Evidence section to
+recover any figure. Whether that is the right trade is a product judgement
+nobody has made explicitly, and it is now the main difference between the
+two models' output.
+
+
+## Discrimination probe: the verdict does respond to evidence, and the
+## confidence does not (2026-08-29)
+
+The deepseek battery closed with a question the criteria could not answer:
+six unanimous `hold`s at 0.92-0.97 fit "less noisy than Haiku" and "returns
+`hold` regardless of input" equally well. Criterion 8 cannot separate them —
+a system with no discriminating power is perfectly stable under re-run. Only
+changing the input can.
+
+### Design, and why the lever is legitimate
+
+One channel manipulated, the fundamentals report text; everything else held
+at the battery's settings — `as_of=2026-08-28`, deepseek-v4-flash in every
+role, same prompts, majority-of-3 sampling, live technical and news.
+
+`synthesis_port._grounded_corpus` builds from the analyst reports in state,
+not from the EDGAR vector store, so a substituted summary is grounded **by
+construction**: quotes resolve against it, the number guards check against
+it, `verify_decision_memo` passes. Nothing is smuggled past a guard. That is
+the point — this measures response to evidence, not the guards' reaction to
+malformed input. Both runs came back `*-decision.md`, not
+`*-decision_failed.md`.
+
+Variants are the real cached report with named `##` sections replaced and
+everything else carried through verbatim — preamble, untouched sections,
+appendices, and the red-flag rubric. Leaving the rubric untouched means the
+injected distress is distress **by the report's own standard**: MSFT goes
+MIXED/1 flag to IMPAIRED/10 flags, ACN MIXED/2 to IMPAIRED/8, in both cases
+tripping two independent IMPAIRED triggers (material weakness in ICFR,
+persistent accrual gap). Predictions were pre-registered before spending
+anything, in `docs/validation/disc-probe-20260829/pre-registration.md`.
+
+### Result
+
+| ticker | battery baseline | distressed | samples | conf | cost |
+|---|---|---|---|---|---|
+| MSFT | hold 0.94, hold x3 | **sell** | sell, hold, sell | **0.97** | $0.1541 |
+| ACN | hold 0.94, hold x3 | hold | hold, **sell**, hold | 0.93 | $0.1259 |
+
+$0.2801 for the arm. **The verdict distribution moved on both tickers**:
+0/3 sell to 2/3 on MSFT, 0/3 to 1/3 on ACN.
+
+- **P1 (a distressed run returns `sell`) — PASS.** MSFT flipped.
+- **P3 (the bear case cites the injected facts) — PASS**, on both. MSFT's
+  reasoning names the material weakness, the SEC subpoena, receivables
+  outrunning revenue, negative FCF, the maturity wall and the RPO decline.
+  ACN's names the adverse ICFR opinion, the 0.83x/0.59x OCF/NI gap, the
+  45.3%-vs-7.35% receivables gap, the margin collapse and the 82.8% fall in
+  operating income.
+- **P2 (confidence falls at least 0.15) — FAIL, and it failed upward.**
+
+**Reading B is refuted in its strong form.** The pipeline reads the evidence
+and the verdict follows it. Six unanimous holds were a fact about the six
+companies, not a fixed point of the model.
+
+### ACN held, and that hold is reasoned rather than reflexive
+
+The memo argues its own verdict: *"A hold reflects that net debt is modest
+and FCF is positive, so a sell is not warranted; but with reported earnings
+unreliable and the leading indicator declining, a buy cannot be justified."*
+
+It is also the pre-registered limitation of a single-channel manipulation
+showing up exactly where it was predicted to. The news channel stayed real
+and genuinely disagreed with the injected filings — analyst upgrades, a
+26.7% one-month gain, a 3.65% dividend yield — and the bull leaned on all
+three. A held verdict under evidence that conflicts across channels is
+defensible. ACN therefore neither confirms nor refutes; **MSFT carries the
+finding**, and one ticker is what this arm establishes.
+
+### The real defect this surfaced: confidence is not a function of anything
+
+MSFT's confidence **rose from 0.94 to 0.97** while its sample vote went from
+unanimous (hold x3) to split (sell, hold, sell). ACN reported 0.93 on a
+2-1 split against 0.94 on a unanimous baseline.
+
+A split vote reporting higher confidence than a unanimous one is backwards,
+and it is now measured rather than suspected. Across baseline, a
+verdict-flipping distressed input and a verdict-holding distressed input,
+confidence never leaves 0.92-0.97. It tracks neither evidence quality nor
+the panel's own agreement — the one quantity the run already has in hand at
+the moment it writes the number. `verdict_samples` is on the memo; the
+confidence beside it ignores it.
+
+This is the residue of the unanimity worry, relocated. The verdict is
+informative; the confidence is decorative, and it is the field a reader is
+most likely to mistake for a measure of how much to trust the verdict.
+
+### Incidental, recorded because the probe is where they showed
+
+- **Both runs hit the 3-round debate cap** — "a truncated argument, not a
+  concluded one", the known Phase 5 residual, unchanged under a much more
+  one-sided input.
+- **The fabrication guard fired on MSFT** (`-36.8%` in the Research
+  Manager's case, in no source). First observation of it firing on a
+  synthetic-input run; the number is in the flagged list, so containment
+  worked as designed.
+- **ACN carried 3 claims and 2 risk factors whose quoted span is not in the
+  cited report**, plus 4 reused `claim_id`s. Both are known classes and
+  neither is caused by the manipulation, but the rate on one run is higher
+  than the battery's.
+
+
+## Phase 9 criterion 8: run at last, and it PASSES (2026-08-29)
+
+The one criterion never run in either battery. Two tickers re-run at the
+battery's `as_of=2026-08-28` on **fresh threads, not resumes**, with real
+fundamentals — a cached report would have frozen the largest single source
+of run-to-run variation, which is the opposite of what the criterion asks.
+Recorded against a clean tree at `5188f95`.
+
+Subjects chosen over the gate's nomination and stated as such: **AVGO**
+because it is the only ticker that has ever produced a split verdict, across
+three separate prior measurements under Haiku, and **NFLX** because it
+carried the lowest confidence in the deepseek battery (0.92) and is the
+least-tested input.
+
+| ticker | battery | re-run | samples | direction | cost |
+|---|---|---|---|---|---|
+| AVGO | hold 0.95 | hold 0.94 | hold x3 | **stable** | $0.2589 |
+| NFLX | hold 0.92 | hold **0.96** | hold x3 | **stable** | $0.2315 |
+
+$0.4905. Both verifier-clean, both carrying `data_as_of_date` 2026-08-28.
+**Criterion 8 PASSES**, and with it the deepseek battery goes 9/9 where the
+Haiku battery was 5 pass / 3 fail / 1 not run.
+
+Read it for exactly what it is. AVGO returning `hold x3` twice is a genuine
+result — this is the ticker Haiku split `sell`/`hold` on three separate
+occasions, and deepseek has now held it unanimous across two independent
+runs. Combined with the probe above, which shows the verdict does move when
+the evidence moves, the stability is evidence of low noise rather than of a
+constant.
+
+### The re-runs sharpen the confidence finding into a number
+
+NFLX returned **0.92 on the battery and 0.96 on the re-run** — same ticker,
+same `as_of`, same models, same prompts, identical input, nothing changed
+but the thread. A 0.04 swing from changing nothing.
+
+Set that beside the probe:
+
+| what changed | ticker | confidence move |
+|---|---|---|
+| nothing (re-run) | NFLX | 0.92 -> **0.96** |
+| nothing (re-run) | AVGO | 0.95 -> 0.94 |
+| fundamentals inverted, verdict flipped hold -> **sell** | MSFT | 0.94 -> 0.97 |
+| fundamentals inverted, verdict held | ACN | 0.94 -> 0.93 |
+
+**The largest confidence move in the whole set came from changing nothing at
+all.** Inverting a company's entire fundamentals picture and flipping its
+verdict moved confidence less (+0.03) than re-running an identical input
+(+0.04). The field is noise of roughly its own magnitude either way, and
+0.92-0.97 is the band it occupies whatever happens.
+
+Criterion 8 as written asks about verdict direction, and by that measure the
+system is stable and passes. It does not ask about confidence, so nothing
+here fails a criterion. But the two measurements together mean the number a
+reader is most likely to treat as "how sure is it" carries no information —
+not about evidence, not about panel agreement, not even about itself across
+identical runs.
+
+### Incidental
+
+`BatteryManifest` serialization warns `Expected date but got str` on
+`data_as_of_date`, which arrives from the memo JSON as a string and is never
+coerced. Harmless — it serializes to the right text — and it predates this
+run, appearing on the same code path the battery used. Noted so the warning
+in `criterion8.log` is not read as something this change introduced.
+
+
+## Confidence clamped by the run's own verdict samples (2026-08-29)
+
+The fix for the entry above, and it starts with a correction: **`confidence`
+is not model-emitted.** `compute_confidence` in `synthesis_port.py` is
+deterministic Python over observables — `0.6 * coverage + 0.3 * (1 -
+mean_spread) + 0.1 * max(0, 1 - flags/10)` — and its section header says so.
+An earlier reading of it as "the model's own number" was wrong, and the
+distinction matters because it changes what the defect is.
+
+The real defect is narrower and sharper. `mean_spread` is **within-trial**
+agreement: how tightly the three personas scored each risk factor inside one
+trial. It is computed inside `run_synthesis`, before any vote exists, so it
+structurally cannot see **across-trial** agreement — whether independent
+trials reached the same verdict at all. Two different quantities, both called
+confidence-ish, nothing reconciling them.
+
+That explains every observation without appealing to noise:
+
+- **MSFT 0.97 on a 2-1 split** vs 0.94 unanimous — the winning trial's panel
+  agreed tightly about each factor while the three trials disagreed about the
+  verdict. Both facts are true at once.
+- **NFLX 0.92 → 0.96 on an identical re-run** — a fresh panel produces a
+  different ledger, so `mean_spread` and the flag count genuinely differ. Not
+  a random field; a real measurement of something other than what a reader
+  takes it for.
+- **AVGO's Phase 9 battery memo reported 0.89 with samples `['sell','hold']`**
+  and a verdict of UNRESOLVED.
+
+### The rule
+
+A memo may not claim more confidence in its verdict than the share of its own
+trials that reached that verdict. `sample_agreement_ceiling` returns k/n;
+`synthesizer_node` applies `min` after the vote, the only point where both
+numbers exist, and records the clamp in `data_gaps` when it bites.
+
+**k/n, deliberately not a posterior.** Laplace ((k+1)/(n+2)) or Jeffreys would
+shrink a unanimous 3/3 to 0.80 or 0.875, repricing every memo in the record
+against a calibration `compute_confidence`'s own docstring disclaims having
+("a judgement call in its weights, not a calibration"). k/n asserts only what
+was observed, and a unanimous run is untouched at any N.
+
+**Floored, not rounded.** `round(2/3, 2)` is 0.67 — above the bound, and on
+the HIGH side of `_confidence_band`'s 2/3 boundary. Rounding to nearest would
+label a 2-1 split HIGH on a rounding error.
+
+### What it changes, replayed over every run in the record
+
+| run | samples | before | after |
+|---|---|---|---|
+| MSFT probe (distressed) | sell, hold, sell | 0.97 | **0.66** |
+| ACN probe (distressed) | hold, sell, hold | 0.93 | **0.66** |
+| AVGO p9 Haiku battery | sell, hold | 0.89 | **0.50** |
+| AVGO criterion 8 | hold x3 | 0.94 | 0.94 |
+| NFLX criterion 8 | hold x3 | 0.96 | 0.96 |
+| all 6 deepseek battery tickers | hold x3 | unchanged | unchanged |
+
+**Three memos in the entire record change, and all three are the
+self-contradictory ones.** Zero live runs were spent verifying this: the
+clamp is pure arithmetic over `verdict_samples`, and replaying it over the
+recorded samples is a stronger check than a fresh run would be, since a fresh
+run would most likely come back unanimous and never exercise the branch.
+
+### What it does not fix
+
+The clamp bounds the number; it does not make the unclamped figure mean what
+a reader thinks it means. Below the ceiling, `confidence` is still
+coverage-plus-factor-spread — on a full run coverage alone contributes 0.6 of
+it — and still moves 0.04 between identical runs. **`verdict_samples` remains
+the field to read.** Calibrating the weights against realised outcomes is
+still the later-phase item `compute_confidence` has always said it was.
+
+
+## `confidence` renamed to `evidence_quality`, and the clamp withdrawn
+## (2026-08-29)
+
+The clamp in the entry above was the right fix for a field called
+confidence. It is the wrong fix once the field is named for what it
+measures, and this change supersedes it.
+
+### Why renaming beats repairing
+
+`compute_confidence` is `0.6*coverage + 0.3*(1 - mean_spread) +
+0.1*(1 - flags/10)`. `ANALYST_OUTPUTS` has three entries and all three are
+present on any full run, so **`coverage` is 1.0 and 0.6 of the number is a
+constant**. The whole informative part is the remaining 0.4, and the
+observed 0.92-0.97 band means the two live terms sit at 0.32-0.37 of a
+possible 0.40. The field had roughly five points of usable range and
+reported them on a 0-1 scale that reads like a probability.
+
+That is not a number to repair. It is a well-defined measurement of input
+quality wearing a name that promises something else.
+
+### What changed
+
+- `confidence: float` → `evidence_quality: EvidenceQuality`, carrying
+  `score` plus the three components (`analyst_coverage`,
+  `panel_dispersion`, `guard_flags`) so a reader can see which term moved
+  instead of comparing two composites whose first 0.6 is identical.
+- `verdict_agreement: float | None` — k/n over `verdict_samples`, reported
+  as its own field. **None when no sampling ran**, which is a different
+  state from 1.0: a verdict never put to a vote has not achieved unanimity,
+  and the renderer omits the line rather than faking one.
+- The clamp is gone. Evidence quality is not bounded by verdict agreement —
+  they are different quantities, which was the point. Both now sit on the
+  memo under their own names, which is what the clamp was working around.
+- `**Confidence:** HIGH (0.93)` → `**Verdict agreement:** 2 of 3 (0.67)  ·
+  **Evidence quality:** 0.97 (analyst coverage 1.00, panel dispersion 0.05,
+  1 guard flag)`. The LOW/MEDIUM/HIGH band is dropped outright: it restated
+  the same number in language that invites the misreading harder.
+
+The MSFT probe memo now renders `**Verdict agreement:** 2 of 3 (0.67)`
+beside `**Evidence quality:** 0.97` — side by side, unreconciled, and no
+longer contradictory, because neither claims to be the other.
+
+### Caught by an existing guard, not by review
+
+`EvidenceQuality` is a new domain type reachable from `TradingState`, and
+`test_every_domain_type_reachable_from_trading_state_is_registered` failed
+until it was added to `ALLOWED_MSGPACK_MODULES`. Under
+`LANGGRAPH_STRICT_MSGPACK=true` a nested unregistered type round-trips
+*cleanly* as a dict, so this would not have surfaced in a round-trip test —
+it would have surfaced in whichever process first resumed a checkpoint.
+The Phase 0 structural guard earned its keep four phases later.
+
+### Back-compatibility
+
+Memos already in the vault carry `confidence`. `_quality_and_agreement` in
+`run_p9_battery.py` reads the new keys and falls back to the old one, so a
+manifest rebuilt from the Phase 9 batteries still reports their numbers
+rather than silently reporting None.
+
+### What is still not fixed
+
+`evidence_quality.score` is honest about what it is and still nearly
+constant. If a single number meaning "how reproducible is this verdict" is
+wanted, it should be **derived** from `verdict_samples` with a shrunk
+estimator (Laplace `(k+1)/(n+2)`), accepting a one-time repricing of the
+record — and that is the change that would make `RISK_VERDICT_SAMPLES = 5`
+worth its ~$0.07/run, since Laplace at N=3 yields only {0.80, 0.60, 0.40}
+while N=5 yields {0.857, 0.714, 0.571, 0.429}. Deliberately not done here:
+it is a calibration decision, not a naming one.
+
+## The concession channel has never fired, and the summary said so wrong
+## (2026-08-29)
+
+Phase 5 gap (4) above recorded "0 `concede` across 30 turns" and left it as
+an open oddity. Re-measured across the whole vault — **42 debate transcripts,
+249 turns: 245 `hold`, 4 `sharpen`, 0 `concede`.** The structural concession
+channel has never fired, in any run, ever. Its correctness still rests
+entirely on unit tests.
+
+**Meanwhile debaters do concede — in prose, where nothing counts it.** MSFT,
+2026-08-29 (`memos/MSFT/20260829/2026-0829-143228/MSFT-debate.md`), turn 2,
+bull, `stance=hold`:
+
+> The bear's strongest point is the material weakness, and I concede that is
+> a genuine overhang. But the authoritative technical relations show...
+
+The transcript summary for that debate printed **"Structurally-justified
+concessions: 0"**, and the Research Manager, reading the same transcript,
+wrote into `MSFT-decision.md`: "The bull's strongest conceded point is that
+the material weakness is a genuine overhang [turn 2]". One artifact said the
+debate contained a concession; the other said it contained none. Both were
+generated from the same six turns.
+
+### Cause: a modeling mismatch, not a weak prompt
+
+`stance` is one label per **turn**. A concession is about one **claim**. The
+concession that actually occurs is partial — accept the point you cannot
+answer, hold the rest — and such a turn is honestly `hold`, because the
+debater IS holding. `check_concession` then made the truthful annotation
+impossible: `elif payload.concession_trigger: raise` meant naming the claim
+that moved you on any stance but `concede` was a hard error that killed the
+turn. The only concession the schema accepted was total capitulation, which
+no debater with a case ever offers. So the concession went into the prose.
+
+Two prose concessions exist in 249 turns (MSFT turn 2 above; ACN
+`2026-0829-103316` turn 2, "The bear's central point is the DOJ matter, and I
+concede it is open-ended — but..."). Both are the partial shape. Neither was
+expressible.
+
+### Why the counter was NOT widened with a keyword match
+
+Measured before deciding. Of 21 occurrences of `concede*` across the vault:
+
+| Shape | Count | Example |
+|---|---:|---|
+| Debater says the OPPONENT concedes X — an **attack** | 18 | "The bull concedes capex is consuming nearly all incremental cash" |
+| Negated | 1 | "None of this is a reason to concede a high-quality... franchise" |
+| Genuine first-person concession | 2 | "I concede that is a genuine overhang" |
+
+A `"I concede"`-style keyword counter would report ~21 concessions where
+there are 2, and would invert the direction of 18 of them — counting an
+attack on the opponent as a surrender to them. Prose is not a channel.
+
+### Fix
+
+1. **`concession_trigger` is decoupled from `stance`.** It names the one
+   opposing `claim_id` accepted this turn, on any stance. The guard's whole
+   point is unchanged and unweakened: the id must still be a real claim
+   belonging to the OTHER side. Severity splits along the two postures
+   already in this module — `stance='concede'` with a bad trigger still
+   RAISES (it changes what the transcript says the debate did), a partial
+   concession with a bad trigger DROPS AND FLAGS like `check_rebuts`
+   (`unresolved_concession: <id>` in `guard_flags`).
+2. **Prompt** (`_SYSTEM_TEMPLATE` rule 6) tells the model the partial shape
+   is the expected one, and that a concession written only in prose is
+   invisible downstream. Prompt-only, and flagged as such in the module
+   docstring — the structural half is what is actually enforced.
+3. **Zero is reported as what it is.** The summary row now reads
+   `N (X full, Y partial)`, and a debate with none carries a caveat saying no
+   turn named an opposing `claim_id` and that this is *not* evidence neither
+   side moved. `_debate_caveats` adds the same as a memo `data_gap`. This
+   half holds regardless of whether the prompt change ever moves the model.
+
+**Not verified live.** No pipeline run was made for this — the change is
+covered by unit tests only, and whether debaters actually start populating
+`concession_trigger` is unmeasured. The reporting fix (3) is deliberately
+independent of that: if the model never fills the field, the artifacts now
+say "nothing was recorded" instead of "nobody moved".

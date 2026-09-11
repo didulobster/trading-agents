@@ -15,7 +15,7 @@ import pytest
 
 import app.agent.trading.infrastructure.synthesis_port as port
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
-from app.agent.trading.domain.decision_memo import ResearchManagerPayload, RiskJudgePayload, Verdict
+from app.agent.trading.domain.decision_memo import ResearchManagerPayload, RiskJudgePayload, Verdict, EvidenceQuality
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.domain.risk import RiskLedgerEntry
 
@@ -414,7 +414,7 @@ async def test_happy_path_assembles_a_complete_memo():
     assert memo.data_as_of_date == date(2026, 8, 19)
     assert "a base gap" in memo.data_gaps
     assert "a base evidence line" in memo.evidence
-    assert 0.0 <= memo.confidence <= 1.0
+    assert 0.0 <= memo.evidence_quality.score <= 1.0
     assert memo.watch_items == _risk_payload()["watch_items"]
     assert memo.bull_case == _research_payload()["bull_case"]
     assert memo.research_thesis == _research_payload()["thesis"]
@@ -554,7 +554,7 @@ def test_verification_works_standalone_not_only_after_run_synthesis():
         ticker="ACN", bull_case="clean", bear_case="clean",
         research_thesis="clean", risk_debate_summary="clean",
         technical_signal="clean", reasoning="Fabricated growth of 63.2%.",
-        watch_items=[], verdict=Verdict.HOLD, confidence=0.5,
+        watch_items=[], verdict=Verdict.HOLD, evidence_quality=EvidenceQuality(score=0.5, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0),
         data_as_of_date=date(2026, 8, 19), data_gaps=[], assumptions=[], evidence=[],
     )
 
@@ -598,7 +598,7 @@ def test_an_unbacked_number_confined_to_watch_items_passes_verification():
         research_thesis="clean", risk_debate_summary="clean",
         technical_signal="clean", reasoning="clean",
         watch_items=["Volume surge above 0.80x of 20-day average would change this."],
-        verdict=Verdict.HOLD, confidence=0.5, data_as_of_date=date(2026, 8, 19),
+        verdict=Verdict.HOLD, evidence_quality=EvidenceQuality(score=0.5, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0), data_as_of_date=date(2026, 8, 19),
         data_gaps=["1 number(s) in the Risk Judge's watch items did not appear "
                    "in any source and may be fabricated: 0.80"],
         assumptions=[], evidence=[],
@@ -619,7 +619,7 @@ def test_an_unbacked_number_confined_to_bull_or_bear_case_passes_verification():
         ticker="ACN", bull_case="Upside could reach $7,777 million.",
         bear_case="clean", research_thesis="clean", risk_debate_summary="clean",
         technical_signal="clean", reasoning="clean", watch_items=[],
-        verdict=Verdict.HOLD, confidence=0.5, data_as_of_date=date(2026, 8, 19),
+        verdict=Verdict.HOLD, evidence_quality=EvidenceQuality(score=0.5, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0), data_as_of_date=date(2026, 8, 19),
         data_gaps=["number 7777 did not appear in any source and may be fabricated"],
         assumptions=[], evidence=[],
     )
@@ -640,7 +640,7 @@ def test_verification_does_not_scan_data_gaps_or_evidence():
         ticker="ACN", bull_case="clean", bear_case="clean",
         research_thesis="clean", risk_debate_summary="clean",
         technical_signal="clean", reasoning="clean",
-        watch_items=[], verdict=Verdict.HOLD, confidence=0.5,
+        watch_items=[], verdict=Verdict.HOLD, evidence_quality=EvidenceQuality(score=0.5, analyst_coverage=1.0, panel_dispersion=0.0, guard_flags=0),
         data_as_of_date=date(2026, 8, 19),
         data_gaps=["number 77.7 did not appear in any source and may be fabricated"],
         assumptions=[], evidence=["[C:margin-hold] cites 77.7 in the debate"],
@@ -652,15 +652,15 @@ def test_verification_does_not_scan_data_gaps_or_evidence():
 
 
 # ---------------------------------------------------------------------------
-# Confidence — computed, not model-emitted
+# Evidence quality — computed, not model-emitted
 # ---------------------------------------------------------------------------
 
-def test_confidence_is_bounded_and_penalizes_contestation_and_flags():
-    full_coverage_uncontested = port.compute_confidence(
+def test_evidence_quality_is_bounded_and_penalizes_contestation_and_flags():
+    full_coverage_uncontested = port.compute_evidence_quality(
         _state(technical_report=object(), news_digest=object()),
         ledger=[], debate_turns=[],
     )
-    heavily_contested = port.compute_confidence(
+    heavily_contested = port.compute_evidence_quality(
         _state(),
         ledger=[
             RiskLedgerEntry(
@@ -668,17 +668,25 @@ def test_confidence_is_bounded_and_penalizes_contestation_and_flags():
                 evidence_ref="none", evidence_quote="", proposed_by="neutral",
                 scores={"aggressive": (5, 5), "conservative": (1, 1)},
                 severity_spread=4, likelihood_spread=4, contested=True,
+                # Set explicitly: `normalized_spread` is a plain field that
+                # `build_risk_ledger` populates, so a hand-built entry leaves
+                # it at 0.0 and the dispersion term never moves.
+                normalized_spread=1.0,
             )
         ],
         debate_turns=[],
     )
-    assert 0.0 <= heavily_contested <= 1.0
-    assert 0.0 <= full_coverage_uncontested <= 1.0
-    assert heavily_contested < full_coverage_uncontested
+    assert 0.0 <= heavily_contested.score <= 1.0
+    assert 0.0 <= full_coverage_uncontested.score <= 1.0
+    assert heavily_contested.score < full_coverage_uncontested.score
+    # The components are carried, not just the composite — the whole point
+    # of the rename is that a reader can see which term moved.
+    assert heavily_contested.panel_dispersion > full_coverage_uncontested.panel_dispersion
+    assert full_coverage_uncontested.analyst_coverage == 1.0
 
 
-def test_confidence_never_exceeds_bounds_regardless_of_inputs():
-    assert 0.0 <= port.compute_confidence(_state(), ledger=[], debate_turns=[]) <= 1.0
+def test_evidence_quality_never_exceeds_bounds_regardless_of_inputs():
+    assert 0.0 <= port.compute_evidence_quality(_state(), ledger=[], debate_turns=[]).score <= 1.0
 
 
 # ---------------------------------------------------------------------------

@@ -23,16 +23,34 @@ def _render(value: str) -> str:
     return value
 
 
-def _confidence_band(confidence: float) -> str:
-    """Display label only — the raw float (`compute_confidence` in
-    synthesis_port.py) is still shown alongside it. Thirds, not calibrated:
-    same "declared prior, not a finding" status as the weights that
-    produce `confidence` itself."""
-    if confidence < 1 / 3:
-        return "LOW"
-    if confidence < 2 / 3:
-        return "MEDIUM"
-    return "HIGH"
+def _render_quality_line(memo: DecisionMemo) -> str:
+    """Evidence quality with its components, and verdict agreement beside it.
+
+    Replaces a `**Confidence:** HIGH (0.93)` line carrying a LOW/MEDIUM/HIGH
+    band over thirds. Both halves of that were the problem: the word invited
+    a reader to take an input-quality score as a probability the verdict is
+    right, and the band restated the same number in language ("HIGH") that
+    invites it harder.
+
+    The components are shown because the composite hides which one moved —
+    `analyst_coverage` is 1.0 on every full run and contributes 0.6 of the
+    score, so a reader comparing 0.94 against 0.97 is really comparing the
+    remaining 0.4. See `EvidenceQuality`.
+    """
+    q = memo.evidence_quality
+    flags = f"{q.guard_flags} guard flag" + ("" if q.guard_flags == 1 else "s")
+    quality = (
+        f"**Evidence quality:** {q.score:.2f} "
+        f"(analyst coverage {q.analyst_coverage:.2f}, "
+        f"panel dispersion {q.panel_dispersion:.2f}, {flags})"
+    )
+    if memo.verdict_agreement is None:
+        return quality
+    agreed = round(memo.verdict_agreement * len(memo.verdict_samples))
+    return (
+        f"**Verdict agreement:** {agreed} of {len(memo.verdict_samples)} "
+        f"({memo.verdict_agreement:.2f})  ·  {quality}"
+    )
 
 
 def _render_verdict_line(memo: DecisionMemo) -> str:
@@ -59,19 +77,19 @@ def _render_verdict_line(memo: DecisionMemo) -> str:
 def _format_memo_markdown(memo: DecisionMemo) -> str:
     lines = [
         f"# {memo.ticker} — Decision Memo",
-        f"{_render_verdict_line(memo)}  ·  **Confidence:** "
-        f"{_confidence_band(memo.confidence)} ({memo.confidence:.2f})",
+        _render_verdict_line(memo),
+        _render_quality_line(memo),
         f"**Data as of:** {memo.data_as_of_date}",
         "",
     ]
 
-    if memo.confidence == 0.0:
+    if memo.evidence_quality.score == 0.0:
         lines += [
-            "> **Treat this memo with extreme caution.** Confidence computed at "
-            "0.00 — some combination of zero analyst coverage, full ledger "
-            "contestation, and heavy guard-flag density. The verdict below is "
-            "the Risk Judge's real output, not a placeholder, but the observables "
-            "confidence is built from say this run saw very little to go on.",
+            "> **Treat this memo with extreme caution.** Evidence quality computed "
+            "at 0.00 — zero analyst coverage, full ledger contestation, and heavy "
+            "guard-flag density together. The verdict below is the Risk Judge's "
+            "real output, not a placeholder, but the observables say this run saw "
+            "very little to go on.",
             "",
         ]
 
@@ -189,7 +207,7 @@ def save_failed_decision_memo(
 def _format_aborted_run_markdown(state, terminated_by: RunTermination) -> str:
     """No DecisionMemo to render — a budget/deadline abort can fire before
     any analyst report exists, and DecisionMemo's required fields (verdict,
-    confidence, ...) assume a completed run. This is deliberately a
+    evidence_quality, ...) assume a completed run. This is deliberately a
     different, looser shape: which stages the run reached before it stopped,
     and why, never a verdict-shaped stand-in for one it never reached."""
     events = state.get("cost_events") or []

@@ -174,11 +174,103 @@ async def test_conceding_to_your_own_earlier_claim_raises():
 
 
 @pytest.mark.anyio
-async def test_concession_trigger_on_a_non_concede_stance_raises():
+async def test_partial_concession_on_a_hold_stance_is_accepted():
+    """The shape that actually occurs, and the one the old guard rejected.
+
+    `concession_trigger` used to be an error on any stance but 'concede', so
+    the only concession the schema accepted was total capitulation — which no
+    debater with a case ever offers. Result: across all 42 vault transcripts,
+    249 turns, zero `concede`, and every summary reporting zero concessions
+    while debaters conceded in prose (MSFT 2026-08-29 turn 2). Accepting a
+    point you cannot answer while holding your overall case is now
+    expressible, and still has to name a real opposing claim_id.
+    """
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    client = _FakeClient(
+        [_payload(stance="hold", concession_trigger="margin-hold", claims=[
+            {"claim_id": "cost-drag", "text": "Costs still bite.", "evidence_ref": "none"}
+        ])]
+    )
+
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bear", 1, client=client
+    )
+
+    assert turn.payload.stance == "hold"
+    assert turn.payload.concession_trigger == "margin-hold"
+    assert turn.guard_flags == []
+
+
+@pytest.mark.anyio
+async def test_partial_concession_to_your_own_claim_is_dropped_and_flagged():
+    """Agreeing with yourself is still not a concession — but on a partial
+    one it drops and flags rather than killing the run, matching
+    `check_rebuts`. The stance, argument and claims are untouched by a bad
+    pointer; a full `stance='concede'` with the same bad id still raises,
+    because that one changes what the transcript says the debate did.
+    """
+    turns = [_turn(0, "bull", ["margin-hold"]), _turn(1, "bear", ["margin-soft"])]
     client = _FakeClient([_payload(stance="hold", concession_trigger="margin-hold")])
 
-    with pytest.raises(ValueError, match="non-concede stance"):
-        await port.run_debate_turn(_state(), "bull", 0, client=client)
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bull", 2, client=client
+    )
+
+    assert turn.payload.concession_trigger == ""
+    # A concession pointing at nothing is a structural finding, not a figure:
+    # it must not reach the list the memo renders as "may be fabricated".
+    assert turn.unresolved_flags == ["unresolved_concession: margin-hold"]
+    assert turn.guard_flags == []
+
+
+def test_partial_concession_to_an_invented_claim_is_dropped():
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    payload = DebateTurnPayload.model_validate(
+        _payload(stance="sharpen", concession_trigger="invented-id")
+    )
+
+    assert port.check_concession(payload, turns, "bear") == "invented-id"
+    assert payload.concession_trigger == ""
+
+
+def test_a_clean_turn_drops_nothing():
+    turns = [_turn(0, "bull", ["margin-hold"])]
+    payload = DebateTurnPayload.model_validate(_payload(stance="hold"))
+
+    assert port.check_concession(payload, turns, "bear") is None
+
+
+# ---------------------------------------------------------------------------
+# (a1) The summary must not report "0 concessions" as if it meant "nobody
+# moved". It counts named claim_ids; a concession made only in the argument
+# prose is not one, and that distinction has to survive into the transcript.
+# ---------------------------------------------------------------------------
+
+def test_summary_counts_partial_concessions():
+    turns = [
+        _turn(0, "bull", ["margin-hold"]),
+        _turn(1, "bear", ["margin-soft"]),
+    ]
+    turns[1].payload.concession_trigger = "margin-hold"
+
+    md = port._format_debate_markdown("ACN", turns, "round_cap")
+
+    assert "| Structurally-justified concessions | 1 (0 full, 1 partial) |" in md
+    assert "*concedes to:* `margin-hold` (partial)" in md
+    assert "No concession was recorded structurally" not in md
+
+
+def test_zero_concessions_is_reported_as_a_limit_of_the_count():
+    """The defect this whole change is about: the table said 0 while the
+    Research Manager quoted a concession out of the same transcript's prose.
+    Zero is now stated as "no id was named", not as "neither side moved"."""
+    turns = [_turn(0, "bull", ["margin-hold"]), _turn(1, "bear", ["margin-soft"])]
+
+    md = port._format_debate_markdown("ACN", turns, "round_cap")
+
+    assert "| Structurally-justified concessions | 0 (0 full, 0 partial) |" in md
+    assert "No concession was recorded structurally" in md
+    assert "it is NOT evidence that neither side moved" in md
 
 
 # ---------------------------------------------------------------------------
@@ -201,26 +293,28 @@ def test_rebutting_a_real_opposing_claim_is_accepted():
     )   # does not raise
 
 
-def test_rebutting_a_claim_nobody_made_raises():
-    with pytest.raises(ValueError, match="hallucinated id or the debater's own side"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(_payload(rebuts=["invented-id"])),
-            [],
-            "bear",
-        )
+def test_rebutting_a_claim_nobody_made_is_dropped_and_reported():
+    """Was a raise until 2026-08-29. It killed an AVGO run that had already
+    paid for fundamentals, news and technical — $0.1586 for no memo —
+    because deepseek-v4-flash named an id in no transcript. A dangling
+    rebuts is a bad pointer inside an otherwise sound turn."""
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["invented-id"]))
+
+    dropped = port.check_rebuts(payload, [], "bear")
+
+    assert dropped == ["invented-id"]
+    assert payload.rebuts == []   # the transcript keeps no dangling reference
 
 
-def test_rebutting_your_own_earlier_claim_raises():
+def test_rebutting_your_own_earlier_claim_is_dropped():
     """A rebuttal names an OPPONENT's claim. Naming your own is not a
     rebuttal, and check_concession draws the same side/opposing-side line for
     the same reason."""
     turns = [_turn(0, "bull", ["own-claim"])]
-    with pytest.raises(ValueError, match="own side"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(_payload(rebuts=["own-claim"])),
-            turns,
-            "bull",
-        )
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["own-claim"]))
+
+    assert port.check_rebuts(payload, turns, "bull") == ["own-claim"]
+    assert payload.rebuts == []
 
 
 def test_rebutting_an_older_opposing_claim_is_still_accepted():
@@ -232,37 +326,44 @@ def test_rebutting_an_older_opposing_claim_is_still_accepted():
         _turn(0, "bull", ["early-claim"]),
         _turn(1, "bear", ["bear-claim"]),
     ]
-    port.check_rebuts(
-        DebateTurnPayload.model_validate(_payload(rebuts=["early-claim"])),
-        turns,
-        "bear",
-    )   # does not raise
+    payload = DebateTurnPayload.model_validate(_payload(rebuts=["early-claim"]))
+    assert port.check_rebuts(payload, turns, "bear") == []
+    assert payload.rebuts == ["early-claim"]   # untouched
 
 
-def test_one_hallucinated_id_among_real_ones_still_raises():
+def test_only_the_hallucinated_id_is_dropped_and_the_real_one_survives():
+    """The whole point of dropping rather than raising: a turn that rebuts
+    one real claim and one invented one has done something worth keeping."""
     turns = [_turn(0, "bull", ["real-id"])]
-    with pytest.raises(ValueError, match=r"\['fake-id'\]"):
-        port.check_rebuts(
-            DebateTurnPayload.model_validate(
-                _payload(rebuts=["real-id", "fake-id"])
-            ),
-            turns,
-            "bear",
-        )
+    payload = DebateTurnPayload.model_validate(
+        _payload(rebuts=["real-id", "fake-id"])
+    )
+
+    assert port.check_rebuts(payload, turns, "bear") == ["fake-id"]
+    assert payload.rebuts == ["real-id"]
 
 
 @pytest.mark.anyio
-async def test_run_debate_turn_raises_on_a_hallucinated_rebuttal():
-    """The end-to-end path, not just the unit function: a turn whose payload
-    names a rebuttal id that does not exist must fail the node, the same way
-    an unjustified concession does."""
+async def test_run_debate_turn_survives_a_hallucinated_rebuttal_and_flags_it():
+    """The end-to-end path. This used to assert the node FAILED; it now
+    asserts the node survives, because killing a run over a bad pointer
+    costs everything already spent on fundamentals, news and technical —
+    measured at $0.1586 on the AVGO run of 2026-08-29.
+
+    The failure must still be visible, or dropping it would be worse than
+    raising: silent repair of model output is how a transcript stops
+    describing what happened."""
     turns = [_turn(0, "bull", ["real-id"])]
     client = _FakeClient([_payload(rebuts=["invented-id"])])
 
-    with pytest.raises(ValueError, match="hallucinated id"):
-        await port.run_debate_turn(
-            _state(debate_turns=turns), "bear", 1, client=client
-        )
+    turn = await port.run_debate_turn(
+        _state(debate_turns=turns), "bear", 1, client=client
+    )
+
+    assert turn.payload.rebuts == []
+    assert any("unresolved_rebuts" in f for f in turn.unresolved_flags)
+    assert any("invented-id" in f for f in turn.unresolved_flags)
+    assert turn.guard_flags == []
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +470,42 @@ def test_typographic_minus_is_normalized_before_the_sign_is_read():
 def test_the_same_fabricated_figure_repeated_is_one_finding():
     text = "71.4 billion, up from 71.4 the prior year, so 71.4 stands."
     assert port._flag_debate_numbers(text, PACK) == ["71.4"]
+
+
+def test_a_decline_written_as_a_negative_clears_against_an_unsigned_source():
+    """Found on the discrimination probe (MSFT, 2026-08-29). The news feed
+    states a decline in words — "Cuts Share Stake In Microsoft Corp By 36.8%"
+    — and the debater wrote it as a signed delta, "Viking -36.8%". That was
+    reported to the reader as a possibly fabricated figure in the memo's data
+    gaps, on a run whose only other flags were real. Prose puts the direction
+    in the verb; a debater putting it in the sign is restating, not
+    inventing."""
+    pack = "NEWS: Viking Global Investors Cuts Share Stake In Microsoft Corp By 36.8%."
+    assert port._flag_debate_numbers("Investors are exiting (Viking -36.8%).", pack) == []
+    assert port._flag_debate_numbers("Investors are exiting (Viking 36.8%).", pack) == []
+
+
+def test_a_source_negative_restated_without_its_sign_also_clears():
+    """The same equivalence in the other direction: the pack carries the sign
+    and the prose carries the word."""
+    pack = "FUNDAMENTALS: free cash flow of -44,708 million."
+    assert port._flag_debate_numbers("FCF was negative 44,708 million.", pack) == []
+
+
+def test_a_sign_inversion_of_a_sourced_figure_is_no_longer_reported():
+    """The cost of the two tests above, asserted rather than left to be
+    discovered from a memo. This guard answers "does this figure have a
+    source", and a magnitude in the pack was not invented; reading it in the
+    wrong direction is a different defect needing a check that knows what the
+    number means."""
+    pack = "FUNDAMENTALS: revenue grew 5.2% year over year."
+    assert port._flag_debate_numbers("Revenue fell -5.2%.", pack) == []
+
+
+def test_magnitude_matching_does_not_widen_the_guard_beyond_the_sign():
+    """A figure absent from the pack is still flagged at either sign — the
+    change is an equivalence between "-x" and "x", not a tolerance."""
+    assert port._flag_debate_numbers("Revenue reached -71.4 billion.", PACK) == ["-71.4"]
 
 
 @pytest.mark.anyio
@@ -585,6 +722,164 @@ def test_canonical_claims_of_an_empty_transcript_is_empty():
     assert canonical_claims([]) == {}
 
 
+def test_the_fabricated_figure_list_holds_only_figures():
+    """Live on FIG (2026-08-30), where the memo told its reader:
+
+        1 mention(s) of 1 figure(s) in the debate did not appear in any
+        analyst report and may be fabricated: unresolved_rebuts:
+        fig-share-count
+
+    which is not a figure and was never claimed to be one. `guard_flags` is
+    rendered under that sentence by both the memo and the transcript, so a
+    structural finding placed in it is described to the reader as a possible
+    fabrication."""
+    from app.agent.trading.domain.debate import DebateTurn
+
+    turn = DebateTurn(
+        turn_index=0, round_num=1, side="bull",
+        payload=DebateTurnPayload.model_validate(_payload()),
+        guard_flags=["71.4"],
+        unresolved_flags=["unresolved_rebuts: fig-share-count"],
+    )
+
+    assert turn.guard_flags == ["71.4"]
+    assert "fig-share-count" not in " ".join(turn.guard_flags)
+
+
+def test_splitting_the_kinds_does_not_raise_evidence_quality():
+    """The count behind `evidence_quality` is "how many findings", not "how
+    many findings of one kind". Moving entries into their own list must not
+    make a memo look better sourced than it was."""
+    from app.agent.trading.domain.debate import DebateTurn
+    from app.agent.trading.infrastructure.synthesis_port import compute_evidence_quality
+
+    payload = DebateTurnPayload.model_validate(_payload())
+    everything_in_one_list = DebateTurn(
+        turn_index=0, round_num=1, side="bull", payload=payload,
+        guard_flags=["71.4", "unresolved_rebuts: x", "'widening' but ..."],
+    )
+    split_by_kind = DebateTurn(
+        turn_index=0, round_num=1, side="bull", payload=payload,
+        guard_flags=["71.4"],
+        unresolved_flags=["unresolved_rebuts: x"],
+        direction_flags=["'widening' but ..."],
+    )
+
+    before = compute_evidence_quality(_state(), [], [everything_in_one_list])
+    after = compute_evidence_quality(_state(), [], [split_by_kind])
+
+    assert after.guard_flags == before.guard_flags == 3
+    assert after.score == before.score
+
+
+# ---------------------------------------------------------------------------
+# (d2) Direction guard — the figures are right and the sentence is not
+#
+# Every false-positive case below is a real sentence from the vault that an
+# earlier version of this guard flagged. The corpus is the test: over 36
+# transcripts the shipped version returns exactly one finding, the NFLX one.
+# ---------------------------------------------------------------------------
+
+def test_a_trend_word_contradicted_by_its_own_figures_is_flagged():
+    """The finding this exists for, live on two NFLX runs a day apart. Both
+    figures are in the fundamentals memo, so the number guard cleared them and
+    the quote check had nothing to say — and 832 against 1,351 is the gap
+    NARROWING."""
+    found = port._flag_direction_claims(
+        "a persistent OCF/NI gap that is widening — FY2025 gap of $832M "
+        "versus FY2024's $1,351M shortfall."
+    )
+
+    assert found == ["'widening' but FY2025 832M is below FY2024 1,351M"]
+
+
+def test_a_trend_word_its_figures_agree_with_is_silent():
+    assert port._flag_direction_claims(
+        "Revenue grew from $477,839K in H1 2025 to $703,522K in H1 2026."
+    ) == []
+    assert port._flag_direction_claims(
+        "The gap narrowed from $1.351B in FY2024 to $832M in FY2025."
+    ) == []
+
+
+def test_figures_written_before_their_period_still_pair_correctly():
+    """AVGO, 2026-08-29 — a CORRECT claim the first version flagged. Reading
+    only "period then figure" paired FY2024 with the number on the far side of
+    it, and inverted the comparison."""
+    assert port._flag_direction_claims(
+        "Total debt/operating income fell from 5.19x (FY2024) to 2.63x "
+        "(FY2025), below the 3.0x trip-line."
+    ) == []
+
+
+def test_a_deepening_decline_is_not_a_contradiction():
+    """ACN, 2026-08-29 — "bookings declined ~1% FY2025 and 2-3% Q3 FY2026" is
+    a decline getting worse, and its figures rise. A delta carries its
+    direction in the verb."""
+    assert port._flag_direction_claims(
+        "Leading indicator declined ~1% FY2025 and 2-3% Q3 FY2026."
+    ) == []
+    assert port._flag_direction_claims(
+        "The order-book risk is the declining leading indicator "
+        "(bookings \u22121% FY2025, \u22122-3% Q3 FY2026)."
+    ) == []
+
+
+def test_a_verb_governing_a_different_quantity_is_not_read_against_the_years():
+    """FIG, 2026-08-29 — the years carry FCF and "grew" belongs to revenue,
+    which has no year attached. The trend word must PRECEDE the figures it is
+    read against."""
+    assert port._flag_direction_claims(
+        "FCF fell 8.6% YoY (H1 2026 $141.8M vs H1 2025 $155.2M) while revenue "
+        "grew +47.2%."
+    ) == []
+
+
+def test_a_form_name_is_not_a_figure():
+    """NFLX risk panel — "the FY2026 10-K shows" offered 10 as FY2026's
+    figure, against a real $832M for FY2025."""
+    assert port._flag_direction_claims(
+        "If the FY2026 10-K shows OCF trailing NI by less than the FY2025 gap "
+        "of ~$832M, with content cash additions growing no faster than "
+        "amortization, I lower severity."
+    ) == []
+
+
+def test_a_markdown_row_is_not_one_sentence():
+    """FIG, 2026-08-24 — a metrics table joined a revenue figure to a verb
+    from the claim row beneath it."""
+    assert port._flag_direction_claims(
+        "| Revenue FY2025 $1,055.8M For H1 2026 SBC expense: $316.6M | "
+        "`ar-divergence` | Accounts receivable grew 88.8% |"
+    ) == []
+
+
+def test_two_quantities_of_different_units_are_never_compared():
+    assert port._flag_direction_claims(
+        "IC margin fell to 41.3% in FY2026 from revenue of $106,265M in FY2025."
+    ) == []
+
+
+def test_an_ambiguous_direction_word_says_nothing():
+    """A deteriorating ratio falls and a deteriorating gap rises. Neither
+    vocabulary claims it."""
+    assert port._flag_direction_claims(
+        "Earnings quality is deteriorating — FY2025 at $832M against FY2024's "
+        "$1,351M."
+    ) == []
+
+
+def test_four_periods_in_one_sentence_are_left_alone():
+    """Which pair the trend word governs is a question this cannot answer, so
+    it does not try. (A semicolon would split this into two sentences, which
+    is why the real MSFT line — which carries no trend word at all — never
+    reaches the comparison either.)"""
+    assert port._flag_direction_claims(
+        "Margins are falling, with PBP FY2026 at 59.9% vs FY2025 57.8% and IC "
+        "FY2026 at 41.3% vs FY2025 42.0%."
+    ) == []
+
+
 # ---------------------------------------------------------------------------
 # (e) Quote verification
 # ---------------------------------------------------------------------------
@@ -616,6 +911,99 @@ def test_quote_matching_tolerates_whitespace_differences():
         }])
     )
     assert port.check_quotes(payload, port.report_texts(_state())) == []
+
+
+def test_quote_matching_tolerates_markdown_emphasis_in_the_report():
+    """Found on the discrimination probe (MSFT, 2026-08-29). The report wrote
+    "internal control ... was **not effective** as of 2026-06-30"; the
+    debater quoted the sentence as a reader sees it, without the asterisks,
+    and its claim was reported as citing a span not in the report — the one
+    claim the run's SELL verdict rested on."""
+    state = _state(
+        fundamentals_report=FundamentalsReport(
+            ticker="ACN",
+            summary=(
+                "Item 9A states that internal control over financial "
+                "reporting was **not effective** as of 2026-06-30."
+            ),
+            input_tokens=0,
+            cache_write_tokens=0,
+            cache_read_tokens=0,
+            output_tokens=0,
+            generated_at=date(2026, 8, 19),
+        )
+    )
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "icfr-not-effective",
+            "text": "ICFR was not effective at year end.",
+            "evidence_ref": "fundamentals",
+            "evidence_quote": (
+                "internal control over financial reporting was not effective "
+                "as of 2026-06-30"
+            ),
+        }])
+    )
+    assert port.check_quotes(payload, port.report_texts(state)) == []
+
+
+def test_a_model_written_verbatim_label_is_not_part_of_the_quote():
+    """Found on the NFLX run (2026-08-29): the model labelled its own span,
+    `"Verbatim: Operating cash flow (...) trailed net income (...)"`, and
+    everything after the label was exact. The label alone was the whole
+    reason that claim — the pivot of the debate — was reported as citing a
+    span not in the report."""
+    claim = DebateClaim(
+        claim_id="margin-hold",
+        text="Margin is stable.",
+        evidence_ref="fundamentals",
+        evidence_quote="Verbatim: operating margin of 34.1%",
+    )
+
+    assert claim.evidence_quote == "operating margin of 34.1%"
+
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[claim.model_dump()])
+    )
+    assert port.check_quotes(payload, port.report_texts(_state())) == []
+
+
+def test_the_word_quote_inside_a_span_is_left_alone():
+    """Only a leading label with its colon comes off — the stripping must not
+    reach into the quoted text itself."""
+    claim = DebateClaim(
+        claim_id="margin-hold",
+        text="Margin is stable.",
+        evidence_ref="fundamentals",
+        evidence_quote="Quotes rose while operating margin of 34.1% held",
+    )
+
+    assert claim.evidence_quote.startswith("Quotes rose")
+
+
+def test_the_blank_sentinel_still_normalizes_through_the_label_strip():
+    """Both validators run on one field; 'none' still means absent."""
+    claim = DebateClaim(
+        claim_id="reasoned", text="Follows from the above.",
+        evidence_ref="none", evidence_quote="none",
+    )
+
+    assert claim.evidence_quote == ""
+
+
+def test_stripping_emphasis_does_not_let_a_false_quote_verify():
+    """The markers come off BOTH sides, so the check still turns on the
+    words: a quote that misstates the report fails whatever its
+    formatting."""
+    payload = DebateTurnPayload.model_validate(
+        _payload(claims=[{
+            "claim_id": "margin-hold",
+            "text": "Margin is stable.",
+            "evidence_ref": "fundamentals",
+            "evidence_quote": "operating **margin** of 51.9%",
+        }])
+    )
+    assert port.check_quotes(payload, port.report_texts(_state())) == ["margin-hold"]
 
 
 def _technical_state() -> dict:

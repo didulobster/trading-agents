@@ -49,6 +49,7 @@ from app.agent.trading.domain.risk import (
 from app.agent.trading.infrastructure.debate_port import (
     _flag_debate_numbers,
     _inline_refs,
+    _flag_direction_claims,
     _norm,
     create_with_temperature_fallback,
     reasoning_config,
@@ -382,6 +383,9 @@ def _check_turn(
     number_corpus = "\n\n".join(texts.values()) + "\n\n" + debate_corpus + "\n\n" + prior_risk_corpus
     scan_text = payload.argument + "\n" + "\n".join(s.rationale for s in payload.scores)
     flags.extend(f"unbacked_number: {n}" for n in _flag_debate_numbers(scan_text, number_corpus))
+    # Same text, the other question: not where the figures came from, but
+    # whether the sentence describing them has them moving the right way.
+    flags.extend(f"contradicted_direction: {d}" for d in _flag_direction_claims(scan_text))
 
     return flags, unquoted
 

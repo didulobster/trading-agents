@@ -99,6 +99,39 @@ class RiskJudgePayload(BaseModel):
     verdict: IndividualVerdict = Field(description="THE final verdict. buy/sell/hold — no fourth option.")
 
 
+class EvidenceQuality(BaseModel):
+    """What this run had to work with — NOT how likely the verdict is right.
+
+    Renamed from `confidence` on 2026-08-29, because that name promised a
+    probability and delivered an input-quality measure. `score` is
+    `0.6*analyst_coverage + 0.3*(1 - panel_dispersion) + 0.1*(1 - guard_flags/10)`,
+    so on any full run `analyst_coverage` is 1.0 and **0.6 of the number is
+    a constant**; the informative part is roughly five points of a 0-1 scale
+    that reads like a probability.
+
+    Two live measurements of what the old name cost a reader: it moved
+    0.92 -> 0.96 between two runs of the same ticker on identical input (a
+    fresh panel means a different ledger, so `panel_dispersion` and the flag
+    count genuinely differ), and it reported 0.97 on a 2-1 verdict split
+    against 0.94 on a unanimous one — because `panel_dispersion` is
+    agreement WITHIN a trial, computed before any vote exists.
+
+    The three components ride alongside the composite so a reader can see
+    which one moved instead of being handed a single number whose weights
+    are, as `compute_evidence_quality` has always said, a judgement call and
+    not a calibration.
+
+    For "did independent trials agree on the verdict", read
+    `verdict_agreement` and `verdict_samples`. Different question, different
+    field, and the one the earlier `confidence` was most often mistaken for.
+    """
+
+    score: float
+    analyst_coverage: float
+    panel_dispersion: float
+    guard_flags: int
+
+
 class DecisionMemo(BaseModel):
     ticker: str
     bull_case: str
@@ -131,7 +164,11 @@ class DecisionMemo(BaseModel):
     # UNRESOLVED (or a majority) verdict, not a bare label — see
     # `application/nodes.py`'s majority-of-N sampling.
     verdict_samples: list[str] = []
-    confidence: float
+    evidence_quality: EvidenceQuality
+    # k/n over `verdict_samples`: the share of independent trials that
+    # reached the reported verdict. None when no sampling ran, which is a
+    # different state from 1.0 and must not be rendered as one.
+    verdict_agreement: float | None = None
     data_as_of_date: date
     data_gaps: list[str] = []
     assumptions: list[str] = []

@@ -15,10 +15,12 @@ from app.infrastructure.llm import client as client_mod
 from app.infrastructure.llm.client import (
     ProviderNotConfigured,
     RoutingClient,
+    create_with_temperature_fallback,
     get_client,
     resolve_provider,
 )
 from app.infrastructure.llm.openai_compat import (
+    LLMBadRequestError,
     OpenAICompatClient,
     _translate_messages,
     _translate_tool_choice,
@@ -39,6 +41,7 @@ from app.infrastructure.llm.openai_compat import (
         ("deepseek-v4-flash", "deepseek"),
         ("deepseek-v4-pro", "deepseek"),
         ("gpt-4.1-nano", "openai"),
+        ("gpt-5.6-luna", "openai"),
         # An id nothing matches must not silently pick a paid third party.
         ("some-unknown-model", "anthropic"),
         (None, "anthropic"),
@@ -563,6 +566,154 @@ async def test_an_effort_the_provider_does_not_have_is_dropped_not_rounded(captu
         output_config={"effort": "medium"},
     )
     assert sent["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+# ---------------------------------------------------------------------------
+# OpenAI GPT-5 family — request shape found live against gpt-5.6-luna
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def openai_capture(monkeypatch):
+    """The shim exactly as `get_client` builds it for OpenAI, with the
+    request captured instead of sent."""
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    shim = get_client("gpt-5.6-luna")
+    sent = {}
+
+    async def fake_create(**kwargs):
+        sent.clear()
+        sent.update(kwargs)
+        return _completion(content="ok")
+
+    monkeypatch.setattr(shim._client.chat.completions, "create", fake_create)
+    return shim, sent
+
+
+@pytest.mark.anyio
+async def test_openai_gets_max_completion_tokens_not_max_tokens(openai_capture):
+    """Live 400 on gpt-5.6-luna: "Unsupported parameter: 'max_tokens' is not
+    supported with this model. Use 'max_completion_tokens' instead." Every
+    call in the pipeline sends a cap, so this failed all of them."""
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model="gpt-5.6-luna", max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert sent["max_completion_tokens"] == 512
+    assert "max_tokens" not in sent
+
+
+@pytest.mark.anyio
+async def test_gpt_5x_with_no_thinking_sends_reasoning_effort_none(openai_capture):
+    """Same rule as DeepSeek's `thinking`: absent means off, sent
+    explicitly, so reasoning tokens cannot eat a small output cap."""
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model="gpt-5.6-luna", max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "tool", "name": "f"},
+    )
+    assert sent["reasoning_effort"] == "none"
+    assert "extra_body" not in sent
+
+
+@pytest.mark.anyio
+async def test_gpt_5x_carries_a_requested_effort_through(openai_capture):
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model="gpt-5.6-luna", max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+        thinking={"type": "adaptive"},
+        output_config={"effort": "low"},
+    )
+    assert sent["reasoning_effort"] == "low"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("output_config", [{"effort": "low"}, None])
+async def test_gpt_5x_with_tools_pins_reasoning_effort_none(openai_capture, output_config):
+    """Live 400 on gpt-5.6-luna: "Function tools with reasoning_effort are
+    not supported ... in /v1/chat/completions". Every port calls with
+    tools, so a requested effort must not reach the wire — and neither may
+    an unset one, because the default is not "none"."""
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model="gpt-5.6-luna", max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "f", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "auto"},
+        thinking={"type": "adaptive"},
+        output_config=output_config,
+    )
+    assert sent["reasoning_effort"] == "none"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("model", ["gpt-4.1-nano", "gpt-5", "gpt-5-mini"])
+async def test_models_without_reasoning_effort_none_are_not_sent_it(openai_capture, model):
+    """gpt-4.1 rejects `reasoning_effort` outright and the original gpt-5
+    has no "none" — only the dotted GPT-5.x ids get it."""
+    shim, sent = openai_capture
+    await shim.messages.create(
+        model=model, max_tokens=512,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert "reasoning_effort" not in sent
+    assert sent["max_completion_tokens"] == 512
+
+
+# ---------------------------------------------------------------------------
+# Temperature fallback — OpenAI's wording, and the decomposer that needs it
+# ---------------------------------------------------------------------------
+
+class _RejectsTemperatureOnce:
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.messages = self
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if "temperature" in kwargs:
+            raise LLMBadRequestError(
+                "Error code: 400 - {'error': {'message': \"Unsupported value: "
+                "'temperature' does not support 0 with this model. Only the "
+                "default (1) value is supported.\", 'param': 'temperature'}}"
+            )
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="share repurchase program\nrepurchases of common stock")],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+
+
+@pytest.mark.anyio
+async def test_openai_temperature_rejection_retries_without_it():
+    client = _RejectsTemperatureOnce()
+    await create_with_temperature_fallback(
+        client, model="gpt-5.6-luna", max_tokens=100, temperature=0,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert len(client.calls) == 2
+    assert "temperature" not in client.calls[1]
+
+
+@pytest.mark.anyio
+async def test_decomposer_survives_a_model_that_rejects_temperature(monkeypatch):
+    """The decomposer hard-codes temperature=0 and had no fallback, so on a
+    model that rejects it every /ask that needed a rewrite raised."""
+    from app.application.query_decomposer import QueryDecomposer
+
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    decomposer = QueryDecomposer(model="gpt-5.6-luna")
+    decomposer._client = _RejectsTemperatureOnce()
+    monkeypatch.setattr(decomposer, "needs_rewrite", lambda q: "expand")
+
+    result = await decomposer.decompose("Apple buybacks fiscal 2024")
+
+    assert result.was_decomposed
+    assert result.sub_queries == ["share repurchase program", "repurchases of common stock"]
 
 
 @pytest.fixture

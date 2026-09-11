@@ -9,6 +9,8 @@ unbounded loop.
 
 from __future__ import annotations
 
+import re
+
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -35,7 +37,10 @@ EvidenceRef = Literal["fundamentals", "technical", "news", "sentiment", "none"]
 # one it writes a stray "</antml parameter>" marker instead, and that landed
 # in `concession_trigger` on 4 of 4 live turns — which then tripped the
 # concession guard on a turn that was not conceding anything. Asking for the
-# literal 'none' produced a clean first attempt every time.
+# literal 'none' produced a clean first attempt every time. (That trip was
+# the old stance-gated guard, which raised on any trigger set outside
+# stance='concede'; it now drops and flags instead. The sentinel is still
+# what keeps a stray marker out of the field in the first place.)
 #
 # So the wire protocol uses a sentinel and Python normalizes it back: "" stays
 # the internal meaning of "absent", and nothing downstream has to know. A
@@ -47,6 +52,26 @@ _BLANK_SENTINELS = frozenset({"none", "null", "n/a", ""})
 def _normalize_blank(value: object) -> object:
     if isinstance(value, str) and value.strip().lower() in _BLANK_SENTINELS:
         return ""
+    return value
+
+# The field asks for a verbatim span, and the model sometimes labels the span
+# as one: `"Verbatim: Operating cash flow ($10,149,273k FY2025; ...) trailed
+# net income ..."` (NFLX, 2026-08-29), where everything after the label was
+# exact. `check_quotes` compares the WHOLE field against the report, so four
+# characters of the model's own bookkeeping turned a faithful quote into
+# "cites a report but the quoted span is not in it" — on the claim that
+# debate turned on.
+#
+# Stripped in the domain rather than inside the check, so the transcript and
+# the vault memo show the span the model meant too. Only these labels, only
+# at the start, only with the colon: a report sentence that genuinely opens
+# this way still matches, because the tail is what gets compared either way.
+_QUOTE_LABEL = re.compile(r"^\s*(?:verbatim quote|verbatim|quoted|quote)\s*[:\-\u2014]\s*", re.I)
+
+
+def _strip_quote_label(value: object) -> object:
+    if isinstance(value, str):
+        return _QUOTE_LABEL.sub("", value, count=1)
     return value
 
 
@@ -75,7 +100,7 @@ class DebateClaim(BaseModel):
     )
 
     _blank = field_validator("evidence_quote", mode="before")(
-        lambda v: _normalize_blank(v)
+        lambda v: _normalize_blank(_strip_quote_label(v))
     )
 
 
@@ -83,11 +108,19 @@ class DebateTurnPayload(BaseModel):
     """EXACTLY what the LLM returns. No indices, no counters, no side."""
 
     stance: Stance
+    # NOT gated on stance. A debater who accepts one opposing point and holds
+    # the rest is the shape that actually occurs — see check_concession's
+    # docstring for the 249-turn transcript survey that found zero
+    # `stance='concede'` turns and prose concessions on `hold` ones.
     concession_trigger: str = Field(
         default="",
         description=(
-            "The opposing claim_id that moved you. The literal string 'none' "
-            "unless stance='concede'. Never an empty string."
+            "The ONE opposing claim_id you accept as correct this turn, on "
+            "ANY stance — including 'hold', where you accept that point but "
+            "hold your overall case. Required when stance='concede'. If your "
+            "argument text concedes a point, that point's id belongs here. "
+            "The literal string 'none' if you accepted nothing. Never an "
+            "empty string."
         ),
     )
     argument: str = Field(description="<=200 words.")
@@ -149,8 +182,24 @@ class DebateTurn(BaseModel):
     # node cannot write to a plain overwrite channel without clobbering its
     # own earlier turns, and adding a second reducer would be a second source
     # of truth for the same content. The synthesizer aggregates across turns.
+    # Numeric findings ONLY — figures that are not in any analyst report. The
+    # synthesizer and the transcript both render this list under that
+    # sentence, so anything else put here is described to the reader as a
+    # possibly fabricated figure. Live on FIG (2026-08-30): "may be
+    # fabricated: unresolved_rebuts: fig-share-count", which is not a figure.
     guard_flags: list[str] = Field(default_factory=list)
+
+    # Structural findings about the turn's own bookkeeping: a `rebuts` naming
+    # a claim_id nobody made, a concession pointing at nothing.
+    unresolved_flags: list[str] = Field(default_factory=list)
+
     unquoted_evidence: list[str] = Field(default_factory=list)
+
+    # Kept out of `guard_flags` deliberately: the synthesizer renders that
+    # list as "figure(s) ... did not appear in any analyst report and may be
+    # fabricated", and a direction finding is the opposite claim — the
+    # figures are in the reports, and the sentence about them is not.
+    direction_flags: list[str] = Field(default_factory=list)
 
     input_tokens: int = 0
     output_tokens: int = 0
