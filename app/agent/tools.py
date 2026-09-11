@@ -339,9 +339,11 @@ def _strictify(schema: dict) -> dict:
     recovered tool call still costs a turn against LOOP_MAX_TURNS — which
     the priciest runs already exhaust.
 
-    An optional property becomes `["<type>", "null"]`, and the dispatch
-    code reads those through `.get()`, so an explicit null behaves exactly
-    as the previously-absent key did.
+    An optional property becomes `["<type>", "null"]`, so a model that
+    leaves one unset sends an explicit null rather than omitting the key.
+    Dispatch code must read optional arguments as `inputs.get(k) or default`:
+    `inputs.get(k, default)` returns the None, not the default, and that is
+    how `ingest_ticker` came to send `limit: null` to /ingest.
     """
     if schema.get("type") != "object":
         return schema
@@ -570,8 +572,12 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return resp.text
 
         if name == "ingest_ticker":
-            payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit", 3)}
-            if "form_type" in inputs:
+            # `or`, not `.get(key, default)`: strict tool calling makes every
+            # optional argument required-but-nullable, so a model that leaves
+            # `limit` unset sends `"limit": null`. `.get("limit", 3)` returned
+            # None for that, and /ingest's `limit: int` rejected it with a 422.
+            payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit") or 3}
+            if inputs.get("form_type"):
                 payload["form_type"] = inputs["form_type"]
             resp = await http.post(f"{API_BASE}/ingest", json=payload)
             if resp.status_code != 200:

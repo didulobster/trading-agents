@@ -243,16 +243,20 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     extractor = MetricsExtractor()
     metrics_repo = MetricsRepository(session_factory=None)
 
-    # In extract() endpoint, before gather_extraction_chunks:
-    window_start = req.filed_date - timedelta(days=30)
-    window_end = req.filed_date + timedelta(days=30)
+    # The window defaults to filed_date ± 30 days; a caller that names its
+    # own bounds gets them. The extract_metrics tool has always offered
+    # filed_after/filed_before to the agent, and they used to be ignored
+    # here, so the agent was steering with a control connected to nothing.
+    window_start = req.filed_after or req.filed_date - timedelta(days=30)
+    window_end = req.filed_before or req.filed_date + timedelta(days=30)
+    if window_start > window_end:
+        raise HTTPException(
+            400, f"filed_after {window_start} is later than filed_before {window_end}"
+        )
     chunks = await gather_extraction_chunks(retrieval, req.ticker, window_start, window_end)
     extracted = await extractor.extract(chunks, req.ticker, req.fiscal_period, req.filing_type, req.filed_date)
-    # `gather_extraction_chunks` runs retrieval, which may invoke the
-    # decomposer; that path does not surface a DecompositionResult here, so
-    # only the extraction call is reported. Under-reporting by the
-    # decomposer's share is the conservative direction and is noted rather
-    # than silently accepted -- see trading-agent-known-gaps.md.
+    # Only the extraction call spends here: gather_extraction_chunks runs
+    # fixed queries through retrieve_hybrid, which never calls the decomposer.
     _report_usage(response, (extractor.llm_model, extractor.last_usage))
     from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
     row = MetricsRow(
