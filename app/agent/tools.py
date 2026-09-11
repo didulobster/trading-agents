@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.domain.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
+from app.application.number_matching import value_in_text, value_spans
 
 
 # Base URL of your running FastAPI server. Override when you wire step 2.
@@ -938,25 +939,13 @@ def _provenance_corpus() -> str:
 # Number matching — a tool returns "€11,384.0 million"; calculate gets 11384.0
 # ---------------------------------------------------------------------------
  
-def _variants(value: float) -> set[str]:
-    """String forms a tool output might use for this value."""
-    out: set[str] = set()
-    if value == int(value):
-        n = int(value)
-        out.update({str(n), f"{n:,}"})
-        # a tool may render a whole number with one decimal
-        out.update({f"{n}.0", f"{n:,}.0"})
-    else:
-        out.update({
-            f"{value}", f"{value:,}",
-            f"{value:.1f}", f"{value:,.1f}",
-            f"{value:.2f}", f"{value:,.2f}",
-        })
-    return out
- 
- 
 def _appears_in_output(value: float, corpus: str) -> bool:
-    return any(v in corpus for v in _variants(value))
+    """Token-anchored (app/application/number_matching.py). This was a
+    substring search, so a declared input counted as "retrieved" whenever its
+    digits sat inside any larger number — every two-digit integer inside a
+    year ("12" in "2012"), "7.4" inside "17.45". The memo verifier had
+    already been moved off that rule for the same reason; this check had not."""
+    return value_in_text(value, corpus)
 
 
 # ---------------------------------------------------------------------------
@@ -977,17 +966,9 @@ def _fiscal_year(fiscal_period: str) -> str | None:
 
 
 def _occurrence_spans(value: float, text: str) -> list[tuple[int, int]]:
-    """Every (start, end) span where some string form of `value` occurs."""
-    spans: list[tuple[int, int]] = []
-    for v in _variants(value):
-        start = 0
-        while True:
-            idx = text.find(v, start)
-            if idx == -1:
-                break
-            spans.append((idx, idx + len(v)))
-            start = idx + len(v)
-    return spans
+    """Every (start, end) span of a numeric token in `text` that `value`
+    matches — the same token-anchored rule as `_appears_in_output`."""
+    return value_spans(value, text)
 
 
 def _year_near_any_occurrence(value: float, year: str, outputs: list[str]) -> bool:
