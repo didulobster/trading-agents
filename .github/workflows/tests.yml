@@ -1,0 +1,63 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    # The 5 checkpoint tests that need a database are the ones guarding a
+    # DELAYED failure: an unregistered domain type serializes fine in-process
+    # and only breaks when a different process reads the checkpoint back out
+    # of Postgres. Skipped, they read as passing. So CI brings a real one.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # No API key is set and none is needed: conftest.py injects a
+      # placeholder for every non-Anthropic provider, and the suite stubs
+      # the call layer. Nothing here reaches a provider or spends money.
+      # A real key appearing in this file would be a bug, not a feature.
+      LLM_CLAUDE_MODEL: deepseek-v4-flash
+      LOOP_MAX_TURNS: "45"
+      MEMO_DIR: memos
+      POSTGRES_DATABASE_URL: postgresql://postgres:dev@localhost:5432/rag
+      TRADING_CHECKPOINT_DB_URI: postgresql://postgres:dev@localhost:5432/rag
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Pinned, not floating. `requires-python = ">=3.13"` alone lets uv pick
+      # the newest interpreter it can find, and on 3.14 the pinned
+      # tiktoken==0.8.0 has no wheel — it falls back to a source build and
+      # fails for want of a Rust toolchain. `.python-version` says 3.13 for
+      # the same reason; this line makes CI say it too rather than inherit it.
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run pytest -q -rs
