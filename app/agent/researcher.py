@@ -41,9 +41,9 @@ from datetime import datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
-from app.config import require_env
 from app.infrastructure.llm import MODEL_PRICING, get_client
 from app.infrastructure.llm.models import model_for
+from app.config import require_env
 
 logger = logging.getLogger(__name__)
 
