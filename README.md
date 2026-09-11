@@ -353,6 +353,8 @@ explanations warrant a spot-check.
 
 `docs/` holds the engineering journals — `architecture.md`, `tutorial.md` (a full code
 walkthrough), `trading-agent-known-gaps.md` (32 dated sections), and the validation
-batteries under `docs/validation/`. **`docs/` is gitignored**, so these are local-only. If
+batteries under `docs/validation/`. Two things under `docs/` are gitignored and stay local:
+`cost-log.jsonl`, which every run appends to, and the raw `*.stdout`/`*.stderr` run output
+under `docs/validation/`. If
 you are about to change something, read the dated section covering it first: most surprises
 in this codebase have already been surprising once and were written down.

@@ -14,7 +14,14 @@ __pycache__/
 /eval/test_set.yaml
 /eval/extraction-results*
 extraction_truth.yaml
-/docs
+
+# docs/ is tracked except what runs write. Every pipeline run appends to the
+# cost log, so tracking it would leave the tree dirty after every run and mark
+# every battery manifest git_dirty. Raw run output carries local paths and
+# third-party news text.
+/docs/cost-log.jsonl
+/docs/validation/**/*.stdout
+/docs/validation/**/*.stderr
 
 # dev cache for trading agent
 .fundamentals_cache/
