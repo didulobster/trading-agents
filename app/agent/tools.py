@@ -8,6 +8,8 @@ import operator
 import os
 import re
 import sys
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 
 import httpx
 from pydantic import ValidationError
@@ -62,15 +64,14 @@ ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
 ASK_EDGAR_K = int(os.getenv("ASK_EDGAR_K", "8"))
 # How many calls out from the cap the agent starts being told to wrap up.
 _ASK_EDGAR_WARN_AT = 5
-_ASK_EDGAR_CALLS = 0
 
-# Results by normalized expression, for the run. Whitespace only: two
+# The calculate cache (_RunState.calc_cache) is keyed by normalized
+# expression. Whitespace only: two
 # expressions that differ in spacing are the same computation, while two
 # that differ in SCALE ("45183.036 - 39001.0" vs "45183036 - 39001000") are
 # deliberately kept apart even though they reduce to the same ratio — a
 # cache is not the place to assert that two differently-written derivations
 # are equivalent.
-_CALC_CACHE: dict[str, str] = {}
 _CALC_WHITESPACE = re.compile(r"\s+")
 
 
@@ -507,7 +508,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return err
 
         key = _normalize_expression(expression)
-        if key in _CALC_CACHE:
+        cache = _state().calc_cache
+        if key in cache:
             # Note honestly what this does and does not save. `calculate` is
             # pure Python with no API call, so the direct cost of a repeat is
             # ~zero and was already paid before this function ran: the
@@ -522,14 +524,14 @@ async def _dispatch(name: str, inputs: dict) -> str:
             # The note carries no digits of its own, so it adds nothing to
             # the provenance corpus the containment guards scan.
             return (
-                f"{_CALC_CACHE[key]}  [already computed earlier this run — "
+                f"{cache[key]}  [already computed earlier this run — "
                 f"identical expression, identical result. Check your earlier "
                 f"working before re-deriving a figure.]"
             )
 
         result = safe_calculate(expression, inputs.get("inputs", []))
         record_calc_result(result)
-        _CALC_CACHE[key] = result
+        cache[key] = result
         return result
 
     # Budget check BEFORE any transport is set up. A refused call has to
@@ -537,8 +539,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
     # the check inside the HTTP context meant a refusal still built a
     # client. Caught by test_the_refusal_makes_no_http_call.
     if name == "ask_edgar":
-        global _ASK_EDGAR_CALLS
-        if _ASK_EDGAR_CALLS >= ASK_EDGAR_MAX_CALLS:
+        run = _state()
+        if run.ask_edgar_calls >= ASK_EDGAR_MAX_CALLS:
             # Refuse rather than raise: the agent's correct response is to
             # write the memo from what it has, exactly as it does at
             # MAX_TURNS. An exception would lose the whole run's work over a
@@ -551,7 +553,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 f"record any checklist item you could not complete as an "
                 f"explicit data gap rather than leaving it unmentioned."
             )
-        _ASK_EDGAR_CALLS += 1
+        run.ask_edgar_calls += 1
 
     if USE_STUBS:
         return _stub(name, inputs)
@@ -606,7 +608,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 for c in data.get("chunks", [])
             )
             out = f"{data['answer']}\n\nSources:\n{citations}"
-            remaining = ASK_EDGAR_MAX_CALLS - _ASK_EDGAR_CALLS
+            remaining = ASK_EDGAR_MAX_CALLS - _state().ask_edgar_calls
             if remaining <= _ASK_EDGAR_WARN_AT:
                 # Only inside the warn band. Appending a counter to all 30
                 # answers would put a changing number into every tool result,
@@ -775,7 +777,7 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             )
 
         # 5 — real value, wrong period label
-        outputs = _RETRIEVED_TEXT
+        outputs = _state().retrieved_text
         mismatched = []
         for i in inputs:
             if i.get("value") is None:
@@ -810,30 +812,45 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
 # ---------------------------------------------------------------------------
 # Run-scoped store of everything the tools have returned.
 #
-# Module-level, which assumes one agent run per process — true for the CLI.
-# If you ever run concurrent agents in one process, make this a context
-# object passed through execute_tool instead.
+# Held in a ContextVar, not module globals. As globals it assumed one agent
+# run per process — true for the CLI, false for the API server, where
+# /news-assess and /trading/analyze run the agent inside request handlers and
+# two overlapping requests shared (and reset) each other's provenance record
+# and ask_edgar budget. A wrong provenance record defeats the calculate guard
+# and the memo verifier without raising anything. Each asyncio task has its
+# own context, so each run now sees only its own state; `reset_run_provenance`
+# (called by `run_agent` at the start of every run) gives the current task a
+# fresh one.
 # ---------------------------------------------------------------------------
- 
-_RETRIEVED_TEXT: list[str] = []
-_CALC_RESULTS: list[float] = []
-_REJECTED_CALC_ATTEMPTS: list[dict] = []
-_SESSION_LOG: list[str] = []
 
-# Keyed by the model that spent it; None for a server too old to say.
-_DELEGATED_USAGE: dict[str | None, TokenUsage] = {}
+@dataclass
+class _RunState:
+    retrieved_text: list[str] = field(default_factory=list)
+    calc_results: list[float] = field(default_factory=list)
+    rejected_calc_attempts: list[dict] = field(default_factory=list)
+    session_log: list[str] = field(default_factory=list)
+    # Keyed by the model that spent it; None for a server too old to say.
+    delegated_usage: dict[str | None, TokenUsage] = field(default_factory=dict)
+    ask_edgar_calls: int = 0
+    # Results by normalized expression, for the run.
+    calc_cache: dict[str, str] = field(default_factory=dict)
+
+
+_RUN_STATE: ContextVar[_RunState | None] = ContextVar("research_run_state", default=None)
+
+
+def _state() -> _RunState:
+    """This task's run state, created on first use outside any run."""
+    state = _RUN_STATE.get()
+    if state is None:
+        state = _RunState()
+        _RUN_STATE.set(state)
+    return state
 
 
 def reset_run_provenance() -> None:
     """Call once at the start of each agent run."""
-    global _ASK_EDGAR_CALLS
-    _RETRIEVED_TEXT.clear()
-    _CALC_RESULTS.clear()
-    _REJECTED_CALC_ATTEMPTS.clear()
-    _SESSION_LOG.clear()
-    _DELEGATED_USAGE.clear()
-    _ASK_EDGAR_CALLS = 0
-    _CALC_CACHE.clear()
+    _RUN_STATE.set(_RunState())
 
 
 def _record_delegated_usage(resp) -> None:
@@ -860,32 +877,33 @@ def _record_delegated_usage(resp) -> None:
         logger.warning("ignoring malformed %s header: %r", USAGE_HEADER, raw[:120])
         return
     for model, usage in reported.items():
-        _DELEGATED_USAGE[model] = _DELEGATED_USAGE.get(model, TokenUsage()) + usage
+        delegated = _state().delegated_usage
+        delegated[model] = delegated.get(model, TokenUsage()) + usage
 
 
 def get_delegated_usage() -> dict[str | None, TokenUsage]:
     """Server-side spend since the last `reset_run_provenance()`, by the
     model that spent it. The key is None for usage from a server that did
     not name its model."""
-    return dict(_DELEGATED_USAGE)
+    return dict(_state().delegated_usage)
 
 def record_log_line(text: str) -> None:
     """Append a line to the run's session log — the full terminal trace
     (tool calls, tool results, agent commentary, turn markers) saved
     beside the report for post-run auditing."""
-    _SESSION_LOG.append(text)
+    _state().session_log.append(text)
 
 def get_session_log() -> str:
-    return "\n".join(_SESSION_LOG)
+    return "\n".join(_state().session_log)
 
 def record_calc_result(value: str | float) -> None:
     try:
-        _CALC_RESULTS.append(float(value))
+        _state().calc_results.append(float(value))
     except (TypeError, ValueError):
         pass
 
 def get_calc_results() -> list[float]:
-    return list(_CALC_RESULTS)
+    return list(_state().calc_results)
 
 def record_rejected_calc(expression: str, inputs: list[dict], reason: str) -> None:
     """Record a calculate() call the guard rejected. Also evaluates the raw
@@ -899,7 +917,7 @@ def record_rejected_calc(expression: str, inputs: list[dict], reason: str) -> No
         value = float(attempted)
     except (TypeError, ValueError):
         value = None
-    _REJECTED_CALC_ATTEMPTS.append({
+    _state().rejected_calc_attempts.append({
         "expression": expression,
         "reason": reason,
         "attempted_result": value,
@@ -909,9 +927,9 @@ def get_unretried_rejected_calcs() -> list[dict]:
     """Rejected calculate() attempts whose would-be result was never
     matched by a later successful calculate() call in this run — i.e. the
     model used (or may use) this number without ever validating it."""
-    retried = {round(v, 2) for v in _CALC_RESULTS}
+    retried = {round(v, 2) for v in _state().calc_results}
     out = []
-    for att in _REJECTED_CALC_ATTEMPTS:
+    for att in _state().rejected_calc_attempts:
         v = att["attempted_result"]
         if v is None or round(v, 2) in retried:
             continue
@@ -923,16 +941,16 @@ def get_unretried_rejected_calcs() -> list[dict]:
     return out
 
 def get_provenance_corpus() -> str:
-    return "\n".join(_RETRIEVED_TEXT)
+    return "\n".join(_state().retrieved_text)
 
 def record_tool_output(text: str) -> None:
     """Record a tool result so its figures count as retrieved."""
     if text:
-        _RETRIEVED_TEXT.append(text)
+        _state().retrieved_text.append(text)
  
  
 def _provenance_corpus() -> str:
-    return "\n".join(_RETRIEVED_TEXT)
+    return "\n".join(_state().retrieved_text)
 
 # ---------------------------------------------------------------------------
 # Number matching — a tool returns "€11,384.0 million"; calculate gets 11384.0
