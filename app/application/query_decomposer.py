@@ -3,7 +3,7 @@ import logging
 
 from app.domain.token_usage import TokenUsage
 import re
-from app.infrastructure.llm import get_client
+from app.infrastructure.llm import create_with_temperature_fallback, get_client
 from app.infrastructure.llm.models import model_for
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,10 @@ class QueryDecomposer:
             logger.info("Rewriting expansion query: %s", query[:80])
             prompt = REWRITE_PROMPT.format(question=query)
 
-        resp = await self._client.messages.create( 
+        # temperature=0 is a 400 on claude-sonnet-5, and on GPT-5.x whenever
+        # reasoning is on; uncaught, it fails every /ask that needs a rewrite.
+        resp = await create_with_temperature_fallback(
+            self._client,
             model=self._model,
             max_tokens=512,
             temperature=0,

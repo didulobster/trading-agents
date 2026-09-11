@@ -28,7 +28,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, BadRequestError
 
 from app.infrastructure.llm.openai_compat import LLMBadRequestError, OpenAICompatClient
 
@@ -57,6 +57,15 @@ class ProviderSpec:
     # key, and because the next provider to add one will not call it
     # "thinking".
     thinking_param: str | None = None
+    # Name of the output-token cap on the wire. OpenAI's GPT-5 family 400s
+    # on `max_tokens` ("Use 'max_completion_tokens' instead"); DeepSeek
+    # still takes the original name.
+    max_tokens_param: str = "max_tokens"
+    # Model-id prefixes that take a top-level `reasoning_effort` including
+    # "none". OpenAI's counterpart to `thinking_param`, but scoped to models
+    # rather than the provider: gpt-4.1 rejects the parameter outright and
+    # the original gpt-5 has no "none".
+    reasoning_effort_models: tuple[str, ...] = ()
 
 
 _PROVIDERS: dict[str, ProviderSpec] = {
@@ -88,6 +97,12 @@ _PROVIDERS: dict[str, ProviderSpec] = {
         base_url_env="OPENAI_BASE_URL",
         max_output_tokens=None,
         prefixes=("gpt-", "o1", "o3", "o4"),
+        # Accepted by every current chat model, not just the GPT-5 family
+        # that requires it, so it is safe provider-wide.
+        max_tokens_param="max_completion_tokens",
+        # Verified live on gpt-5.6-luna 2026-09-11: "none" accepted,
+        # "minimal" rejected. Supported: none/low/medium/high/xhigh.
+        reasoning_effort_models=("gpt-5.",),
     ),
     # Escape hatch: any endpoint speaking the OpenAI dialect, named
     # explicitly via LLM_PROVIDER because its model ids carry no prefix
@@ -207,11 +222,61 @@ def get_client(model: str | None = None, *, api_key: str | None = None):
         max_output_tokens=spec.max_output_tokens,
         provider=spec.name,
         thinking_param=spec.thinking_param,
+        max_tokens_param=spec.max_tokens_param,
+        reasoning_effort_models=spec.reasoning_effort_models,
     )
 
 
 def is_anthropic(model: str | None) -> bool:
     return resolve_provider(model).name == ANTHROPIC
+
+
+def _rejects_temperature(message: str) -> bool:
+    """Whether a 400's message is a model refusing `temperature` itself.
+
+    Anthropic (claude-sonnet-5): "temperature is deprecated for this model".
+    OpenAI (gpt-5.6-luna with reasoning on, 2026-09-11): "Unsupported value:
+    'temperature' does not support 0.2 with this model. Only the default (1)
+    value is supported."
+    """
+    message = message.lower()
+    return "temperature" in message and ("deprecated" in message or "unsupported" in message)
+
+
+async def create_with_temperature_fallback(client: LLMClient, **kwargs):
+    """`client.messages.create(**kwargs)`, but if the model rejects
+    `temperature` outright, retry once without it.
+
+    Found live (2026-08-25, running the Phase 6 determinism check against
+    claude-sonnet-5 as Risk Judge/Research Manager): `temperature=0.0` 400s
+    with "temperature is deprecated for this model" — not merely ignored,
+    REJECTED. Haiku 4.5 (this project's RISK_MODEL) accepted the identical
+    parameter on the same run; whether a given model still honors
+    `temperature` is therefore a live API fact, not something safe to
+    special-case from a hardcoded model list that goes stale the moment a
+    new model ships. GPT-5.x rejects it too, in different words, whenever
+    reasoning is on (see `_translate_reasoning_effort`).
+
+    Reacting to the API's own error is the general fix, but it changes what
+    a determinism/stability claim MEANS for a model like this: there is no
+    lever left to set, so "replayed at temperature=0" silently becomes
+    "replayed at whatever this model's fixed default is" — printed loudly
+    here specifically so that distinction is never silently absorbed into a
+    passing check.
+    """
+    try:
+        return await client.messages.create(**kwargs)
+    except (BadRequestError, LLMBadRequestError) as e:
+        if "temperature" in kwargs and _rejects_temperature(str(e)):
+            print(
+                f"[reasoning_config] {kwargs.get('model')} rejects `temperature` "
+                f"— retrying without it. Any determinism/stability claim for "
+                f"this call no longer rests on a temperature lever, only on the "
+                f"model's own fixed default."
+            )
+            kwargs = {k: v for k, v in kwargs.items() if k != "temperature"}
+            return await client.messages.create(**kwargs)
+        raise
 
 
 __all__ = [
@@ -220,6 +285,7 @@ __all__ = [
     "RoutingClient",
     "ProviderNotConfigured",
     "ProviderSpec",
+    "create_with_temperature_fallback",
     "get_client",
     "is_anthropic",
     "resolve_provider",

@@ -41,8 +41,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from anthropic import BadRequestError
-from app.infrastructure.llm import LLMBadRequestError, LLMClient, get_client
+# create_with_temperature_fallback lives with the clients now, so the query
+# decomposer can use it too; re-exported for risk_port and synthesis_port.
+from app.infrastructure.llm import LLMClient, create_with_temperature_fallback, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
 from pydantic import ValidationError
 
@@ -157,42 +158,6 @@ def reasoning_config(model: str, temperature: float | None) -> dict:
     if supports_adaptive_thinking(model):
         return {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}
     return {}
-
-
-async def create_with_temperature_fallback(client: LLMClient, **kwargs):
-    """`client.messages.create(**kwargs)`, but if the model rejects
-    `temperature` outright, retry once without it.
-
-    Found live (2026-08-25, running the Phase 6 determinism check against
-    claude-sonnet-5 as Risk Judge/Research Manager): `temperature=0.0` 400s
-    with "temperature is deprecated for this model" — not merely ignored,
-    REJECTED. Haiku 4.5 (this project's RISK_MODEL) accepted the identical
-    parameter on the same run; whether a given model still honors
-    `temperature` is therefore a live API fact, not something safe to
-    special-case from a hardcoded model list that goes stale the moment a
-    new model ships.
-
-    Reacting to the API's own error is the general fix, but it changes what
-    a determinism/stability claim MEANS for a model like this: there is no
-    lever left to set, so "replayed at temperature=0" silently becomes
-    "replayed at whatever this model's fixed default is" — printed loudly
-    here specifically so that distinction is never silently absorbed into a
-    passing check.
-    """
-    try:
-        return await client.messages.create(**kwargs)
-    except (BadRequestError, LLMBadRequestError) as e:
-        message = str(e).lower()
-        if "temperature" in kwargs and "temperature" in message and "deprecated" in message:
-            print(
-                f"[reasoning_config] {kwargs.get('model')} rejects `temperature` "
-                f"(deprecated for this model) — retrying without it. Any "
-                f"determinism/stability claim for this call no longer rests on a "
-                f"temperature lever, only on the model's own fixed default."
-            )
-            kwargs = {k: v for k, v in kwargs.items() if k != "temperature"}
-            return await client.messages.create(**kwargs)
-        raise
 
 
 warn_if_unpriced(DEBATE_MODEL, "debate", DEBATE_BUDGET_USD)
