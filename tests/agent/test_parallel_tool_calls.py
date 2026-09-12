@@ -99,7 +99,7 @@ def anyio_backend():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio
-async def test_decomposed_sub_queries_are_retrieved_concurrently_and_merged_in_order():
+async def test_decomposed_sub_queries_are_retrieved_concurrently_and_fused_by_agreement():
     from app.application.query_decomposer import DecompositionResult
     from app.application.retrieval_service import RetrievalService
     from datetime import date
@@ -118,7 +118,7 @@ async def test_decomposed_sub_queries_are_retrieved_concurrently_and_merged_in_o
         async def decompose(self, q):
             return DecompositionResult(original_query=q, was_decomposed=True, sub_queries=["a", "b", "c"])
 
-    service = RetrievalService(embedding_service=None, chunk_repo=None, decomposer=Decomposer(), use_hybrid=True)
+    service = RetrievalService(embedding_service=None, chunk_repo=None, decomposer=Decomposer())
 
     async def fake_hybrid(q, k=8, filters=None):
         state["in_flight"] += 1
@@ -131,7 +131,14 @@ async def test_decomposed_sub_queries_are_retrieved_concurrently_and_merged_in_o
     chunks, decomposition = await service.retrieve_full("q", k=8)
 
     assert state["peak"] == 3
-    assert [(c.chunk.id, c.similarity) for c in chunks] == [(1, 0.03), (2, 0.025), (3, 0.01)]
+    # Chunk 2 was found by TWO sub-queries (0.02 + 0.025) and chunk 1 by one
+    # (0.03), so chunk 2 ranks first. Under the previous max-across-queries
+    # merge it scored 0.025 and came second — agreement between sub-queries,
+    # which is the entire reason to decompose a question, counted for
+    # nothing. See retrieval_service._fuse_across_queries.
+    assert [(c.chunk.id, round(c.similarity, 6)) for c in chunks] == [
+        (2, 0.045), (1, 0.03), (3, 0.01),
+    ]
     assert decomposition.sub_queries == ["a", "b", "c"]
 
 
