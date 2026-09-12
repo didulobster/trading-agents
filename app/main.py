@@ -4,6 +4,7 @@ from app.config import load_env
 
 load_env()
 
+import asyncio  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from dataclasses import asdict
 import logging
@@ -39,7 +40,7 @@ from app.application.embedding_service import EmbeddingService
 from app.application.extraction_service import FinancialMetrics, MetricsExtractor
 from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
-from app.application.retrieval_service import RetrievalService
+from app.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.application.citations import format_citation_tag
 
 from app.infrastructure.llm.models import model_for
@@ -265,8 +266,7 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
     retrieval = RetrievalService(
         embedding_service=embedder, 
         chunk_repo=chunk_repo,
-        decomposer=decomposer,
-        use_hybrid=True)
+        decomposer=decomposer)
 
     sections = req.section_path_contains
     if sections:
@@ -338,8 +338,7 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     retrieval = RetrievalService(
         embedding_service=embedder, 
         chunk_repo=chunk_repo,
-        decomposer=decomposer,
-        use_hybrid=True)
+        decomposer=decomposer)
     extractor = MetricsExtractor()
     metrics_repo = MetricsRepository()
 
@@ -371,15 +370,22 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     return extracted
 
 async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):
+    """The four fixed metric queries, fused into one list.
+
+    Concurrent rather than one at a time, and fused by SUMMING each chunk's
+    RRF score across the queries that found it rather than keeping the max —
+    both for the reasons `_fuse_across_queries` gives. A chunk the cash-flow
+    and income-statement queries both surface is more likely to be the
+    statements page than one only a single query reached.
+    """
     filters = ChunkSearchFilters(tickers=[ticker], filed_after=filed_after, filed_before=filed_before)
-    seen: dict[int, RetrievedChunk] = {}
-    for query in RetrievalService.METRIC_QUERIES.values():
-        results = await retrieval.retrieve_hybrid(query, k=5, filters=filters)
-        for chunk in results:
-            cid = chunk.chunk.id
-            if cid not in seen or chunk.similarity > seen[cid].similarity:
-                seen[cid] = chunk
-    return list(seen.values())
+    per_query = await asyncio.gather(*(
+        retrieval.retrieve_hybrid(query, k=5, filters=filters)
+        for query in RetrievalService.METRIC_QUERIES.values()
+    ))
+    # No top-k truncation here: the extractor wants every distinct chunk the
+    # four queries found, ordered by how much of the set agreed on it.
+    return _fuse_across_queries(per_query, k=sum(len(r) for r in per_query))
 
 @app.get("/corpus-status")
 async def corpus_status_endpoint(ticker: str | None = None):

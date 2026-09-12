@@ -31,6 +31,7 @@ from app.infrastructure.repositories.document_repo import DocumentRepository
 from app.infrastructure.repositories.filing_repo import FilingRepository
 from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.application.citations import format_citation_tag
+from eval.runner import DEFAULT_MODE
 from app.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
@@ -145,11 +146,18 @@ def corpus_status_cmd(
 @app.command(name="eval")
 def eval_cmd(
     test_set: Path = Path("eval/test_set.yaml"),
-    decompose: bool = typer.Option(False,"--decompose"),
-    hybrid: bool = typer.Option(False,"--hybrid")
-    ):
-    """Run the evaluation harness against the current retrieval pipeline."""
-    asyncio.run(_run_eval(test_set, 10, decompose, hybrid))
+    mode: str = typer.Option(
+        DEFAULT_MODE, "--mode",
+        help="full (what /ask does) | hybrid (what extraction does) | vector (baseline)",
+    ),
+):
+    """Run the evaluation harness against the current retrieval pipeline.
+
+    Defaults to `full`, the path POST /ask actually takes. The old
+    --decompose/--hybrid flags selected two paths nothing in production
+    used, and no flag combination could reach the real one.
+    """
+    asyncio.run(_run_eval(test_set, 10, mode))
 
 @app.command(name="eval-extraction")
 def eval_extraction_cmd(
@@ -198,13 +206,13 @@ def _prune_old_results(prefix: str, keep: int = 10) -> None:
         stale.unlink()
 
 
-async def _run_eval(test_set_path: Path, k, use_decomposition: bool, use_hybrid: bool = False) -> None:
+async def _run_eval(test_set_path: Path, k, mode: str) -> None:
     from eval.runner import run_eval
     from eval.report import report
 
     await init_pool()
     try:
-        results = await run_eval(test_set_path, k, use_decomposition, use_hybrid)
+        results = await run_eval(test_set_path, k, mode)
         print(report(results))
 
         # Save raw results for diffing across runs
@@ -414,7 +422,6 @@ async def _run_extract_metrics(ticker: str, k: int) -> None:
             embedding_service=embedder,
             chunk_repo=chunk_repo,
             decomposer=decomposer,
-            use_hybrid=True,
         )
         extractor = MetricsExtractor()
         metrics_repo = MetricsRepository()
