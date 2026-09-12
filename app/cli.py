@@ -1,6 +1,6 @@
 
 # Entry point: .env first, before any app import reads its settings.
-from app.config import load_env
+from app.config import load_env, require_env
 
 load_env()
 
@@ -178,7 +178,7 @@ def extract_metrics_cmd(
 
 # ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
-    user_agent = os.environ["EDGAR_USER_AGENT"]  # "Wilson Ting wilson@example.com"
+    user_agent = require_env("EDGAR_USER_AGENT")   # "Wilson Ting wilson@example.com"
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
     resolver = TickerResolver(user_agent, cache_root / "company_tickers.json")
@@ -370,7 +370,7 @@ async def _ingest(
     ticker: str, form_type: str, limit: int, since_year: int | None,
     retry_failed: bool = False,
 ) -> None:
-    user_agent = os.environ["EDGAR_USER_AGENT"]
+    user_agent = require_env("EDGAR_USER_AGENT")
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
     await init_pool()
