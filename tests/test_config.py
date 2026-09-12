@@ -130,3 +130,22 @@ def test_the_dead_pdf_pipeline_is_gone():
     `test_only_app_config_loads_dotenv`."""
     for name in ("ingest.py", "retrieve.py", "db_postgres.py", "db.py", "chunk.py"):
         assert not (APP / name).exists(), name
+
+
+def test_every_variable_the_code_reads_is_in_the_example_env():
+    """`.env.example` is what `require_env`'s error message points at, so a
+    variable missing from it is a dead end for the person reading that
+    error. AGENT_TOOL_CONCURRENCY was read and documented nowhere."""
+    source = "\n".join(p.read_text() for p in APP.rglob("*.py"))
+    read = {
+        name
+        for tup in re.findall(
+            r'os\.getenv\("([A-Z_0-9]{3,})"|require_env\("([A-Z_0-9]{3,})"', source
+        )
+        for name in tup
+        if name
+    }
+    documented = set(re.findall(
+        r"^#?\s*([A-Z_0-9]{3,})=", (APP.parent / ".env.example").read_text(), re.M
+    ))
+    assert sorted(read - documented) == []
