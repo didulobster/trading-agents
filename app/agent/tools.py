@@ -90,7 +90,9 @@ TOOLS = [
         "description": (
             "Check what filings are available for a ticker before asking "
             "questions. Always call this first for any ticker. Returns filing "
-            "count, date range, and chunk counts."
+            "count, date range, chunk counts, and `sections_available` — the "
+            "only section names ask_edgar's `sections` filter will match. "
+            "Read that list before using the filter."
         ),
         "input_schema": {
             "type": "object",
@@ -153,8 +155,10 @@ TOOLS = [
             "while the auditor's near-identical opinion on the same subject "
             "sits in the financial statements, and without the filter the "
             "statements win. Naming the Item in the question text does NOT "
-            "do this — it only dilutes the question. Leave it off when you "
-            "want the whole filing."
+            "do this — it only dilutes the question. Take the names from "
+            "check_corpus's `sections_available`; anything else matches "
+            "nothing and the filter is discarded. Leave it off when you want "
+            "the whole filing."
         ),
         "input_schema": {
             "type": "object",
@@ -165,9 +169,12 @@ TOOLS = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Item numbers or section titles to restrict to, e.g. "
-                        "['Item 9A'] or ['Risk Factors']. A chunk matches if "
-                        "any one of them appears in its section path."
+                        "Item labels to restrict to, e.g. ['Item 9A']. Use "
+                        "ONLY names from check_corpus's `sections_available` "
+                        "— an accounting note title such as 'Revenue "
+                        "Recognition' or 'Consolidated Statements of Income' "
+                        "is not a section and matches nothing. A chunk "
+                        "matches if any one of these is in its section path."
                     ),
                 },
             },

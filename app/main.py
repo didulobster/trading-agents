@@ -395,11 +395,14 @@ async def corpus_status_endpoint(ticker: str | None = None):
 
     issues = await query.issues(ticker)
     per_filing = await query.per_filing(ticker)
-    
+
     return {
         "summary": [asdict(row) for row in summary],
         "issues": [asdict(i) for i in issues],
         "per_filing": [asdict(d) for d in per_filing],
+        # What `ask_edgar`'s `sections` filter will actually match. Without
+        # this the agent guesses note titles, and the filter is dropped.
+        "sections_available": await query.item_sections(ticker),
     }
 
 @app.post("/ingest", dependencies=SPENDS_MONEY)
