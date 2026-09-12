@@ -146,13 +146,30 @@ TOOLS = [
             "least important ones rather than on whatever happened to come "
             "last. Do not re-ask something an earlier answer already told "
             "you. When the budget runs out you will be told to write the "
-            "memo from what you have."
+            "memo from what you have.\n\n"
+            "`sections` restricts retrieval to the Items you name. Use it "
+            "when a filing says similar things in two places and you need "
+            "one of them: management's own ICFR conclusion lives in Item 9A "
+            "while the auditor's near-identical opinion on the same subject "
+            "sits in the financial statements, and without the filter the "
+            "statements win. Naming the Item in the question text does NOT "
+            "do this — it only dilutes the question. Leave it off when you "
+            "want the whole filing."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "question": {"type": "string"},
                 "tickers": {"type": "array", "items": {"type": "string"}},
+                "sections": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Item numbers or section titles to restrict to, e.g. "
+                        "['Item 9A'] or ['Risk Factors']. A chunk matches if "
+                        "any one of them appears in its section path."
+                    ),
+                },
             },
             "required": ["question"],
         },
@@ -605,6 +622,10 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 json={
                     "question": inputs["question"],
                     "tickers": inputs.get("tickers"),
+                    # `or None`, not `.get(...)`: a model that means "no
+                    # filter" sends [] about as often as it omits the key,
+                    # and an empty list would filter everything out.
+                    "section_path_contains": inputs.get("sections") or None,
                     "k": ASK_EDGAR_K,
                 },
             )
@@ -626,6 +647,16 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 for c in data.get("chunks", [])
             )
             out = f"{data['answer']}\n\nSources:\n{citations}"
+            dropped = data.get("dropped_section_filter")
+            if dropped:
+                # Said plainly, because otherwise the agent reads an answer
+                # drawn from the whole filing as one drawn from the section
+                # it asked for.
+                out += (
+                    f"\n\nNote: no chunk is filed under {dropped}, so this "
+                    "answer covers the whole filing. Check the section paths "
+                    "in the citations before attributing it."
+                )
             remaining = ASK_EDGAR_MAX_CALLS - _state().ask_edgar_calls
             if remaining <= _ASK_EDGAR_WARN_AT:
                 # Only inside the warn band. Appending a counter to all 30
