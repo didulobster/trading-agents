@@ -145,6 +145,13 @@ class AskResponse(BaseModel):
     citations: list[str]
     unverified: list[str] = []
     chunks: list[RetrievedChunkResponse]
+    dropped_section_filter: list[str] | None = Field(
+        default=None,
+        description=(
+            "Sections that were asked for but match no chunk in this corpus. "
+            "When set, the answer was produced WITHOUT the section filter."
+        ),
+    )
 
 class ExtractRequest(BaseModel):
     ticker: Ticker
@@ -254,12 +261,26 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
         decomposer=decomposer,
         use_hybrid=True)
 
+    sections = req.section_path_contains
+    if sections:
+        # An unmatched section name retrieves nothing, and an empty answer
+        # reads to the caller as "the filing doesn't say" rather than "you
+        # spelled the section wrong". Drop the filter and say so, instead of
+        # spending the answer call on no excerpts at all.
+        matched = await chunk_repo.sections_with_content(sections, req.tickers)
+        if not matched:
+            logging.warning(
+                "/ask: no chunk is filed under %s; answering without the "
+                "section filter", sections,
+            )
+            sections = None
+
     filters = ChunkSearchFilters(
         tickers=req.tickers,
         filing_types=req.filing_types,
         filed_after=req.filed_after,
         filed_before=req.filed_before,
-        section_path_contains=req.section_path_contains,
+        section_path_contains=sections,
     )
 
     chunks, decomposition = await retrieval.retrieve_full(req.question, k=req.k, filters=filters)
@@ -295,6 +316,10 @@ async def ask(req: AskRequest, response: Response) -> AskResponse:
             )
             for c in chunks
         ],
+        dropped_section_filter=(
+            req.section_path_contains if sections is None and req.section_path_contains
+            else None
+        ),
     )
 
 
