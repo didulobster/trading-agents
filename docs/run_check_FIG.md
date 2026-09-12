@@ -197,9 +197,60 @@ yfinance**, which is flaky. That is a standing constraint on `--as-of` runs, not
 - [x] `logging.basicConfig` in the trading CLI, matching `app/cli.py`
 - [x] Tests for all three, including one quoting the leaked memo sentence as the reason
 
+---
+
+# Runs 3 and 4 — forcing the memo path, to verify #4
+
+#4 changed the call the agent makes when its loop ends: it used to send no `tools` and a
+bare-string `system`, which on these providers changes the request at position zero and
+makes a prefix-cache hit impossible. Neither earlier run reached that call — run 1
+finished in 10 turns of 45, run 2 died first.
+
+**Run 3** (`LOOP_MAX_TURNS=4 --only fundamentals`) still finished naturally: with a low
+cap, `TURN_WARN_AT=8` tells the agent to wrap up on every turn, so it returns prose
+before the cap bites. Useful anyway — it validated the measurement method, since the
+node's logged totals matched the per-turn traces exactly, residual zero:
+
+```
+node total       : in=13131  cache_read=49415  out=2938
+traced 4 turns   : in=13131  cache_read=49415  out=2938
+UNTRACED residual: in=0      cache_read=0      out=0
+```
+
+**Run 4** (`LOOP_MAX_TURNS=1`) reached it: `[MAX_TURNS reached — forcing memo from
+gathered data]`. Subtracting the traced turn from the node's total isolates the
+forced-memo call:
+
+```
+node total       : in=1685  cache_read=17873  out=1427
+traced loop turn : in=110   cache_read=8919   out=63
+FORCED-MEMO CALL : in=1575  cache_read=8954   out=1364
+```
+
+**8,954 of 10,529 prompt tokens (85.0%) served from cache** on the call that used to be
+guaranteed to miss.
+
+## The counterfactual, measured
+
+Inference from one number is weak, so the two shapes were run against the provider with
+**identical messages**, new shape first to populate the cache:
+
+| call | `input` | `cache_read` | cached |
+|---|---|---|---|
+| 1. new shape (populates) | 5,823 | 8,847 | 60.3% |
+| 2. new shape again — **the fix** | **75** | **14,595** | **99.5%** |
+| 3. **old shape**, same messages | **13,217** | **0** | **0.0%** |
+
+The old shape gets **zero** cache reads on message content the provider has just seen,
+because dropping the tools block and flattening `system` to a string changes the prefix
+from its first byte. Priced at this run's model, that one call is **$0.004280 old vs
+$0.001944 new — 2.2× cheaper**, and it is the call carrying the entire conversation.
+
+**#4 is verified.**
+
 ## Still open
 
-- [ ] **#4 remains unverified.** Run 1 finished in 10 turns of 45; run 2 died before its agent hit the cap. Needs a run that reaches `MAX_TURNS` or the budget stop.
+- [ ] ~~#4 unverified~~ — **verified above** (runs 3–4 plus the A/B).
 - [ ] **Whether retrieval improved** is still unmeasured. That is `eval/` with `--mode full`, not a pipeline run, and it needs the gitignored corpus.
 - [ ] **A technical-node vendor failure kills the whole run**, discarding the fundamentals spend that already succeeded ($0.070 here). Nothing in `test_node_failures_degrade.py` expects the technical node to degrade, so this is a design question rather than a defect — but it is worth a decision.
 - [ ] The version probe and `extra="forbid"` follow-ups from run 1 are still open, and run 2's `check_corpus` leak is a second argument for the latter.
