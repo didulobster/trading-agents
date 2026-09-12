@@ -107,9 +107,99 @@ is not a free win.
 
 ---
 
-## Recommended next step
+---
 
-Re-run FIG against the restarted server, and with `--as-of` in the past, so that #5's
-fusion and #2's retrieval bound are both actually exercised. Roughly $0.16 and ~5
-minutes. The run above is a clean regression check; it is not yet evidence that
-retrieval improved.
+# Run 2 — FIG, `--as-of 2026-03-01`, restarted server
+
+Purpose: exercise what run 1 could not — the retrieval bound (#2) and the fusion
+change (#5), both against current server code.
+
+**Outcome: failed (exit 1)** in the technical node, after the fundamentals leg
+completed. $0.070 spent. The failure is a flaky vendor, not a regression — but the way
+it failed exposed two real defects, both now fixed.
+
+## What run 2 established
+
+### #2's `filed_before` bound is real, and measurable
+
+| | run 1 (unbounded) | run 2 (`<= 2026-03-01`) |
+|---|---|---|
+| FIG chunks visible | 789 | **437** |
+| distinct filing dates | 5 | **2** |
+| `ask_edgar` calls | 30 (the cap) | **24** |
+| delegated input tokens | 172,336 | **99,308** |
+| delegated cost | $0.0889 | **$0.0550** |
+
+Token volume tracks the corpus reduction almost exactly (58% vs 55%). The bound reached
+`/ask` and changed what came back.
+
+The fundamentals memo says so in its own words:
+
+> **Filings reviewed:** FIG Form 10-K, filed 2026-02-18 … The corpus also contains
+> filings dated after the analysis cutoff, including Form 10-Q filed 2026-05-14 and
+> Form 10-Q filed 2026-08-05; **these were not used because they were unavailable as of
+> 2026-03-01.**
+
+### #5's fusion ran, against current server code
+
+All 24 `ask_edgar` calls went through the restarted server, so `retrieve_full`'s
+sum-merge was exercised. Whether it retrieves *better* is not measurable from a
+pipeline run — that needs `eval/` with the `full` mode, and the corpus it needs is
+gitignored.
+
+## Two defects run 2 exposed
+
+### A. The memo quote above is itself a lookahead leak
+
+`ask_edgar` and `/latest-filings` were bounded; **`check_corpus` was not**. So the run
+could not READ the post-cutoff filings but could still SEE them, and it enumerated two
+of them by date in its own memo. Knowing a filing exists, and when, is information from
+after the cutoff — the same argument that put the bound on `/latest-filings`.
+
+Fixed: `filed_before` now flows through `/corpus-status` into all four
+`CorpusStatusQuery` methods and the `check_corpus` tool. Verified live:
+
+```
+/corpus-status?ticker=FIG                          6 filings  2025-11-05 .. 2026-08-05  789 chunks
+/corpus-status?ticker=FIG&filed_before=2026-03-01  2 filings  2025-11-05 .. 2026-02-18  437 chunks
+```
+
+### B. The price-vendor diagnosis was still invisible — my own #11 fix was half-done
+
+The run died on `VendorError: No price data for FIG from yfinance or Finnhub`, with no
+record of what either vendor said. Two causes:
+
+- `#11` logged the **exception** path at WARNING but the **empty-result** path at INFO.
+  yfinance returned an empty frame (transient; it returns 146 bars for that date when
+  called directly), and that went to INFO.
+- `app/agent/trading/interface/cli.py` **configured no logging at all** — so INFO went
+  nowhere, and WARNING arrived only through Python's handler-of-last-resort, unformatted
+  and unattributed. `app/cli.py` has always called `basicConfig`; the entry point that
+  spends the most per invocation never did.
+
+Fixed both. Returning `None` from a vendor helper is never routine — it either triggers
+the fallback or ends the run — so it is WARNING, not INFO. Same failure now reads:
+
+```
+WARNING app...price_data_port: yfinance returned no bars for FIG as of 2026-03-01
+WARNING app...price_data_port: finnhub failed for FIG as of 2026-03-01
+                               FinnhubAPIException(status_code: 403): You don't have access to this resource.
+VendorError: No price data for FIG from yfinance or Finnhub
+```
+
+Finnhub's free tier has no historical candles, so **historical runs depend entirely on
+yfinance**, which is flaky. That is a standing constraint on `--as-of` runs, not a bug.
+
+## Fixes applied during run 2
+
+- [x] `check_corpus` / `/corpus-status` bounded at the analysis date (4 query methods, the endpoint, the tool)
+- [x] Vendor no-data logged at WARNING, not INFO — it is never a routine outcome
+- [x] `logging.basicConfig` in the trading CLI, matching `app/cli.py`
+- [x] Tests for all three, including one quoting the leaked memo sentence as the reason
+
+## Still open
+
+- [ ] **#4 remains unverified.** Run 1 finished in 10 turns of 45; run 2 died before its agent hit the cap. Needs a run that reaches `MAX_TURNS` or the budget stop.
+- [ ] **Whether retrieval improved** is still unmeasured. That is `eval/` with `--mode full`, not a pipeline run, and it needs the gitignored corpus.
+- [ ] **A technical-node vendor failure kills the whole run**, discarding the fundamentals spend that already succeeded ($0.070 here). Nothing in `test_node_failures_degrade.py` expects the technical node to degrade, so this is a design question rather than a defect — but it is worth a decision.
+- [ ] The version probe and `extra="forbid"` follow-ups from run 1 are still open, and run 2's `check_corpus` leak is a second argument for the latter.

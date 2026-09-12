@@ -8,6 +8,7 @@ if __name__ == "__main__":
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from datetime import date
 
@@ -189,6 +190,15 @@ async def run(
 
 
 def main() -> None:
+    # This entry point configured no logging at all, so every logger.info in
+    # the pipeline went nowhere and WARNING arrived only via Python's
+    # handler-of-last-resort, unformatted and without a logger name. app/cli.py
+    # has always done this; the trading CLI — the one that spends the most per
+    # invocation, and whose failures cost a whole run — did not.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(description="Run the trading pipeline for a single ticker")
     parser.add_argument("ticker", type=_ticker_arg)
     parser.add_argument("--thread-id", default=None)

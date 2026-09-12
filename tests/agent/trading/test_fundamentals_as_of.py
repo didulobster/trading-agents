@@ -232,3 +232,36 @@ def test_a_run_dated_today_has_no_after_to_leak():
 def test_a_run_whose_fundamentals_leg_did_not_run_says_nothing_about_it():
     """That absence is already reported by the analyst-did-not-run gap."""
     assert nodes._fundamentals_caveats({"as_of_date": AS_OF - timedelta(days=1)}) == []
+
+
+# ---------------------------------------------------------------------------
+# check_corpus: seeing that a filing exists is lookahead too
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_check_corpus_is_bounded_at_the_analysis_date(monkeypatch):
+    """Found live. A FIG run at --as-of 2026-03-01 could not READ the later
+    filings — ask_edgar and latest-filings were bounded — but check_corpus
+    was not, so the agent enumerated them and wrote into its own memo:
+
+      "The corpus also contains filings dated after the analysis cutoff,
+       including Form 10-Q filed 2026-05-14 and Form 10-Q filed 2026-08-05"
+
+    Knowing a filing exists, and when, is information from after the cutoff.
+    """
+    sent = _capture(monkeypatch)
+    tools.reset_run_provenance(AS_OF)
+
+    await tools._dispatch("check_corpus", {"ticker": "FIG"})
+
+    assert sent["params"]["filed_before"] == "2026-03-01"
+
+
+@pytest.mark.anyio
+async def test_an_unbounded_run_still_sees_the_whole_corpus(monkeypatch):
+    sent = _capture(monkeypatch)
+    tools.reset_run_provenance()
+
+    await tools._dispatch("check_corpus", {"ticker": "FIG"})
+
+    assert "filed_before" not in sent["params"]
