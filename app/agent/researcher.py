@@ -499,6 +499,51 @@ def _stop_reason(stop_check: StopCheck | None, usage: UsageSummary) -> str | Non
     return stop_check(usage) if stop_check is not None else None
 
 
+def _system_block(system_prompt: str) -> list[dict]:
+    """The system prompt as a cacheable block."""
+    return [{
+        "type": "text",
+        "text": system_prompt,
+        "cache_control": {"type": "ephemeral"},
+    }]
+
+
+async def _agent_turn(client, system_prompt: str, messages: list, *, may_call_tools: bool):
+    """One model call in the agent loop — ALWAYS the same request shape.
+
+    Every call sends `tools`, because the cached prefix is
+    tools + system + messages and dropping the tools block changes the
+    request at position zero. On Anthropic that loses the cache_control
+    prefix; on the OpenAI-compat providers this project actually runs
+    (DeepSeek, luna), caching is automatic PREFIX matching and
+    `cache_control` is stripped in translation — so an identical prefix is
+    the only thing that can produce a hit at all.
+
+    The forced-memo call at the end of the loop sent no tools and a bare
+    string system prompt. It is also the call carrying the whole
+    conversation, and Phase 9 measured 2 of 3 fundamentals runs ending on
+    it. So the largest request of the run was the one guaranteed to miss.
+
+    `may_call_tools=False` keeps the tools in the prefix while forbidding a
+    call, which is what the memo turns need: the prompt already says "do
+    not call any more tools", and tool_choice makes that true rather than
+    hoped for. It costs nothing in reasoning — this dialect's translation
+    disables thinking on any call that sends no `thinking`, which is every
+    call in this loop.
+    """
+    _roll_cache_breakpoint(messages)
+    kwargs = {
+        "model": AGENT_MODEL,
+        "max_tokens": AGENT_MAX_TOKENS,
+        "system": _system_block(system_prompt),
+        "tools": TOOLS,
+        "messages": messages,
+    }
+    if not may_call_tools:
+        kwargs["tool_choice"] = {"type": "none"}
+    return await client.messages.create(**kwargs)
+
+
 async def run_agent(
     user_task: str,
     system_prompt: str,
@@ -554,19 +599,8 @@ async def run_agent(
         if stopped_by:
             break
         _trace(f"\n--- turn {turn + 1} ---")
-        _roll_cache_breakpoint(messages)
-        response = await client.messages.create(
-            model=AGENT_MODEL,
-            max_tokens=AGENT_MAX_TOKENS,
-            system=[
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            tools=TOOLS,
-            messages=messages,
+        response = await _agent_turn(
+            client, system_prompt, messages, may_call_tools=True
         )
         u = response.usage
         usage.input_tokens += u.input_tokens
@@ -607,17 +641,8 @@ async def run_agent(
                         "section."
                     ),
                 })
-                cont = await client.messages.create(
-                    model=AGENT_MODEL,
-                    max_tokens=AGENT_MAX_TOKENS,
-                    system=[
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                    messages=messages,
+                cont = await _agent_turn(
+                    client, system_prompt, messages, may_call_tools=False
                 )
                 cu = cont.usage
                 usage.input_tokens += cu.input_tokens
@@ -688,11 +713,8 @@ async def run_agent(
             "that the tool budget was exhausted. Do not call any more tools."
         )
     messages.append({"role": "user", "content": budget_note})
-    response = await client.messages.create(
-        model=AGENT_MODEL,
-        max_tokens=AGENT_MAX_TOKENS,
-        system=system_prompt,
-        messages=messages,
+    response = await _agent_turn(
+        client, system_prompt, messages, may_call_tools=False
     )
     u = response.usage
     usage.input_tokens += u.input_tokens
@@ -734,6 +756,11 @@ def main() -> None:
     if args.test:
         task += "Run the test task described in your instructions."
         prompt = STEP1_TEST_PROMPT
+        # Assigned on every branch. It was not: `--test` left it unbound and
+        # the `mode != "test"` check below raised UnboundLocalError after the
+        # run had already completed — on the flag this module's own docstring
+        # advertises first.
+        mode = "test"
     elif args.ticker and args.news:
         ticker = args.ticker.upper()
         prompt = _build_news_prompt(ticker, args.news)
