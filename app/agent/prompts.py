@@ -491,6 +491,20 @@ When coverage clears that bar, state:
   investigate before acting.
 Never assign a tier when the coverage gate above says not to.
 
+END THIS SECTION with one line, on its own, in exactly this form:
+
+  **Verdict: <CLEAN|MIXED|IMPAIRED|INSUFFICIENT_EVIDENCE>**
+
+Every path through this section ends with that line — the gated path and
+the tiered path alike. It is the memo's single verdict, and the Executive
+Summary's first bullet must name the same one. Of 34 memos audited on
+2026-09-12, 8 contradicted themselves here: 4 stated a tier in the summary
+that the Assessment section never declared at all, 2 assigned a tier while
+recording item 10(a) as a Data Gap, and 2 named different tiers in the two
+places. Before writing that line, re-read your own coverage count and
+your own flag list, and make it follow from them rather than from the
+impression the findings left.
+
 Rules for the memo:
 - Every number must either come from a filing (with citation) or from
   a calculate tool call (show the expression).
