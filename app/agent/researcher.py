@@ -46,6 +46,7 @@ from app.domain.values import normalize_ticker
 from app.infrastructure.llm import MODEL_PRICING, get_client
 from app.infrastructure.llm.models import model_for
 from app.config import require_env
+from app.infrastructure.cost_log_path import cost_log_path
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +357,7 @@ def log_cost(
     run_id: str | None = None,
     event_id: str | None = None,
 ) -> float | None:
-    """Append one JSON line to docs/cost-log.jsonl. Returns the estimated
+    """Append one JSON line to this month's cost log. Returns the estimated
     cost (or None if pricing isn't configured), so callers can also surface
     it elsewhere (e.g. in the memo itself).
 
@@ -387,7 +388,10 @@ def log_cost(
         "output_tokens": usage.output_tokens,
         "estimated_cost_usd": cost,
     }
-    log_path = Path("docs/cost-log.jsonl")
+    # Resolved from the repo, not the working directory: this was
+    # Path("docs/cost-log.jsonl"), so a run started elsewhere wrote a log
+    # that log_run_summary's disk reconciliation never read.
+    log_path = cost_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a") as f:
         f.write(json.dumps(entry) + "\n")

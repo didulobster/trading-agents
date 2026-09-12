@@ -1,6 +1,6 @@
 # Entry point (uvicorn app.main:app): .env first, before any app import reads
 # its settings. See app/config.py.
-from app.config import load_env
+from app.config import load_env, require_env
 
 load_env()
 
@@ -413,7 +413,7 @@ async def corpus_status_endpoint(ticker: str | None = None):
 
 @app.post("/ingest", dependencies=SPENDS_MONEY)
 async def ingest_endpoint(req: IngestRequest):
-    user_agent = os.environ["EDGAR_USER_AGENT"]
+    user_agent = require_env("EDGAR_USER_AGENT")
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
     async with EdgarClient(user_agent, cache_root / "filings") as edgar:
@@ -443,7 +443,7 @@ async def ingest_endpoint(req: IngestRequest):
 
 @app.post("/latest-filings")
 async def latest_filings_endpoint(req: LatestFilingsRequest):
-    user_agent = os.environ["EDGAR_USER_AGENT"]
+    user_agent = require_env("EDGAR_USER_AGENT")
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
     async with EdgarClient(user_agent, cache_root / "filings") as edgar:
