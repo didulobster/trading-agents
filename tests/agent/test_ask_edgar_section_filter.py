@@ -221,3 +221,17 @@ async def test_the_agent_is_told_when_its_filter_was_dropped(monkeypatch):
     out = await tools._dispatch("ask_edgar", {"question": "q", "sections": ["Item 99Z"]})
     assert "Item 99Z" in out
     assert "whole filing" in out
+
+
+def test_the_tool_descriptions_point_at_the_list_of_valid_section_names():
+    """Given the filter but no list of names, the agent guesses note titles:
+    18 of 29 filtered calls on ACN named something no chunk is filed under."""
+    by_name = {t["name"]: t for t in tools.TOOLS}
+
+    assert "sections_available" in by_name["check_corpus"]["description"]
+
+    ask = by_name["ask_edgar"]
+    assert "sections_available" in ask["description"]
+    sections = ask["input_schema"]["properties"]["sections"]["description"]
+    assert "sections_available" in sections
+    assert "Revenue Recognition" in sections, "name a concrete wrong guess"
