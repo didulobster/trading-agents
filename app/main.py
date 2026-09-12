@@ -57,7 +57,10 @@ from app.infrastructure.repositories.document_repo import DocumentRepository
 from app.infrastructure.repositories.filing_repo import FilingRepository
 from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.infrastructure.repositories.section_repo import SectionRepository
-from app.infrastructure.repositories.metrics_repo import MetricsRepository
+from app.infrastructure.repositories.metrics_repo import (
+    FinancialMetricsRow,
+    MetricsRepository,
+)
 from app.llm import answer_question
 
 
@@ -334,7 +337,7 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
         decomposer=decomposer,
         use_hybrid=True)
     extractor = MetricsExtractor()
-    metrics_repo = MetricsRepository(session_factory=None)
+    metrics_repo = MetricsRepository()
 
     # The window defaults to filed_date ± 30 days; a caller that names its
     # own bounds gets them. The extract_metrics tool has always offered
@@ -351,23 +354,16 @@ async def extract(req: ExtractRequest, response: Response) -> FinancialMetrics:
     # Only the extraction call spends here: gather_extraction_chunks runs
     # fixed queries through retrieve_hybrid, which never calls the decomposer.
     _report_usage(response, (extractor.llm_model, extractor.last_usage))
-    from app.infrastructure.repositories.metrics_repo import FinancialMetrics as MetricsRow
-    row = MetricsRow(
+    # Built through the one constructor both writers share, so the fields
+    # the extractor's model does not carry cannot be dropped here either.
+    await metrics_repo.upsert(FinancialMetricsRow.from_extraction(
+        extracted,
         ticker=req.ticker,
         fiscal_period=req.fiscal_period,
         filing_type=req.filing_type,
         filed_date=req.filed_date,
-        revenue=extracted.revenue,
-        gross_margin_pct=extracted.gross_margin_pct,
-        gaap_net_income=extracted.gaap_net_income,
-        free_cash_flow=extracted.free_cash_flow,
-        sbc_pct_of_revenue=extracted.sbc_pct_of_revenue,
-        net_dollar_retention=extracted.net_dollar_retention,
-        extraction_confidence=extracted.extraction_confidence,
-        reasoning=extracted.reasoning,
         source_citations=[format_citation_tag(c) for c in chunks],
-    )
-    await metrics_repo.upsert(row)
+    ))
     return extracted
 
 async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):

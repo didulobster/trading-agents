@@ -30,7 +30,11 @@ from app.infrastructure.repositories.db import close_pool, init_pool
 from app.infrastructure.repositories.document_repo import DocumentRepository
 from app.infrastructure.repositories.filing_repo import FilingRepository
 from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
-from app.infrastructure.repositories.metrics_repo import MetricsRepository
+from app.application.citations import format_citation_tag
+from app.infrastructure.repositories.metrics_repo import (
+    FinancialMetricsRow,
+    MetricsRepository,
+)
 from app.infrastructure.repositories.section_repo import SectionRepository
 from eval.extraction_report import serialize_extraction_result
 from eval.runner import serialize_result
@@ -392,45 +396,83 @@ async def _ingest(
         await close_pool()
 
 async def _run_extract_metrics(ticker: str, k: int) -> None:
-    embedder = EmbeddingService()
-    chunk_repo = ChunkRepository()
-    decomposer = QueryDecomposer()
-    retrieval = RetrievalService(
-        embedding_service=embedder,
-        chunk_repo=chunk_repo,
-        decomposer=decomposer,
-        use_hybrid=True,
-    )
-    extractor = MetricsExtractor()
-    metrics_repo = MetricsRepository(session_factory=None)
-    filing_repo = FilingRepository()
+    """Extract and store metrics for every embedded filing of one ticker.
 
-    filings = await filing_repo.list_by_state(ticker, FilingStatus.INGESTED)
-    if not filings:
-        typer.echo(f"No ingested filings found for {ticker.upper()}")
-        raise typer.Exit(1)
+    This command had never run. It called `FilingStatus.INGESTED` (no such
+    member), `filing_repo.list_by_state` and `.set_state` (neither exists),
+    read `f.fiscal_period` off a Filing (which has `period_of_report`), and
+    passed the extractor's own model to `MetricsRepository.upsert`, which
+    needs the row type. Five failures, none of them caught, because no test
+    touched any CLI command.
+    """
+    await init_pool()
+    try:
+        embedder = EmbeddingService()
+        chunk_repo = ChunkRepository()
+        decomposer = QueryDecomposer()
+        retrieval = RetrievalService(
+            embedding_service=embedder,
+            chunk_repo=chunk_repo,
+            decomposer=decomposer,
+            use_hybrid=True,
+        )
+        extractor = MetricsExtractor()
+        metrics_repo = MetricsRepository()
+        filing_repo = FilingRepository()
 
-    for f in filings:
-        typer.echo(f"Extracting {f.fiscal_period} ({f.filing_type}, {f.filed_date})...")
+        # EMBEDDED is where ingestion leaves a filing that finished; a
+        # filing already at METRICS_EXTRACTED is re-done on request, since
+        # the upsert refreshes rather than duplicates.
+        filings = await filing_repo.list_by_ticker_and_status(
+            ticker, [FilingStatus.EMBEDDED, FilingStatus.METRICS_EXTRACTED]
+        )
+        if not filings:
+            typer.echo(
+                f"No embedded filings found for {ticker.upper()} — "
+                f"run `ingest` first, or check `corpus-status {ticker.upper()}`."
+            )
+            raise typer.Exit(1)
 
-        chunks = await retrieval.retrieve_for_extraction(ticker, f.filed_date, k=k)
-        if not chunks:
-            typer.echo(f"  WARNING: no chunks retrieved — skipping")
-            continue
+        extracted_count = 0
+        for f in filings:
+            fiscal_period = f.fiscal_period_label()
+            typer.echo(
+                f"Extracting {fiscal_period} ({f.filing_type}, {f.filed_date})..."
+            )
 
-        metrics = await extractor.extract(chunks, ticker, f.fiscal_period, f.filing_type, f.filed_date)
-        await metrics_repo.upsert(metrics)
-        await filing_repo.set_state(f.id, FilingStatus.METRICS_EXTRACTED)
+            chunks = await retrieval.retrieve_for_extraction(ticker, f.filed_date, k=k)
+            if not chunks:
+                typer.echo("  WARNING: no chunks retrieved — skipping")
+                continue
+
+            metrics = await extractor.extract(
+                chunks, ticker, fiscal_period, f.filing_type, f.filed_date
+            )
+            await metrics_repo.upsert(FinancialMetricsRow.from_extraction(
+                metrics,
+                ticker=ticker.upper(),
+                fiscal_period=fiscal_period,
+                filing_type=f.filing_type,
+                filed_date=f.filed_date,
+                source_citations=[format_citation_tag(c) for c in chunks],
+            ))
+            await filing_repo.mark_status(f.id, FilingStatus.METRICS_EXTRACTED)
+            extracted_count += 1
+
+            typer.echo(
+                f"  revenue={metrics.revenue}M  "
+                f"gross_margin={metrics.gross_margin_pct}%  "
+                f"fcf={metrics.free_cash_flow}M  "
+                f"ndr={metrics.net_dollar_retention}  "
+                f"conf={metrics.extraction_confidence}"
+            )
 
         typer.echo(
-            f"  revenue={metrics.revenue}M  "
-            f"gross_margin={metrics.gross_margin_pct}%  "
-            f"fcf={metrics.free_cash_flow}M  "
-            f"ndr={metrics.net_dollar_retention}  "
-            f"conf={metrics.extraction_confidence}"
+            f"\nDone. {extracted_count} of {len(filings)} filing(s) "
+            f"extracted for {ticker.upper()}."
         )
-
-    typer.echo(f"\nDone. {len(filings)} filing(s) processed for {ticker.upper()}.")
+    finally:
+        await close_pool()
 
 
 # async wrapper — matches _run_eval structure
