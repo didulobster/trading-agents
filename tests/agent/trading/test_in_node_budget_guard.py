@@ -59,6 +59,19 @@ def _tool_use(i: int):
     return SimpleNamespace(type="tool_use", id=f"t{i}", name="check_corpus", input={"ticker": "ACN"})
 
 
+def _text(content) -> str:
+    """A turn's text, whether it is a bare string or content blocks.
+
+    Every call now goes through `_roll_cache_breakpoint`, which wraps a
+    string turn so the breakpoint has a block to attach to.
+    """
+    if isinstance(content, str):
+        return content
+    return " ".join(
+        b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
 class FakeAgentClient:
     """Answers every turn with tool calls, and the forced-memo turn (the one
     whose last message is the budget note) with a memo."""
@@ -66,13 +79,15 @@ class FakeAgentClient:
     def __init__(self, tools_per_turn: int = 1):
         self.tools_per_turn = tools_per_turn
         self.calls: list[list[dict]] = []
+        self.requests: list[dict] = []
         self.messages = self
 
     async def create(self, **kwargs):
         messages = kwargs["messages"]
         self.calls.append(messages)
-        last = messages[-1]["content"]
-        if isinstance(last, str) and "Write the memo now" in last:
+        self.requests.append(kwargs)
+        last = _text(messages[-1]["content"])
+        if "Write the memo now" in last:
             return SimpleNamespace(
                 content=[SimpleNamespace(type="text", text="# ACN memo\n## Assessment\nstub")],
                 stop_reason="end_turn", usage=_usage(),
@@ -112,7 +127,9 @@ async def test_the_loop_stops_when_the_check_fires_and_still_writes_a_memo(agent
     assert agent.executed == ["check_corpus"]  # turn 2's tool was refused
     refused = agent.client.calls[2][-2]["content"][0]["content"]
     assert refused.startswith("RUN BUDGET REACHED: budget_exceeded")
-    assert "spending or time budget has been reached (budget_exceeded)" in agent.client.calls[2][-1]["content"]
+    assert "spending or time budget has been reached (budget_exceeded)" in _text(
+        agent.client.calls[2][-1]["content"]
+    )
     assert usage.output_tokens == 30
 
 
@@ -150,7 +167,7 @@ async def test_without_a_check_the_loop_is_unchanged(agent, monkeypatch):
 
     assert len(agent.client.calls) == 3        # both turns, then the MAX_TURNS memo
     assert agent.executed == ["check_corpus", "check_corpus"]
-    assert "exhausted your tool-call budget" in agent.client.calls[-1][-1]["content"]
+    assert "exhausted your tool-call budget" in _text(agent.client.calls[-1][-1]["content"])
 
 
 # ---------------------------------------------------------------------------
