@@ -38,7 +38,7 @@ import sys
 from typing import Callable
 import yaml
 
-from datetime import datetime
+from datetime import date, datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
@@ -504,6 +504,7 @@ async def run_agent(
     system_prompt: str,
     *,
     stop_check: StopCheck | None = None,
+    as_of: date | None = None,
 ) -> tuple[str, UsageSummary]:
     """
     Run the agent loop: send task, process tool calls, return final text
@@ -519,8 +520,14 @@ async def run_agent(
     loop the way MAX_TURNS does: one final call writes the memo from what
     was gathered, so the run keeps its fundamentals artifact and overshoots
     by that one call, the same bound the edge guard documents.
+
+    `as_of` is the run's analysis date. It becomes the upper bound every
+    filing-reading tool applies to itself (app/agent/tools.py), so a
+    historical run cannot read a filing published after the date it claims
+    to analyse. None leaves the run unbounded — right for the standalone
+    CLI and for news assessment, wrong for anything the trading graph calls.
     """
-    reset_run_provenance()
+    reset_run_provenance(as_of)
     client = get_client(AGENT_MODEL)
     # The budget goes in the TASK, not the system prompt. The system block
     # carries its own cache breakpoint and is identical across every run;

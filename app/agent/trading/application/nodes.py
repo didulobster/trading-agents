@@ -97,11 +97,24 @@ async def graceful_abort_node(state: TradingState) -> dict:
 
 
 async def fundamentals_node(state: TradingState) -> dict:
-    print(f"[fundamentals] running for {state['ticker']}")
+    as_of = state.get("as_of_date")
+    if as_of is None:
+        # Same rule as technical_node and news_node, and the last leg to
+        # adopt it. This node used to call date.today() inside the port and
+        # never see the run's analysis date at all, so a historical run
+        # bounded its prices and news and let its most heavily-weighted
+        # analyst read whatever had been filed since.
+        raise ValueError(
+            "as_of_date missing from TradingState — refusing to run the "
+            "fundamentals agent unbounded. Filing retrieval without an "
+            "explicit upper bound is a lookahead bug."
+        )
+    print(f"[fundamentals] running for {state['ticker']} as of {as_of}")
     # The budget and the run's earlier spend go in so the agent loop can stop
     # itself: the edge guard around this node cannot see inside it.
     report = await get_fundamentals_report(
         state["ticker"],
+        as_of,
         run_id=state.get("run_id"),
         budget=state.get("budget"),
         prior_events=state.get("cost_events") or [],
@@ -276,6 +289,30 @@ ANALYST_OUTPUTS = {
     "technical": "technical_report",
     "news": "news_digest",
 }
+
+
+def _fundamentals_caveats(state: TradingState) -> list[str]:
+    """What the fundamentals leg could not see, for a run dated in the past.
+
+    Filing retrieval is bounded at `as_of_date` (fundamentals_port), so a
+    historical run reads only what had been filed by then — which is the
+    point. What the bound cannot reach is the model's own priors: it may
+    know perfectly well how the year turned out. Said plainly in the memo
+    rather than assumed, because "bounded retrieval" and "no knowledge of
+    later events" are not the same claim, and only the first is enforced.
+
+    Nothing to say on a run dated today: there is no "after" to leak.
+    """
+    as_of = state.get("as_of_date")
+    report = state.get("fundamentals_report")
+    if as_of is None or report is None or as_of >= date.today():
+        return []
+    return [
+        f"this is a historical run dated {as_of.isoformat()}: filing "
+        f"retrieval was bounded at that date, so the fundamentals leg read "
+        f"nothing filed after it — but the model's own prior knowledge is "
+        f"not bounded, and may include how the period turned out"
+    ]
 
 
 def _news_caveats(state: TradingState) -> tuple[list[str], list[str]]:
@@ -599,6 +636,7 @@ async def synthesizer_node(state: TradingState) -> dict:
     missing = sorted(
         name for name, key in ANALYST_OUTPUTS.items() if state.get(key) is None
     )
+    fundamentals_gaps = _fundamentals_caveats(state)
     news_gaps, news_evidence = _news_caveats(state)
     debate_gaps, debate_evidence = _debate_caveats(state)
     risk_gaps, risk_evidence, ledger = _risk_caveats(state)
@@ -609,6 +647,7 @@ async def synthesizer_node(state: TradingState) -> dict:
             f"at all, which is not the same as that evidence being neutral"
             for name in missing
         ]
+        + fundamentals_gaps
         + news_gaps
         + debate_gaps
         + risk_gaps

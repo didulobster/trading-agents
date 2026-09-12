@@ -11,7 +11,7 @@ paid for." These pin the in-node checks.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -198,16 +198,22 @@ def test_a_passed_deadline_stops_the_loop(monkeypatch):
 async def test_the_fundamentals_node_hands_the_port_its_budget_and_prior_spend(monkeypatch):
     seen = {}
 
-    async def fake_report(ticker, run_id=None, **kwargs):
+    async def fake_report(ticker, as_of=None, run_id=None, **kwargs):
+        seen["as_of"] = as_of
         seen.update(kwargs)
         return None
 
     monkeypatch.setattr(nodes, "get_fundamentals_report", fake_report)
     budget, prior = _budget(0.75), [_event(0.05)]
 
-    await nodes.fundamentals_node({"ticker": "ACN", "budget": budget, "cost_events": prior})
+    as_of = date(2026, 8, 19)
+    await nodes.fundamentals_node(
+        {"ticker": "ACN", "as_of_date": as_of, "budget": budget, "cost_events": prior}
+    )
 
-    assert seen == {"budget": budget, "prior_events": prior}
+    # The analysis date rides with the budget: the node cannot pass one and
+    # forget the other.
+    assert seen == {"as_of": as_of, "budget": budget, "prior_events": prior}
 
 
 # ---------------------------------------------------------------------------

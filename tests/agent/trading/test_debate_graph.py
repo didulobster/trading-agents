@@ -98,7 +98,7 @@ def _stub_debate(monkeypatch, *, productive=True, cost=0.01):
 
 
 def _stub_fundamentals(monkeypatch):
-    async def fake(ticker: str, run_id: str | None = None, **_):
+    async def fake(ticker: str, as_of=None, run_id: str | None = None, **_):
         return FundamentalsReport(
             ticker=ticker,
             summary="# Stub memo",
@@ -381,7 +381,7 @@ async def test_a_run_with_no_analyst_evidence_skips_the_debate_entirely(monkeypa
     _stub_debate(monkeypatch, productive=True)
     _stub_synthesis(monkeypatch)
 
-    async def no_report(ticker: str, run_id: str | None = None, **_):
+    async def no_report(ticker: str, as_of=None, run_id: str | None = None, **_):
         return None
 
     monkeypatch.setattr(nodes, "get_fundamentals_report", no_report)

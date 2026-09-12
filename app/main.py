@@ -196,6 +196,10 @@ class LatestFilingsRequest(BaseModel):
     # None = auto-detect the filer's form-type family (see IngestRequest).
     form_types: list[str] | None = None
     since_year: int | None = None
+    # Upper bound on the filing date. A historical run must not be shown
+    # filings published after the date it is analysing — knowing a 10-K
+    # exists is itself lookahead, even before anything is read from it.
+    filed_before: date | None = None
     # Narrow the auto-detected family to its PERIODIC members (10-K/10-Q, or
     # 20-F), dropping the event-driven ones. Defaults on because a
     # fundamentals checklist is built from periodic reports and the event
@@ -453,6 +457,9 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
             cik=cik, form_types=form_types, since=since,
         )
 
+    if req.filed_before:
+        sec_filings = [f for f in sec_filings if f.filing_date <= req.filed_before]
+
     accession_numbers = [f.accession_number for f in sec_filings]
     ingested: dict[str, str] = {}
     if accession_numbers:
@@ -485,6 +492,8 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
     return {
         "ticker": req.ticker.upper(),
         "form_types_searched": form_types,
+        # Echoed so a reader of the agent's trace can see the run was bounded.
+        "filed_before": req.filed_before.isoformat() if req.filed_before else None,
         "total_on_sec": len(filings_list),
         "already_ingested": len(filings_list) - len(new_filings),
         "new_filings_count": len(new_filings),
