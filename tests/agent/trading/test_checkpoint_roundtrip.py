@@ -470,7 +470,7 @@ def _stub_expensive_nodes(monkeypatch, tmp_path) -> None:
     df = pd.read_csv(FIXTURE, index_col=0)
     df.index = pd.to_datetime(df.index, utc=True)
 
-    async def fake_fundamentals(ticker: str, run_id: str | None = None, **_):
+    async def fake_fundamentals(ticker: str, as_of=None, run_id: str | None = None, **_):
         return FundamentalsReport(
             ticker=ticker,
             summary="# Stub memo",

@@ -322,9 +322,10 @@ tests/
 
 Named, not hidden. The significant ones:
 
-- **`as_of_date` does not reach the fundamentals leg.** News and prices are bounded at the
-  analysis date; the fundamentals agent reads the wall clock. A historical run's memo looks
-  complete and its fundamentals research is unbounded. This is the one lookahead hole left.
+- **A historical run bounds retrieval, not the model's priors.** `as_of_date` now reaches
+  every leg: filing retrieval is capped at the analysis date (`filed_before` on every
+  `ask_edgar`, `check_latest_filings` and `extract_metrics` call), and the memo says so.
+  What no bound can reach is what the model already knows about how the period turned out.
 - **The budget is checked on edges, not inside nodes.** The synthesizer is one node making
   at least 24 model calls, so the documented "overshoot by at most one call" bound is wrong
   for the most expensive node in the pipeline.

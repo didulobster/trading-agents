@@ -10,6 +10,7 @@ import re
 import sys
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import date
 
 import httpx
 from pydantic import ValidationError
@@ -528,6 +529,33 @@ async def execute_tool(name: str, inputs: dict) -> str:
     return result
 
 
+def _as_of_bound() -> dict:
+    """`{"filed_before": <analysis date>}`, or `{}` on an unbounded run.
+
+    The run's analysis date is the upper bound for every source in the
+    pipeline — prices and news enforce it, and the fundamentals leg did
+    not: it read whatever the corpus held, however recently filed. A memo
+    dated March could cite an August 10-K and say nothing about it.
+
+    Applied here, in dispatch, rather than asked of the model: the bound
+    holds whether or not the agent remembers it, and it stays out of every
+    tool schema so there is nothing for the model to set.
+    """
+    as_of = get_as_of()
+    return {"filed_before": as_of.isoformat()} if as_of else {}
+
+
+def _clamped_window(inputs: dict) -> dict:
+    """The model's own `filed_before`, never later than the run's bound."""
+    bound = _as_of_bound()
+    if not bound:
+        return {}
+    asked = inputs.get("filed_before")
+    if not asked:
+        return bound
+    return {"filed_before": min(str(asked), bound["filed_before"])}
+
+
 async def _dispatch(name: str, inputs: dict) -> str:
     if name == "calculate":
         expression = inputs["expression"]
@@ -624,18 +652,17 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return resp.text
 
         if name == "ask_edgar":
-            resp = await http.post(
-                f"{API_BASE}/ask",
-                json={
-                    "question": inputs["question"],
-                    "tickers": inputs.get("tickers"),
-                    # `or None`, not `.get(...)`: a model that means "no
-                    # filter" sends [] about as often as it omits the key,
-                    # and an empty list would filter everything out.
-                    "section_path_contains": inputs.get("sections") or None,
-                    "k": ASK_EDGAR_K,
-                },
-            )
+            payload = {
+                "question": inputs["question"],
+                "tickers": inputs.get("tickers"),
+                # `or None`, not `.get(...)`: a model that means "no
+                # filter" sends [] about as often as it omits the key,
+                # and an empty list would filter everything out.
+                "section_path_contains": inputs.get("sections") or None,
+                "k": ASK_EDGAR_K,
+            }
+            payload.update(_as_of_bound())
+            resp = await http.post(f"{API_BASE}/ask", json=payload)
             if resp.status_code != 200:
                 return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
             _record_delegated_usage(resp)
@@ -687,14 +714,18 @@ async def _dispatch(name: str, inputs: dict) -> str:
             return out
 
         if name == "extract_metrics":
-            resp = await http.post(f"{API_BASE}/extract", json=inputs)
+            # The model chooses this window; the run's bound overrides the
+            # top of it. A model asking for metrics "through 2026" during a
+            # run dated March 2026 gets March, not 2026.
+            payload = {**inputs, **_clamped_window(inputs)}
+            resp = await http.post(f"{API_BASE}/extract", json=payload)
             if resp.status_code != 200:
                 return f"Error from /extract_metrics: {resp.status_code} — {resp.text[:500]}"
             _record_delegated_usage(resp)
             return resp.text
 
         if name == "check_latest_filings":
-            payload = {"ticker": inputs["ticker"]}
+            payload = {"ticker": inputs["ticker"], **_as_of_bound()}
             # Passed through only when the agent named its forms. Omitting
             # the key lets the server auto-detect the filer's family and
             # narrow it to periodic reports; sending form_types=None would
@@ -881,6 +912,15 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
 
 @dataclass
 class _RunState:
+    # The run's analysis date. Every filing-reading tool bounds itself at
+    # this date, so a historical run cannot retrieve a filing published
+    # after the date it claims to be analysing. None means "no bound" — the
+    # standalone research CLI answering about today.
+    #
+    # Held here rather than offered to the model as a tool argument on
+    # purpose: a bound the agent has to remember to apply is not a bound.
+    # It never appears in any tool schema.
+    as_of: date | None = None
     retrieved_text: list[str] = field(default_factory=list)
     calc_results: list[float] = field(default_factory=list)
     rejected_calc_attempts: list[dict] = field(default_factory=list)
@@ -904,9 +944,19 @@ def _state() -> _RunState:
     return state
 
 
-def reset_run_provenance() -> None:
-    """Call once at the start of each agent run."""
-    _RUN_STATE.set(_RunState())
+def reset_run_provenance(as_of: date | None = None) -> None:
+    """Call once at the start of each agent run.
+
+    `as_of` is the run's analysis date, and becomes the upper bound every
+    filing-reading tool applies to itself. Omit it only where "now" is the
+    honest answer (the standalone research CLI, news assessment).
+    """
+    _RUN_STATE.set(_RunState(as_of=as_of))
+
+
+def get_as_of() -> date | None:
+    """The run's analysis date, or None when the run is unbounded."""
+    return _state().as_of
 
 
 def _record_delegated_usage(resp) -> None:
