@@ -123,7 +123,15 @@ def _try_yfinance(ticker: str, as_of: date) -> tuple[pd.DataFrame | None, str]:
             start=start, end=as_of + timedelta(days=1), interval="1d"
         )
         if df is None or df.empty:
-            logger.info("yfinance returned no bars for %s as of %s", ticker, as_of)
+            # WARNING, not INFO. Returning None here is never routine: it
+            # either falls through to the other vendor or ends the run with
+            # VendorError. Logged at INFO it was invisible under the trading
+            # CLI's default level, which is how a FIG run died at 2026-03-01
+            # with "No price data for FIG from yfinance or Finnhub" and no
+            # record of what either vendor had actually said.
+            logger.warning(
+                "yfinance returned no bars for %s as of %s", ticker, as_of
+            )
             return None, "yfinance"
         return _bound_to_as_of(df, as_of), "yfinance"
     except Exception:
@@ -154,8 +162,9 @@ def _try_finnhub(ticker: str, as_of: date) -> tuple[pd.DataFrame | None, str]:
         from_ts = to_ts - _LOOKBACK_DAYS * 24 * 60 * 60
         candles = client.stock_candles(ticker, "D", from_ts, to_ts)
         if candles.get("s") != "ok":
-            logger.info(
-                "finnhub returned status %r for %s as of %s",
+            logger.warning(
+                "finnhub returned status %r for %s as of %s — same reasoning "
+                "as the yfinance branch above",
                 candles.get("s"), ticker, as_of,
             )
             return None, "finnhub"

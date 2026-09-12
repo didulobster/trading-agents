@@ -388,19 +388,26 @@ async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, fil
     return _fuse_across_queries(per_query, k=sum(len(r) for r in per_query))
 
 @app.get("/corpus-status")
-async def corpus_status_endpoint(ticker: str | None = None):
+async def corpus_status_endpoint(ticker: str | None = None, filed_before: date | None = None):
+    """`filed_before` bounds every section at the caller's analysis date.
+
+    A historical run could not READ a later filing but could still SEE it:
+    a live FIG run at --as-of 2026-03-01 listed two post-cutoff 10-Qs by
+    date in its own memo. Knowing a filing exists, and when, is information
+    from after the cutoff.
+    """
     if ticker is not None:
         try:
             ticker = normalize_ticker(ticker)
         except ValueError as e:
             raise HTTPException(422, str(e))
     query = CorpusStatusQuery()
-    summary = await query.summary(ticker)
+    summary = await query.summary(ticker, filed_before)
     if not summary:
         return {"summary": [], "issues": [], "per_filing": []}
 
-    issues = await query.issues(ticker)
-    per_filing = await query.per_filing(ticker)
+    issues = await query.issues(ticker, filed_before)
+    per_filing = await query.per_filing(ticker, filed_before)
 
     return {
         "summary": [asdict(row) for row in summary],
@@ -408,7 +415,7 @@ async def corpus_status_endpoint(ticker: str | None = None):
         "per_filing": [asdict(d) for d in per_filing],
         # What `ask_edgar`'s `sections` filter will actually match. Without
         # this the agent guesses note titles, and the filter is dropped.
-        "sections_available": await query.item_sections(ticker),
+        "sections_available": await query.item_sections(ticker, filed_before),
     }
 
 @app.post("/ingest", dependencies=SPENDS_MONEY)

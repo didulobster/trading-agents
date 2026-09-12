@@ -630,7 +630,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
         if name == "check_corpus":
             # STEP 2: confirm this route/param exists, or add it to main.py
             resp = await http.get(
-                f"{API_BASE}/corpus-status", params={"ticker": inputs["ticker"]}
+                f"{API_BASE}/corpus-status",
+                params={"ticker": inputs["ticker"], **_as_of_bound()},
             )
             if resp.status_code != 200:
                 return f"Error from /check_corpus: {resp.status_code} — {resp.text[:500]}"

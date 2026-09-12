@@ -259,9 +259,27 @@ def test_no_bars_is_logged_as_no_bars_not_as_a_failure(monkeypatch, caplog):
 
     monkeypatch.setattr(port.yf, "Ticker", _Empty)
 
-    with caplog.at_level(logging.INFO, logger=port.logger.name):
+    with caplog.at_level(logging.WARNING, logger=port.logger.name):
         df, _ = port._try_yfinance("ACN", _date(2026, 3, 1))
 
     assert df is None
+    # WARNING, not INFO. A live FIG run at --as-of 2026-03-01 died with
+    # "No price data for FIG from yfinance or Finnhub" and no record of what
+    # either vendor said, because this line was INFO and the trading CLI
+    # configured no logging at all. Returning None here is never routine.
     assert "returned no bars" in caplog.text
     assert "failed" not in caplog.text
+
+
+def test_the_trading_cli_configures_logging():
+    """Without this, every logger.info in the pipeline goes nowhere and
+    WARNING arrives via Python's handler-of-last-resort — unformatted, with
+    no logger name. app/cli.py always did it; the entry point that spends
+    the most per invocation did not."""
+    import inspect
+
+    import app.agent.trading.interface.cli as trading_cli
+
+    source = inspect.getsource(trading_cli.main)
+    assert "logging.basicConfig" in source
+    assert "logging.INFO" in source
