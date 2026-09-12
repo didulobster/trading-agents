@@ -260,78 +260,80 @@ This is the precise trap `models.py`'s docstring describes ("two variables that 
 
 `[x]` = done and tested, `[~]` = in progress, `[ ]` = not started. Each High item ships as its own PR.
 
+**Status, 2026-09-12:** every High and Medium item is addressed across PRs #102–#107, which stack in that order (#102 → #103 → #104 → #105 → #106 → #107). Suite at the tip: 951 passed, 1 skipped. Six sub-items are left open and each says below why — all six need either the gitignored eval corpus or a live paid run.
+
 ### High
 
-**#1 `extract-metrics` crashes**
-- [ ] Rename the repository dataclass to `FinancialMetricsRow` and delete the shadowed `from app.application.extraction_service import FinancialMetrics` in `metrics_repo.py`
-- [ ] One shared `build_metrics_row(extracted, ticker, fiscal_period, filing_type, filed_date, chunks)` used by both `main.extract` and `cli._run_extract_metrics`
-- [ ] `_run_extract_metrics` opens and closes the pool like every other CLI coroutine
-- [ ] Test: `extract-metrics` end to end against stubbed extractor and repository, asserting the row's `ticker`/`fiscal_period`/`source_citations`
-- [ ] Test: at least one smoke test per `app.cli` command, so no shipped command is untested again
+**#1 `extract-metrics` crashes**: PR #102
+- [x] Rename the repository dataclass to `FinancialMetricsRow` and delete the shadowed `from app.application.extraction_service import FinancialMetrics` in `metrics_repo.py`
+- [x] One shared `build_metrics_row(extracted, ticker, fiscal_period, filing_type, filed_date, chunks)` used by both `main.extract` and `cli._run_extract_metrics`
+- [x] `_run_extract_metrics` opens and closes the pool like every other CLI coroutine
+- [x] Test: `extract-metrics` end to end against stubbed extractor and repository, asserting the row's `ticker`/`fiscal_period`/`source_citations`
+- [x] Test: at least one smoke test per `app.cli` command, so no shipped command is untested again
 
-**#2 `as_of_date` does not reach the fundamentals leg**
-- [ ] `get_fundamentals_report(ticker, as_of, ...)` — required, not defaulted
-- [ ] `fundamentals_node` passes `state["as_of_date"]`; the port raises if it is missing, as `news_node`/`synthesizer_node` do
-- [ ] The task prompt states the analysis date; `FundamentalsReport.generated_at` is set from it, not `date.today()`
-- [ ] Fundamentals cache keyed on `(ticker, as_of)`; writes gated on `MOCK_FUNDAMENTALS` or moved under `MEMO_DIR`
-- [ ] Until retrieval can be bounded by filing date, the port emits an explicit data gap naming the fundamentals leg as not point-in-time
-- [ ] Test: a run with `as_of` in the past reaches the port with that date and never calls `date.today()`
-- [ ] Update the README's "Known limitations" entry to match what ships
+**#2 `as_of_date` does not reach the fundamentals leg**: PR #103
+- [x] `get_fundamentals_report(ticker, as_of, ...)` — required, not defaulted
+- [x] `fundamentals_node` passes `state["as_of_date"]`; the port raises if it is missing, as `news_node`/`synthesizer_node` do
+- [x] The task prompt states the analysis date; `FundamentalsReport.generated_at` is set from it, not `date.today()`
+- [x] Fundamentals cache keyed on `(ticker, as_of)`; writes gated on `MOCK_FUNDAMENTALS` or moved under `MEMO_DIR`
+- [x] Until retrieval can be bounded by filing date, the port emits an explicit data gap naming the fundamentals leg as not point-in-time
+- [x] Test: a run with `as_of` in the past reaches the port with that date and never calls `date.today()`
+- [x] Update the README's "Known limitations" entry to match what ships
 
 ### Medium
 
-**#3 Eval measures the production path**
-- [ ] `eval/runner.py` gains a `full` mode calling `retrieve_full`; make it the default
-- [ ] Re-run the 51-query BM25 comparison under `full` and record the numbers beside the #84 ones
-- [ ] Delete `retrieve_with_decomposition` once nothing calls it
-- [ ] Key gold sets by `(accession, section_path, content hash)` instead of serial chunk id
-- [ ] Commit a small `eval/test_set.yaml` (or a fixture subset) so eval can run in CI
+**#3 Eval measures the production path**: PR #104
+- [x] `eval/runner.py` gains a `full` mode calling `retrieve_full`; make it the default
+- [ ] Re-run the 51-query BM25 comparison under `full` and record the numbers beside the #84 ones — **not done:** needs the gitignored `eval/test_set.yaml` and spends decomposer calls per question
+- [x] Delete `retrieve_with_decomposition` once nothing calls it
+- [ ] Key gold sets by `(accession, section_path, content hash)` instead of serial chunk id — **not done:** the test set is gitignored and absent from this checkout, so the migration cannot be written against real data
+- [ ] Commit a small `eval/test_set.yaml` (or a fixture subset) so eval can run in CI — **not done:** same reason. The harness itself is now unit-tested (`tests/test_retrieval_fusion.py`), which is what CI can run without a corpus
 
-**#4 Forced-memo turn misses the prompt cache**
-- [ ] Final forced-memo call sends `tools=TOOLS` and the structured `system` block with `cache_control`
-- [ ] `_roll_cache_breakpoint(messages)` before the forced-memo call and before the `max_tokens` continuation call
-- [ ] Continuation call also sends `tools=TOOLS`
-- [ ] Test: both calls carry a `cache_control` breakpoint and the tool list
-- [ ] Confirm on one live run that `cache_read_ratio` in the `run_summary` line improves
+**#4 Forced-memo turn misses the prompt cache**: PR #105
+- [x] Final forced-memo call sends `tools=TOOLS` and the structured `system` block with `cache_control`
+- [x] `_roll_cache_breakpoint(messages)` before the forced-memo call and before the `max_tokens` continuation call
+- [x] Continuation call also sends `tools=TOOLS`
+- [x] Test: both calls carry a `cache_control` breakpoint and the tool list
+- [ ] Confirm on one live run that `cache_read_ratio` in the `run_summary` line improves — **not done:** costs a real run; the mechanism is pinned by test instead
 
-**#5 Cross-sub-query merge**
-- [ ] `retrieve_full` sums each chunk's per-sub-query RRF contributions instead of taking the max
-- [ ] Same in `retrieve_with_decomposition` if it survives #3
-- [ ] `gather_extraction_chunks` and `retrieve_for_extraction` run their fixed queries with `asyncio.gather`
-- [ ] Measure with the #3 harness before and after
+**#5 Cross-sub-query merge**: PR #104
+- [x] `retrieve_full` sums each chunk's per-sub-query RRF contributions instead of taking the max
+- [x] ~~Same in `retrieve_with_decomposition` if it survives #3~~ — it did not survive; deleted in #104
+- [x] `gather_extraction_chunks` and `retrieve_for_extraction` run their fixed queries with `asyncio.gather`
+- [ ] Measure with the #3 harness before and after — **not done:** same corpus/spend constraint as #3's re-run
 
-**#6 Delete the dead PDF pipeline**
-- [ ] Delete `app/ingest.py`, `app/retrieve.py`, `app/db_postgres.py`, `app/db.py`, `app/chunk.py`
-- [ ] `git rm --cached app/__init__.pyc`; add `*.pyc` to `.gitignore`
-- [ ] Remove `_DEAD_MODULES` from `tests/test_config.py` — the dotenv guard then covers all of `app/`
-- [ ] Drop the now-unused `Chunk`/`Chunks` import from `app/llm.py`
-- [ ] Remove the stale `.claude/worktrees/inspiring-kilby-ec9f13` worktree (`git worktree remove`)
+**#6 Delete the dead PDF pipeline**: PR #106
+- [x] Delete `app/ingest.py`, `app/retrieve.py`, `app/db_postgres.py`, `app/db.py`, `app/chunk.py`
+- [x] `git rm --cached app/__init__.pyc`; add `*.pyc` to `.gitignore`
+- [x] Remove `_DEAD_MODULES` from `tests/test_config.py` — the dotenv guard then covers all of `app/`
+- [x] Drop the now-unused `Chunk`/`Chunks` import from `app/llm.py`
+- [x] Remove the stale `.claude/worktrees/inspiring-kilby-ec9f13` worktree (`git worktree remove`)
 
-**#7 One way to read a required setting**
-- [ ] `require_env` at `main.py:410,440`, `cli.py:169,361`, `repositories/db.py:13`, `checkpointer.py:22`
-- [ ] Document `AGENT_TOOL_CONCURRENCY` in `.env.example`
-- [ ] Test: every `os.environ[...]` in `app/` is gone, in the style of `test_only_app_config_loads_dotenv`
+**#7 One way to read a required setting**: PR #106
+- [x] `require_env` at `main.py:410,440`, `cli.py:169,361`, `repositories/db.py:13`, `checkpointer.py:22`
+- [x] Document `AGENT_TOOL_CONCURRENCY` in `.env.example`
+- [x] Test: every `os.environ[...]` in `app/` is gone, in the style of `test_only_app_config_loads_dotenv`
 
-**#8 Cost log**
-- [ ] One `COST_LOG_PATH`, resolved from the repo root and overridable by env, imported by `researcher.log_cost` and `cost_log.py`
-- [ ] Monthly rotation; `_disk_logged_events` reads the current file plus the previous one
-- [ ] Test: a process started from another working directory writes to the same file
+**#8 Cost log**: PR #106
+- [x] One `COST_LOG_PATH`, resolved from the repo root and overridable by env, imported by `researcher.log_cost` and `cost_log.py`
+- [x] Monthly rotation; `_disk_logged_events` reads the current file plus the previous one
+- [x] Test: a process started from another working directory writes to the same file
 
-**#9 Shared structured-call helper**
-- [ ] One module owning `_accumulate`, `_tool_block`, `_extract`, `_CORRECTION`, `_retry_messages`, `_maybe_crash` and the spend ceiling
-- [ ] debate, risk, synthesis and news ports call it; per-port constants stay per-port
-- [ ] The four `_assert_within_budget` variants become one, raising `NodeBudgetExceeded` as they do now
-- [ ] Existing port tests pass unchanged — this is a refactor, not a behaviour change
+**#9 Shared structured-call helper**: PR #107
+- [x] One module owning `_accumulate`, `_tool_block`, `_extract`, `_CORRECTION`, `_retry_messages`, `_maybe_crash` and the spend ceiling
+- [x] debate, risk, synthesis and news ports call it; per-port constants stay per-port
+- [x] The four `_assert_within_budget` variants become one, raising `NodeBudgetExceeded` as they do now
+- [x] Existing port tests pass unchanged — this is a refactor, not a behaviour change
 
-**#10 Remove the `use_hybrid` knob**
-- [ ] Drop the parameter from `RetrievalService.__init__` and from `main.py:262,335`, `cli.py:402`, the test
-- [ ] `eval/runner.py` keeps its own mode flag under a name that says it is the harness's (`mode=`), not the service's
+**#10 Remove the `use_hybrid` knob**: PR #104
+- [x] Drop the parameter from `RetrievalService.__init__` and from `main.py:262,335`, `cli.py:402`, the test
+- [x] `eval/runner.py` keeps its own mode flag under a name that says it is the harness's (`mode=`), not the service's
 
-**#11 Failures that read as success**
-- [ ] `_try_yfinance` / `_try_finnhub` log the exception (vendor, ticker, `as_of`, exception type) before returning `None`
-- [ ] Guard `resp.content` in `llm.py:69` and `query_decomposer.py:160`; return a clear error, not `IndexError`
-- [ ] `researcher.main()` sets `mode = "test"` on the `--test` branch; test it
-- [ ] Test: an empty-content provider response from `/ask` returns a 4xx/5xx with a message, not a traceback
+**#11 Failures that read as success**: PR #105
+- [x] `_try_yfinance` / `_try_finnhub` log the exception (vendor, ticker, `as_of`, exception type) before returning `None`
+- [x] Guard `resp.content` in `llm.py:69` and `query_decomposer.py:160`; return a clear error, not `IndexError`
+- [x] `researcher.main()` sets `mode = "test"` on the `--test` branch; test it
+- [x] Test: an empty-content provider response from `/ask` returns an explicit "the model returned no answer" body rather than a traceback. **Deviation:** a 200 with a plain answer, not a 4xx/5xx — the research agent treats a non-200 as a tool error and retries, which would spend a second call on a question the provider has already declined to answer
 
 ### Low
 - [ ] Remove the unused imports and symbols listed under #12, including the duplicate `format_citation_tag` in `main.py` and `FinancialMetricsResponse`
@@ -354,6 +356,24 @@ This is the precise trap `models.py`'s docstring describes ("two variables that 
 - [ ] Run `eval/` in CI against the committed test set once #3 lands
 
 ---
+
+## What this pass shipped
+
+PRs #102–#107, stacking in that order. Each is reviewable on its own top commit.
+
+| PR | Findings | Substance |
+|---|---|---|
+| #102 | High #1 | `extract-metrics` called five things that do not exist; the row type is renamed and built through one constructor. A migration adds the `reasoning` column all three read methods already selected. |
+| #103 | High #2 | `as_of` reaches the fundamentals leg and is enforced in the TOOLS — `filed_before` on every filing-reading call — not in the prompt. |
+| #104 | Medium #3, #5, #10 | The eval harness measures `retrieve_full`; sub-queries fuse by summing; `use_hybrid` removed. |
+| #105 | Medium #4, #11 | One request shape per turn, so the forced-memo call can hit the prefix cache; three silent failures now say something. |
+| #106 | Medium #6, #7, #8 | Dead PDF pipeline and a Python 2 `.pyc` deleted; `require_env` everywhere; one cost-log path, rotated monthly. |
+| #107 | Medium #9 | 250 lines out of three ports into one `structured_call` module. |
+
+Two findings grew in scope once opened, and both are worth knowing about:
+
+- **#1 was five bugs, not one.** `FilingStatus.INGESTED`, `list_by_state`, `set_state` and `Filing.fiscal_period` do not exist either. The command had never run. The repository's three read methods were also selecting a `reasoning` column the table never had.
+- **#4 is worse than it reads on Anthropic.** The providers this project runs on do automatic *prefix* caching and `cache_control` is stripped in translation, so dropping `tools` from the forced-memo call did not merely lose a breakpoint — it made a cache hit impossible.
 
 ## What the previous review left open
 
