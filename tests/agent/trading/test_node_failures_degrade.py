@@ -179,3 +179,55 @@ async def test_the_synthesizer_over_its_cap_aborts_instead_of_ending_without_a_m
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# ---------------------------------------------------------------------------
+# A price vendor being down is not a reason to lose the run
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_a_vendor_outage_degrades_the_technical_leg_instead_of_ending_the_run(monkeypatch):
+    """Live, FIG 2026-09-13: yfinance returned an empty frame and Finnhub's
+    free tier 403'd on historical candles. VendorError propagated out of the
+    node and ended the run — discarding the fundamentals leg that had
+    already completed and been paid for ($0.070). Nothing about a price feed
+    being down invalidates the filing analysis."""
+    from datetime import date
+
+    import app.agent.trading.application.nodes as nodes
+    from app.agent.trading.domain.errors import VendorError
+
+    async def boom(ticker, as_of):
+        raise VendorError("No price data for FIG from yfinance or Finnhub")
+
+    monkeypatch.setattr(nodes, "get_price_history", boom)
+
+    out = await nodes.technical_node({"ticker": "FIG", "as_of_date": date(2026, 3, 1)})
+
+    assert out == {"analyst_failures": ["technical: No price data for FIG from yfinance or Finnhub"]}
+    assert "technical_report" not in out       # nothing fabricated to fill the hole
+
+
+@pytest.mark.parametrize("missing,failures,expect", [
+    (["technical"], ["technical: No price data for FIG from yfinance or Finnhub"],
+     ["FAILED", "yfinance"]),
+    (["technical"], [], ["did not run"]),
+])
+def test_a_failed_analyst_and_an_unselected_one_read_differently(missing, failures, expect):
+    """Same missing section, different claim about it. An analyst nobody
+    selected cannot claim a vendor was down; one whose vendor WAS down must
+    not read as though the evidence were merely unrequested."""
+    import app.agent.trading.application.nodes as nodes
+
+    gap = nodes._missing_analyst_gaps(missing, failures)[0]
+    for token in expect:
+        assert token in gap
+    assert "not the same as that evidence being neutral" in gap or "FAILED" in gap
+
+
+def test_a_malformed_failure_entry_falls_back_to_did_not_run():
+    """Never crash the memo over the shape of a diagnostic string."""
+    import app.agent.trading.application.nodes as nodes
+
+    assert "did not run" in nodes._missing_analyst_gaps(["technical"], ["technical"])[0]
+    assert "did not run" in nodes._missing_analyst_gaps(["technical"], ["technical: "])[0]

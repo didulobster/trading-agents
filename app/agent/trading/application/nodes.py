@@ -7,6 +7,7 @@ resolution live in infrastructure/synthesis_port.py — this module still owns
 the caveat computation (`_news_caveats`, `_debate_caveats`, `_risk_caveats`),
 same split as the risk/debate ports vs. their nodes.
 """
+import logging
 from collections import Counter
 from datetime import date, datetime, timezone
 
@@ -20,6 +21,7 @@ from app.agent.trading.application.risk_ledger import (
 from app.agent.trading.application.risk_router import RISK_MAX_TURNS
 from app.agent.trading.domain.budget import NodeBudgetExceeded, RunTermination
 from app.agent.trading.domain.decision_memo import Verdict
+from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.domain.news_digest import (
     AGGREGATED_RELEVANCE,
     NewsDigest,
@@ -58,6 +60,8 @@ from app.agent.trading.infrastructure.technical_interpreter_port import interpre
 # sampling has to re-run the whole (panel, Research Manager, Risk Judge)
 # trial, not just resample the Judge's call. See
 # trading-agent-known-gaps.md for the measurements this decision rests on.
+logger = logging.getLogger(__name__)
+
 RISK_VERDICT_SAMPLES = 3
 
 
@@ -146,7 +150,23 @@ async def technical_node(state: TradingState) -> dict:
         )
     print(f"[technical] running for {ticker} as of {as_of}")
 
-    df, source, dropped_bars = await get_price_history(ticker, as_of)
+    try:
+        df, source, dropped_bars = await get_price_history(ticker, as_of)
+    except VendorError as exc:
+        # A vendor outage ended the whole run, discarding the fundamentals
+        # leg that had already completed and been paid for — $0.070 on FIG,
+        # 2026-09-13, when yfinance returned an empty frame and Finnhub's
+        # free tier 403'd on historical candles. Nothing about a price feed
+        # being down invalidates the filing analysis.
+        #
+        # Degrading here is not silence: the synthesizer already reports an
+        # absent analyst as a data gap, and `analyst_failures` makes this
+        # one say WHY, which an unselected analyst cannot claim. The one
+        # thing that must not happen is a memo that reads as though the
+        # technical evidence were neutral.
+        print(f"[technical] FAILED, continuing without it: {exc}")
+        logger.warning("technical analyst failed for %s: %s", ticker, exc)
+        return {"analyst_failures": [f"technical: {exc}"]}
     if dropped_bars:
         print(f"[technical] dropped {dropped_bars} incomplete bar(s) from {source}")
     indicators = compute_indicators(df)
@@ -289,6 +309,39 @@ ANALYST_OUTPUTS = {
     "technical": "technical_report",
     "news": "news_digest",
 }
+
+
+def _missing_analyst_gaps(missing: list[str], failures: list[str]) -> list[str]:
+    """One gap per analyst with no report, saying WHICH kind of absence.
+
+    An analyst that was never selected (`--only`) and one whose vendor was
+    down leave the same hole, but they are different claims about it: the
+    first means nobody asked, the second means somebody asked and the answer
+    could not be got. A memo that renders a vendor outage as "did not run"
+    invites the reader to treat the silence as deliberate.
+
+    Neither ever reads as neutral evidence — that is the point of saying
+    anything at all.
+    """
+    reasons = {
+        name.strip(): reason.strip()
+        for name, _, reason in (f.partition(":") for f in failures)
+        if reason.strip()
+    }
+    gaps = []
+    for name in missing:
+        if name in reasons:
+            gaps.append(
+                f"{name} analyst FAILED and this memo carries no {name} "
+                f"evidence as a result: {reasons[name]}"
+            )
+        else:
+            gaps.append(
+                f"{name} analyst did not run — this memo carries no {name} "
+                f"evidence at all, which is not the same as that evidence "
+                f"being neutral"
+            )
+    return gaps
 
 
 def _fundamentals_caveats(state: TradingState) -> list[str]:
@@ -642,11 +695,7 @@ async def synthesizer_node(state: TradingState) -> dict:
     risk_gaps, risk_evidence, ledger = _risk_caveats(state)
 
     base_gaps = (
-        [
-            f"{name} analyst did not run — this memo carries no {name} evidence "
-            f"at all, which is not the same as that evidence being neutral"
-            for name in missing
-        ]
+        _missing_analyst_gaps(missing, state.get("analyst_failures") or [])
         + fundamentals_gaps
         + news_gaps
         + debate_gaps

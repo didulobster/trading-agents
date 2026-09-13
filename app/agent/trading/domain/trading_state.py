@@ -39,6 +39,14 @@ class TradingState(TypedDict, total=False):
     # (NodeBudgetExceeded): the message, for the abort artifact. Every guarded
     # edge routes to graceful_abort once it is set.
     node_budget_breach: str | None
+    # An analyst that RAN and FAILED, as "<analyst>: <reason>". Distinct from
+    # an analyst that was never selected (--only) and from one whose report is
+    # simply absent: the memo has to be able to say which, because "no
+    # technical evidence because the vendor was down" and "no technical
+    # evidence because you did not ask for it" are different claims about the
+    # same missing section. An add-reducer, like every other channel several
+    # nodes can append to.
+    analyst_failures: Annotated[list[str], operator.add]
     fundamentals_report: FundamentalsReport
     technical_report: TechnicalReport
     news_digest: NewsDigest

@@ -19,7 +19,7 @@ from fastapi import Depends, Header
 
 from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 from app.domain.values import Ticker, normalize_ticker
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -43,6 +43,7 @@ from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.application.citations import format_citation_tag
 
+from app.infrastructure.build_info import build_info
 from app.infrastructure.llm.models import model_for
 from app.infrastructure.edgar.client import EdgarClient, periodic_forms
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
@@ -70,6 +71,8 @@ claude_model = model_for("answer")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.infrastructure.build_info import describe
+    logging.info("serving code at %s", describe())
     await init_pool()
     # Built once and shared, instead of per request: every /ask and /extract
     # used to construct a fresh OpenAI client and a fresh decomposer client,
@@ -120,6 +123,14 @@ app.add_middleware(
 # ---- Request / response models ----
 
 class AskRequest(BaseModel):
+    # A field the server does not understand is a 422, not a shrug. Pydantic's
+    # default is to DROP unknown fields, and that is how a 22-hour-stale
+    # server accepted `filed_before` on /latest-filings and silently
+    # discarded the bound: the caller was told nothing, and a historical run
+    # read filings it was not supposed to see. Failing on the first call
+    # beats a wrong answer thirty calls later.
+    model_config = ConfigDict(extra="forbid")
+
     question: str
     k: int = 8
     tickers: list[Ticker] | None = None
@@ -158,6 +169,9 @@ class AskResponse(BaseModel):
     )
 
 class ExtractRequest(BaseModel):
+    # See AskRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     ticker: Ticker
     fiscal_period: str          # "Q1 2026" — you supply this, it's not extracted
     filing_type: str            # "10-Q"
@@ -172,6 +186,9 @@ class FinancialMetricsResponse(BaseModel):
     citations: list[str]
 
 class NewsAssessRequest(BaseModel):
+    # See AskRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     ticker: Ticker
     headline: str
 
@@ -181,6 +198,9 @@ class NewsAssessResponse(BaseModel):
     assessment: str
 
 class IngestRequest(BaseModel):
+    # See AskRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     ticker: Ticker
     # None = auto-detect: 10-K for a domestic filer, 20-F for a foreign
     # private issuer (see EdgarClient.default_form_types). Pass explicitly
@@ -193,6 +213,9 @@ class IngestRequest(BaseModel):
     retry_failed: bool = False
 
 class LatestFilingsRequest(BaseModel):
+    # See AskRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     ticker: Ticker
     # None = auto-detect the filer's form-type family (see IngestRequest).
     form_types: list[str] | None = None
@@ -387,6 +410,18 @@ async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, fil
     # four queries found, ordered by how much of the set agreed on it.
     return _fuse_across_queries(per_query, k=sum(len(r) for r in per_query))
 
+@app.get("/health")
+async def health():
+    """What code this process is running.
+
+    Exists because a 22-hour-stale uvicorn served a whole FIG pipeline run
+    on 2026-09-13 with no symptom but a date bound that silently did
+    nothing. `commit` is snapshotted at import, so it is the RUNNING
+    process's commit, not the working tree's.
+    """
+    return {"status": "ok", **build_info()}
+
+
 @app.get("/corpus-status")
 async def corpus_status_endpoint(ticker: str | None = None, filed_before: date | None = None):
     """`filed_before` bounds every section at the caller's analysis date.
@@ -536,6 +571,9 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
 
 
 class TradingAnalysisRequest(BaseModel):
+    # See AskRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     ticker: Ticker
     thread_id: str | None = None
     # Same defaults as the CLI. `as_of_date` falls back to today HERE, at the

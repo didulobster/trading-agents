@@ -197,9 +197,141 @@ yfinance**, which is flaky. That is a standing constraint on `--as-of` runs, not
 - [x] `logging.basicConfig` in the trading CLI, matching `app/cli.py`
 - [x] Tests for all three, including one quoting the leaked memo sentence as the reason
 
+---
+
+# Runs 3 and 4 — forcing the memo path, to verify #4
+
+#4 changed the call the agent makes when its loop ends: it used to send no `tools` and a
+bare-string `system`, which on these providers changes the request at position zero and
+makes a prefix-cache hit impossible. Neither earlier run reached that call — run 1
+finished in 10 turns of 45, run 2 died first.
+
+**Run 3** (`LOOP_MAX_TURNS=4 --only fundamentals`) still finished naturally: with a low
+cap, `TURN_WARN_AT=8` tells the agent to wrap up on every turn, so it returns prose
+before the cap bites. Useful anyway — it validated the measurement method, since the
+node's logged totals matched the per-turn traces exactly, residual zero:
+
+```
+node total       : in=13131  cache_read=49415  out=2938
+traced 4 turns   : in=13131  cache_read=49415  out=2938
+UNTRACED residual: in=0      cache_read=0      out=0
+```
+
+**Run 4** (`LOOP_MAX_TURNS=1`) reached it: `[MAX_TURNS reached — forcing memo from
+gathered data]`. Subtracting the traced turn from the node's total isolates the
+forced-memo call:
+
+```
+node total       : in=1685  cache_read=17873  out=1427
+traced loop turn : in=110   cache_read=8919   out=63
+FORCED-MEMO CALL : in=1575  cache_read=8954   out=1364
+```
+
+**8,954 of 10,529 prompt tokens (85.0%) served from cache** on the call that used to be
+guaranteed to miss.
+
+## The counterfactual, measured
+
+Inference from one number is weak, so the two shapes were run against the provider with
+**identical messages**, new shape first to populate the cache:
+
+| call | `input` | `cache_read` | cached |
+|---|---|---|---|
+| 1. new shape (populates) | 5,823 | 8,847 | 60.3% |
+| 2. new shape again — **the fix** | **75** | **14,595** | **99.5%** |
+| 3. **old shape**, same messages | **13,217** | **0** | **0.0%** |
+
+The old shape gets **zero** cache reads on message content the provider has just seen,
+because dropping the tools block and flattening `system` to a string changes the prefix
+from its first byte. Priced at this run's model, that one call is **$0.004280 old vs
+$0.001944 new — 2.2× cheaper**, and it is the call carrying the entire conversation.
+
+**#4 is verified.**
+
 ## Still open
 
-- [ ] **#4 remains unverified.** Run 1 finished in 10 turns of 45; run 2 died before its agent hit the cap. Needs a run that reaches `MAX_TURNS` or the budget stop.
-- [ ] **Whether retrieval improved** is still unmeasured. That is `eval/` with `--mode full`, not a pipeline run, and it needs the gitignored corpus.
-- [ ] **A technical-node vendor failure kills the whole run**, discarding the fundamentals spend that already succeeded ($0.070 here). Nothing in `test_node_failures_degrade.py` expects the technical node to degrade, so this is a design question rather than a defect — but it is worth a decision.
-- [ ] The version probe and `extra="forbid"` follow-ups from run 1 are still open, and run 2's `check_corpus` leak is a second argument for the latter.
+- [x] ~~#4 unverified~~ — **verified above** (runs 3–4 plus the A/B).
+- [x] Whether retrieval improved — **measured**, see below.
+- [x] A technical-node vendor failure killing the run — **fixed**, see below.
+- [x] Version probe and `extra="forbid"` — **both shipped**, see below.
+
+---
+
+# Closing the four open actions
+
+## 1. Did retrieval actually improve? Yes — in rank, not in recall
+
+`scripts/probe_fusion_ab.py` settles it without an LLM and without a hand-labelled gold
+set, by **known-item retrieval**: a distinctive sentence lifted out of a real chunk has
+that chunk as its correct answer by construction. Two such sentences make a two-part
+question whose right answer set is known exactly — the shape decomposition produces, and
+the only shape where the two merges can differ at all.
+
+Two shapes, because the change could plausibly hurt one of them:
+
+**AGREE** — two parts of *one* question (what the decomposer actually emits). 150
+questions, k=8, 2.49 chunks found by both sub-queries, **102/150 rankings differ**:
+
+| merge | recall@8 | both@8 | **MRR** |
+|---|---|---|---|
+| max (old) | 0.880 | 0.880 | **0.593** |
+| sum (new) | 0.887 | 0.887 | **0.694** |
+
+**SPLIT** — two *unrelated* parts with two different answers. 40 questions, **0.00**
+chunks found by both sub-queries, **0/40** rankings differ — the merges are identical by
+construction, because disjoint result sets make a sum a max.
+
+**Read it honestly:** the change does not alter *whether* the answer is retrieved —
+recall@8 is flat at ~0.88, and it was already high. It alters *where the answer lands*:
+**MRR 0.593 → 0.694, +17%**, stable across sample sizes (+14.6% at n=40). That matters
+because `ask_edgar` hands the answer model 8 chunks in order, so earlier is read better.
+The feared regression on split questions does not occur.
+
+Caveat worth keeping: these are synthetic sub-queries, not the live decomposer's output.
+It measures the merge, which is what changed — not end-to-end answer quality.
+
+## 2. A vendor outage no longer costs the run
+
+`technical_node` let `VendorError` propagate, which ended the whole run and discarded the
+fundamentals leg that had already completed and been paid for — $0.070 on run 2. Nothing
+about a price feed being down invalidates the filing analysis.
+
+It now degrades. The synthesizer already reports an absent analyst as a data gap; the new
+`analyst_failures` channel makes this one say **why**, which an unselected analyst cannot
+claim:
+
+- failed: `technical analyst FAILED and this memo carries no technical evidence as a result: No price data for FIG from yfinance or Finnhub`
+- unselected: `technical analyst did not run — … which is not the same as that evidence being neutral`
+
+Same hole, different claim about it. Neither ever reads as neutral evidence. The gap
+builder is `_missing_analyst_gaps`, extracted so it is testable on its own, and a
+malformed diagnostic string falls back to the "did not run" wording rather than crashing
+the memo.
+
+## 3. A stale server now announces itself
+
+`GET /health` returns the commit the **running process** started with — snapshotted at
+import, never recomputed, because a value that tracks the working tree always agrees and
+is exactly the comparison that needs to be able to fail. The server logs it on startup,
+and the agent's tool layer probes it **once per process** (not once per `ask_edgar` call)
+and warns on mismatch. A server too old to have `/health` is itself the answer, and says
+so.
+
+```
+$ curl -s localhost:8000/health
+{"status":"ok","commit":"3790fb9","dirty":true}
+```
+
+## 4. Unknown request fields are a 422, not a shrug
+
+All six request models take `extra="forbid"`. Pydantic's default is to **drop** unknown
+fields, which is precisely how a stale server accepted `filed_before` on
+`/latest-filings` and silently discarded the bound. Verified against the live server:
+
+```
+POST /latest-filings {"ticker":"FIG","filed_befor":"2026-03-01"}   -> HTTP 422   (was 200)
+```
+
+Between them, 3 and 4 close both halves of the run-1 failure: the server could not say
+what it was running, *and* it accepted a field it did not understand. Either one alone
+would have left it silent.
