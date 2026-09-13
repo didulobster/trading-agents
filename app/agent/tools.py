@@ -556,6 +556,48 @@ def _clamped_window(inputs: dict) -> dict:
     return {"filed_before": min(str(asked), bound["filed_before"])}
 
 
+_SERVER_VERSION_CHECKED = False
+
+
+async def _warn_if_server_is_stale(http) -> None:
+    """Say so, once per process, if the API server is running other code.
+
+    On 2026-09-13 a 22-hour-old uvicorn served a full pipeline run. It
+    predated every fix the run was meant to verify, and the only symptom was
+    a date bound the old server silently dropped — FastAPI discards unknown
+    request fields, so nothing failed. The run finished, looking fine, and
+    verified nothing.
+
+    Best-effort and never fatal: an older server has no /health, and that is
+    itself the answer.
+    """
+    global _SERVER_VERSION_CHECKED
+    if _SERVER_VERSION_CHECKED:
+        return
+    _SERVER_VERSION_CHECKED = True
+    from app.infrastructure.build_info import COMMIT
+
+    try:
+        resp = await http.get(f"{API_BASE}/health", timeout=5)
+        served = resp.json().get("commit") if resp.status_code == 200 else None
+    except Exception:
+        served = None
+
+    if served is None:
+        logger.warning(
+            "the API server did not report a commit — it predates /health, so "
+            "it is running code older than this checkout. Restart it before "
+            "trusting this run."
+        )
+    elif COMMIT and served != COMMIT:
+        logger.warning(
+            "the API server is running %s but this process is %s. Its half of "
+            "the pipeline (ask_edgar, extract_metrics, check_corpus) is on "
+            "different code. Restart it before trusting this run.",
+            served, COMMIT,
+        )
+
+
 async def _dispatch(name: str, inputs: dict) -> str:
     if name == "calculate":
         expression = inputs["expression"]
@@ -627,6 +669,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
     api_key = os.getenv("APP_API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as http:
+        await _warn_if_server_is_stale(http)
         if name == "check_corpus":
             # STEP 2: confirm this route/param exists, or add it to main.py
             resp = await http.get(
