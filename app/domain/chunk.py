@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .values import SectionPath, Ticker
 from app.infrastructure.chunking.models import ChunkDraft

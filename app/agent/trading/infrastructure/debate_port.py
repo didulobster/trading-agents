@@ -49,8 +49,13 @@ from app.agent.trading.infrastructure.structured_call import (
 )
 # create_with_temperature_fallback is re-exported on purpose: risk_port and
 # the determinism scripts import it from here, and several tests patch it
-# at this name. It reads as unused to a naive import scan; it is not.
-from app.infrastructure.llm import LLMClient, create_with_temperature_fallback, get_client
+# at this name. It reads as unused to a naive import scan; it is not — the
+# noqa is what stops `ruff --fix` from deleting it, which it did once.
+from app.infrastructure.llm import (  # noqa: F401
+    LLMClient,
+    create_with_temperature_fallback,
+    get_client,
+)
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
 
 from app.agent.researcher import (

@@ -5,7 +5,6 @@ from app.config import load_env, require_env
 load_env()
 
 import asyncio  # noqa: E402
-from dataclasses import asdict  # noqa: E402
 import json
 import logging
 import os

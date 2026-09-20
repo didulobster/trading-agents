@@ -1,4 +1,3 @@
-from psycopg.types.json import Json
 from app.domain.section import Section
 from .db import get_connection
 

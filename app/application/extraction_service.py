@@ -1,5 +1,4 @@
 from app.domain.token_usage import TokenUsage
-import os
 from datetime import date
 from typing import Literal
 

@@ -3,7 +3,6 @@ import asyncio
 import logging
 from pathlib import Path
 from datetime import date, datetime
-from sqlite3 import connect
 
 import httpx
 from .models import FilingSummary

@@ -41,19 +41,16 @@ from app.application.extraction_service import FinancialMetrics, MetricsExtracto
 from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService, _fuse_across_queries
-from app.application.citations import format_citation_tag
 
 from app.infrastructure.build_info import build_info
 from app.infrastructure.llm.models import model_for
 from app.infrastructure.edgar.client import EdgarClient, periodic_forms
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.queries.corpus_status import CorpusStatusQuery
-from app.infrastructure.repositories import metrics_repo
 from app.infrastructure.repositories.db import init_pool, close_pool, get_connection
 from app.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
     ChunkSearchFilters,
-    RetrievedChunk,
 )
 from app.infrastructure.repositories.document_repo import DocumentRepository
 from app.infrastructure.repositories.filing_repo import FilingRepository
