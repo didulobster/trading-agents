@@ -1,384 +1,257 @@
-# Code review: trading-agents
+# Code review: `app/` — simplification
 
-**Reviewed:** `main` at `617387f` (after #100, the memo verdict-consistency flag), 2026-09-12.
-**Scope:** `app/` (~11.5k lines), `tests/` (~14.8k lines), `eval/`, `scripts/`, `migrations/`, CI, packaging, docs.
-**Method:** read the HTTP API, the CLI, the research agent and its tool layer, the trading graph, nodes, routers and guards, the fundamentals/technical/news/debate/risk/synthesis ports, the budget and cost path, retrieval and the SQL repositories, ingestion, EDGAR, parsing, chunking, the verifiers, provider routing and config. Ran the full suite, an AST unused-import pass, and an env-var cross-check of `.env.example` against what the code actually reads. Where a claim needed proof I reproduced it (marked **[verified]**); otherwise **[from code]**.
+**Reviewed:** `main` at `543d020` (after #110, the stale-server guards), 2026-09-20.
+**Scope:** `app/` only (~18.5k lines, 92 modules). Tests, `eval/`, `scripts/` and `migrations/` were read only where they decide whether something in `app/` is dead.
+**Question asked:** not "is this correct?" but "what is here twice, here for nothing, or here in the wrong place?" Correctness findings are in the PR reviews; this pass reports only structure.
+**Method:** an AST pass for definitions nothing references (counting `tests/`, `eval/`, `scripts/` as callers, so nothing is called dead because only a test uses it); `ruff` (F/B/SIM/RET/ARG/PIE/C4); an AST pass for `_private` names imported across module boundaries; an import-cycle trace; and a hand read of the six largest modules. Every claim below was checked against the tree — **[verified]** means I ran something, **[from code]** means I read it.
 
-**Suite at review time:** `881 passed, 1 skipped in 3.49s` (the skip is `test_manifest_merge.py`, which needs a `docs/validation/` file absent from this checkout).
+**Predecessor:** the previous review (broad, all-categories, 2026-09-12) is at `git show d82ce1c:docs/code_review.md`. Its High and Medium findings shipped; where an item of its Low section is still open it is folded in below rather than repeated.
+
+**Suite at review time [verified]:** `3 failed, 960 passed, 10 skipped in 93s`. All three failures need a Postgres on `localhost:6432` that is not running in this checkout (`tests/agent/test_ask_edgar_section_filter.py` ×2, `tests/test_stale_server_guards.py::test_health_reports_the_running_commit`). They are environmental and unrelated to anything here — but the third is a new test that did not need a database until #110, and it is already filed as a review finding against that PR.
 
 ---
 
 ## Summary
 
-The core is in good shape. Since the previous review (deleted from the tree at `4e966a7`; recoverable with `git show 0e8e80d:docs/code_review.md`) **all three High and all ten Medium findings shipped** across PRs #82–#95: the API and CLI now share one run lifecycle, the budget guard reaches inside the fundamentals loop and the synthesizer, BM25 actually returns hits, per-run state moved to ContextVars, number matching is consolidated, ingestion retries FAILED filings idempotently, and config loads `.env` exactly once per entry point. That pass left its **Low section entirely unaddressed**, and this review confirms every item in it is still open.
+`app/` has been through real simplification passes and it shows: `structured_call.py` holds the one forced-tool-call contract all three ports used to copy, `_save_output` is the one vault writer, `number_matching.py` is the one token-anchored matcher, and the pre-refactor PDF pipeline is gone. There is no large-scale duplication left to delete.
 
-What this review adds is mostly at the edges the last one flagged and in the places the last one did not reach:
+What remains is one structural problem and a tail of small ones. The structural problem is **module placement**, not module content: three things that belong low in the stack live high in it, and every module that needs them reaches upward. That is what produces this repo's most distinctive smell — **20 `_private` names imported across module boundaries [verified]**, and **9 function-local imports written to dodge a cycle [verified]**, each with a comment apologising for itself. Both numbers go to near zero by moving three definitions; almost no logic changes.
 
-- **A shipped CLI command is broken** — `extract-metrics` raises `AttributeError` on its first filing.
-- **The fundamentals leg still reads the wall clock**, so a historical `--as-of` run has one unbounded analyst. The README names this; nothing in the code does.
-- **The eval harness measures a retrieval path production does not use**, so the numbers that justified the BM25 work do not describe `/ask`.
-- **The pre-refactor PDF pipeline is still in `app/`**, along with a Python 2.7 `.pyc` committed to git.
-- **Three ports carry a byte-identical copy of the same six helpers.**
-
-Nothing here is a security exposure: CORS is scoped, the spending endpoints take an optional shared secret, tickers are validated at every entry point including the vault writer, and Postgres is bound to loopback. Those were the previous review's #4 and they held.
+The rest is genuine but small: four copies of one guard, two copies of one wiring block, five copies of one error shape, 23 copies of one `with`, eight dead definitions and thirteen unused imports.
 
 ### Priority list
 
-| # | Severity | Finding | Where |
+| # | Size | Finding | Where |
 |---|---|---|---|
-| 1 | High | `extract-metrics` CLI crashes — wrong `FinancialMetrics` type reaches the repository | `cli.py:416-424`, `metrics_repo.py` |
-| 2 | High | `as_of_date` never reaches the fundamentals leg — lookahead in every historical run | `nodes.py:103`, `fundamentals_port.py:101` |
-| 3 | Medium | Eval never exercises `retrieve_full`, the path `/ask` uses | `eval/runner.py:136-151` |
-| 4 | Medium | The forced-memo turn is billed at full price — no tools, no cache breakpoint | `researcher.py:683-690` |
-| 5 | Medium | Sub-query results are merged by max RRF, discarding cross-query agreement | `retrieval_service.py:279-285` |
-| 6 | Medium | Dead pre-refactor PDF pipeline still in `app/`; Python 2.7 `.pyc` tracked in git | `app/ingest.py`, `app/retrieve.py`, `app/db_postgres.py`, `app/db.py`, `app/chunk.py`, `app/__init__.pyc` |
-| 7 | Medium | Seven direct `os.environ[...]` / `os.getenv` reads bypass `require_env` | `main.py`, `cli.py`, `db.py`, `checkpointer.py` |
-| 8 | Medium | The cost log has two hardcoded relative paths and no rotation | `researcher.py:390`, `cost_log.py:29` |
-| 9 | Medium | `_accumulate` + five more helpers are copied across three ports | debate/risk/synthesis ports |
-| 10 | Medium | `use_hybrid` is threaded through four call sites and read by nothing | `retrieval_service.py:41` |
-| 11 | Medium | Price-fetch failures are silent; `content[0]` is unguarded; `researcher --test` crashes | price port, `llm.py`, `researcher.py:748` |
-| 12 | Low | Unused imports, unused models, `USE_STUBS` scaffolding, stale docstrings | many |
-| 13 | Low | Duplicate/diverged docs, stale README limitation, undeclared dependencies | root vs `docs/` |
-| 14 | Low | No linter, no type checker, no coverage of any CLI command in CI | `.github/workflows/tests.yml` |
+| 1 | Medium | A 5-line dict in the wrong layer causes a real import cycle and 9 deferred imports | `application/nodes.py:307` |
+| 2 | Medium | `researcher.py` is the de-facto vault/usage library for the whole trading pipeline | `agent/researcher.py`, 7 importers |
+| 3 | Medium | `debate_port.py` is a de-facto shared library, reached into privately 6 times | `risk_port.py:51`, `synthesis_port.py:495,606` |
+| 4 | Small | The same `as_of_date is None` guard, written out four times | `application/nodes.py:112,147,204,685` |
+| 5 | Small | `/ask` and `/extract` repeat the same six-line `RetrievalService` wiring | `main.py:289,361` |
+| 6 | Small | Five `_dispatch` branches repeat the same non-200 error shape | `agent/tools.py:601-785` |
+| 7 | Small | `_QUOTE_LABEL` + `_strip_quote_label` + a 17-line comment, copied verbatim | `domain/debate.py:69`, `domain/risk.py:65` |
+| 8 | Small | 23 nested `async with` in six repositories | `infrastructure/repositories/*.py` |
+| 9 | Small | Eight definitions nothing calls | various |
+| 10 | Small | 13 unused imports, 1 duplicate import, 1 module shadowed by a local | various, `main.py:37/44`, `main.py:51/366` |
+| 11 | Small | Three comments that now describe the opposite of what the code does | `tools.py:487,665,674`, `number_matching.py:18` |
+| 12 | Small | Two parameters that are passed and never read | `researcher.py:110`, `runner.py:114` |
 
 ---
 
-## High
+## 1. A 5-line dict in the wrong layer causes a real import cycle — `application/nodes.py:307` [verified]
 
-### 1. `extract-metrics` crashes on its first filing [verified]
-
-`app/cli.py:416-424` runs extraction and hands the result straight to the repository:
+`ANALYST_OUTPUTS` maps each analyst leg to the `TradingState` key it fills:
 
 ```python
-metrics = await extractor.extract(chunks, ticker, f.fiscal_period, f.filing_type, f.filed_date)
-await metrics_repo.upsert(metrics)
+ANALYST_OUTPUTS = {
+    "fundamentals": "fundamentals_report",
+    "technical":    "technical_report",
+    "news":         "news_digest",
+}
 ```
 
-`MetricsExtractor.extract` returns the **Pydantic** `FinancialMetrics` from `app/application/extraction_service.py` — revenue, margins, confidence, reasoning. `MetricsRepository.upsert` expects the **dataclass** `FinancialMetrics` defined in `app/infrastructure/repositories/metrics_repo.py:11`, and its first statement is `metrics.ticker.upper()`.
+That is a statement about the *state shape*. It lives in `application/nodes.py`, the 923-line module that runs the legs. Three infrastructure modules need it, so `debate_port.py:61` imports it at module level — and `nodes.py` imports `synthesis_port`, which is downstream of `debate_port`. The cycle is `risk_nodes → risk_port → debate_port → nodes → synthesis_port`, and the codebase already knows:
 
-```
-CONFIRMED AttributeError: 'FinancialMetrics' object has no attribute 'ticker'
-has source_citations? False
-```
+- `synthesis_port.py:38-42` — *"Imports from debate_port are LOCAL to each function rather than at module level … debate_port imports `ANALYST_OUTPUTS` from application.nodes at its OWN module level, and nodes.py imports from this module, so a top-level import here completes the cycle."*
+- `nodes.py:633-635` — *"Local import: risk_nodes → risk_port → debate_port → nodes (for ANALYST_OUTPUTS) is a real cycle at module-load time."*
 
-`ticker`, `fiscal_period`, `filing_type`, `filed_date` and `source_citations` are all absent. `POST /extract` gets this right (`main.py:354-370` builds a `MetricsRow` explicitly); the CLI path never did.
+So one dict in the wrong module is the stated cause of **9 function-local imports** across 4 files [verified]: `nodes.py:636`, `risk_port.py:228`, `synthesis_port.py:254, 298, 405, 461, 495, 606, 640`.
 
-Two things make it invisible. `metrics_repo.py:5` imports the extraction-service `FinancialMetrics` and then shadows it with its own dataclass on line 11 — the shadowed import is almost certainly where the confusion started. And no test touches any `app.cli` command: `grep -rn "app.cli" tests/` returns nothing.
+**Suggested change.** Move `ANALYST_OUTPUTS` to `domain/trading_state.py`, beside the `TradingState` keys it names. Nothing else moves. `debate_port.py:61` then imports from `domain`, which imports nothing back, the cycle is gone, and the nine deferred imports become ordinary top-level ones — deleting nine comments explaining why they could not be.
 
-`_run_extract_metrics` also never calls `init_pool()` (every other CLI coroutine does); `get_connection` self-heals, so the pool is opened lazily and never closed, but the asymmetry is worth removing.
+While there, fold in the line that is duplicated *because* of the awkward placement: `order = list(ANALYST_OUTPUTS) + ["sentiment"]` appears at both `debate_port.py:451` and `risk_port.py:231` [verified]. Make it `REPORT_ORDER` in the same new home.
 
-**Fix:** have the two identically-named types stop colliding — rename the repository row to `FinancialMetricsRow`, delete the shadowed import — and build it in one shared helper both `main.extract` and `cli._run_extract_metrics` call. Add a test that runs the command against stubbed repositories.
+## 2. `researcher.py` is the trading pipeline's vault library — `agent/researcher.py` [verified]
 
-### 2. `as_of_date` never reaches the fundamentals leg [from code]
+`app/agent/researcher.py` is the standalone research-agent CLI. It is also where seven trading modules get their infrastructure:
 
-Every other data source is bounded at the analysis date and asserts it. `price_data_port._bound_to_as_of` drops post-`as_of` bars inside both vendor helpers; `news_node` and `synthesizer_node` refuse to run without `as_of_date` rather than defaulting to today; `TradingState.as_of_date`'s own comment says a node calling `date.today()` internally "makes probe-date runs impossible to verify".
+| Imported from `researcher` | By |
+|---|---|
+| `_save_output` | `debate_port`, `risk_port`, `news_digest_port`, `decision_memo_port`, `fundamentals_port`, `technical_interpreter_port` |
+| `UsageSummary` | `cost_log`, `structured_call`, `news_digest_port`, `technical_interpreter_port`, `risk_port`, `fundamentals_port` |
+| `log_cost`, `_compute_cost`, `AGENT_MODEL`, `StopCheck` | `fundamentals_port`, others |
+| `_ticker_arg` | `trading/interface/cli.py:15` |
+| `_build_news_prompt` | `main.py:559` (function-local, to avoid importing the agent at app start) |
 
-The fundamentals leg does exactly that:
+`_save_output` is a 40-line function that owns the vault layout, the run-folder convention and the last ticker-validation before a path is written. Six modules outside its package import it *by its private name*. A leading underscore that six other packages ignore is documentation that is actively false, and it hides the real dependency: every port depends on the research CLI module being importable, with its argparse, its watchlist loading and its prompt constants.
+
+**Suggested change.** Two small modules, no behaviour change:
+
+- `app/agent/vault.py` — `save_output` (public), which `researcher.py` re-exports or simply calls.
+- `UsageSummary` / `_compute_cost` / `log_cost` alongside the existing `app/domain/token_usage.py`, which is already the module for "what a call cost."
+
+`researcher.py` shrinks toward being what its name says, and `trading/infrastructure/*` stops importing the research CLI to write a file.
+
+## 3. `debate_port.py` is a de-facto shared library — `risk_port.py:51`, `synthesis_port.py:495,606` [verified]
+
+`risk_port` imports four private names from `debate_port` at module level (`_flag_debate_numbers`, `_inline_refs`, `_flag_direction_claims`, `_norm`); `synthesis_port` imports two more, function-locally, to dodge finding #1's cycle. `debate_port` in turn reaches privately into `technical_interpreter_port` for `_PERIOD_LABEL` and `_flag_unmatched_numbers_against` (`debate_port.py:71`).
+
+These are not accidents — they are the right functions being reused. The problem is that the reuse is undeclared: `debate_port.py` is 1502 lines of which roughly a third (`_inline_refs`, `_norm`, `check_quotes`, the number-flagging block, `report_texts`/`quotable_texts`) is infrastructure the other two ports run on, mixed in with the bull/bear debate itself.
+
+**Suggested change.** Lift the shared third into a sibling — `trading/infrastructure/evidence.py` is the natural name, since every one of those helpers answers "is this claim/figure backed by the evidence pack?" Make the names public there. `debate_port` drops to the debate, `risk_port`'s private import block becomes a normal one, and with #1 done, `synthesis_port`'s seven deferred imports become one ordinary import of the new module.
+
+This is the largest of the three, and it is the one to do **last** — it is a genuine reorganisation, where #1 and #2 are moves.
+
+## 4. The same `as_of_date` guard, four times — `nodes.py:112, 147, 204, 685` [verified]
+
+Each of the four nodes opens with the same shape: read `state.get("as_of_date")`, and if it is `None`, raise a `ValueError` whose message says "refusing to run unbounded … is a lookahead bug," above a 3–6 line comment explaining the rule. Roughly 40 lines say one thing four times.
+
+**Suggested change.** One helper in `application/guards.py` — which already exists for run-level guards and imports nothing that would cycle:
 
 ```python
-# nodes.py:103 — as_of_date is in state, and is not passed
-report = await get_fundamentals_report(state["ticker"], run_id=..., budget=..., prior_events=...)
-
-# fundamentals_port.py:101
-today = date.today()
-task = f"Today's date is {today.isoformat()}. Run the full research checklist for {ticker}."
+def require_as_of(state: TradingState, leg: str) -> date:
+    """The run's analysis date, or refuse. A bound a node can forget to
+    apply is not a bound: every source in the pipeline is capped at this
+    date, and an unbounded read is lookahead, not a missing default."""
+    as_of = state.get("as_of_date")
+    if as_of is None:
+        raise ValueError(
+            f"as_of_date missing from TradingState — refusing to run the "
+            f"{leg} leg unbounded. Reading a source without an explicit "
+            f"upper bound is a lookahead bug."
+        )
+    return as_of
 ```
 
-`get_fundamentals_report` has no `as_of` parameter at all. `today` also becomes `FundamentalsReport.generated_at`. So a run invoked with `--as-of 2026-03-01` produces a memo whose news and prices stop at March and whose fundamentals research reads whatever is in the corpus and on EDGAR today — and the memo does not say so. That is lookahead bias in the one analyst whose output carries the most weight.
+Each call site becomes `as_of = require_as_of(state, "fundamentals")`. The four incident comments collapse into the one docstring — keep the specifics (`nodes.py:105-109` on the fundamentals leg being the last to adopt the rule) as a one-line note at its site.
 
-Two related hazards in the same file:
+## 5. `/ask` and `/extract` repeat the same wiring — `main.py:289, 361` [verified]
 
-- `_cache_path(ticker)` keys the fundamentals cache on **ticker alone**. It is written on every real run (`fundamentals_port.py:153-154`) and read only under `MOCK_FUNDAMENTALS=1`. One environment variable pairs a months-old memo with any analysis date.
-- The cache directory is `app/agent/trading/.fundamentals_cache` — inside the source tree.
-
-**Fix:** thread `as_of` from `TradingState` into `get_fundamentals_report`, put it in the task prompt, and set `generated_at` from it. Key the cache on `(ticker, as_of)`, and either move it under `MEMO_DIR` or gate the *write* on `MOCK_FUNDAMENTALS` too. Until the agent's retrieval can be bounded by filing date, have the port add an explicit data gap saying the fundamentals leg is not point-in-time.
-
----
-
-## Medium
-
-### 3. The eval harness measures a path production does not use [from code]
-
-`eval/runner.py:136-151` picks exactly one of three modes:
-
-| flag | method called | decomposition | hybrid |
-|---|---|---|---|
-| `use_hybrid` | `retrieve_hybrid` | no | yes |
-| `use_decomposition` | `retrieve_with_decomposition` | yes | no (vector only) |
-| neither | `retrieve_by_embedding` | no | no |
-
-`POST /ask` calls **`retrieve_full`** — decomposition *and* hybrid — and `retrieve_full` is called by nothing in `eval/`. `retrieve_with_decomposition` is called by nothing *but* `eval/runner.py`. So the harness has a method kept alive only for measurement, and the method that serves every agent question is never measured.
-
-This matters because the BM25 fix (#84) was justified by a measurement, and the measured configuration is not the shipped one: fusion behaves differently when its inputs are sub-queries.
-
-The gold sets compound it — they are keyed by serial chunk ids, which change on every re-ingest, `eval/test_set.yaml` is gitignored, and eval is not in CI.
-
-**Fix:** add a `full` mode that calls `retrieve_full`, make it the default, and delete `retrieve_with_decomposition` once nothing needs it. Key gold sets by `(accession, section_path, content hash)`.
-
-### 4. The forced-memo turn cannot read the prompt cache [from code]
-
-The loop is careful about caching: `_roll_cache_breakpoint` moves a single breakpoint to the last block each turn, and the system block carries its own `cache_control`, so each turn re-reads tools + system + history at ~0.1×.
-
-The final call does neither (`researcher.py:683-690`):
+Both endpoints open with the identical six lines (down to the same trailing whitespace):
 
 ```python
-response = await client.messages.create(
-    model=AGENT_MODEL,
-    max_tokens=AGENT_MAX_TOKENS,
-    system=system_prompt,      # plain string — no cache_control breakpoint
-    messages=messages,         # no tools=TOOLS
-)
+embedder = _embedder()
+chunk_repo = ChunkRepository()
+decomposer = _decomposer()
+retrieval = RetrievalService(
+    embedding_service=embedder, 
+    chunk_repo=chunk_repo,
+    decomposer=decomposer)
 ```
 
-The cached prefix is tools → system → messages, so dropping `tools` invalidates it from the first byte, and with no breakpoint anywhere there is nothing to read from cache regardless. This is the turn that sends the *entire* accumulated conversation, and `tools.py:27-45` records that Phase 9 measured 2 of 3 fundamentals runs ending on exactly this path.
+`_embedder()` and `_decomposer()` already exist at `main.py:93-98` for exactly this reason; the composite was never given the same treatment. `/ask` needs `chunk_repo` separately for its section check, so return both or let it construct its own.
 
-The `max_tokens` continuation call inside the loop (`researcher.py:604-616`) does keep `cache_control`, and it also omits `tools` — same invalidation, smaller blast radius.
+**Suggested change.** Add `_retrieval()` beside them, returning the configured service. Two call sites lose five lines each, and there is one place to change when the service gains a dependency. (`cli.py:421`, `eval/runner.py:149` and three `scripts/` probes build it too, with four different argument styles — out of scope here, but the factory is where they should eventually point.)
 
-**Fix:** pass `tools=TOOLS` and the structured `system=[{... cache_control ...}]` block on both calls, and call `_roll_cache_breakpoint(messages)` before each. Verify against the `cache_read_ratio` already recorded in each `run_summary` line.
+## 6. Five `_dispatch` branches repeat one error shape — `agent/tools.py:601-785` [verified]
 
-### 5. Sub-query results merge by max, not by agreement [from code]
-
-`retrieve_full` fuses within a sub-query with RRF, then merges across sub-queries with a max (`retrieval_service.py:279-285`, and identically at `:112-116`):
+Each HTTP tool branch ends the same way:
 
 ```python
-if existing is None or chunk.similarity > existing.similarity:
-    all_chunks[chunk.chunk.id] = chunk
+resp = await http.post(f"{API_BASE}/ask", json=payload)
+if resp.status_code != 200:
+    return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
 ```
 
-RRF scores are rank-derived and comparable *within* a ranking, so `max` amounts to "best rank this chunk reached in any sub-query". A chunk that every sub-query ranked 3rd scores the same as one that a single sub-query ranked 3rd and the others missed entirely — the multi-query agreement signal that is the whole reason to decompose is discarded. Summing the per-sub-query RRF contributions is the standard treatment and is a two-line change.
+Five branches, five copies of the check and the 500-char truncation [verified: `grep -c "Error from /"` → 5].
 
-`main.gather_extraction_chunks` (`main.py:373-382`) has the same shape over `METRIC_QUERIES`, and additionally runs its four queries **sequentially**, as does `RetrievalService.retrieve_for_extraction:233-236` — both missed by the #93 parallelisation pass.
+**Suggested change.** One helper inside the `async with` block:
 
-### 6. The pre-refactor PDF pipeline is still shipped, and a Python 2 `.pyc` is in git [verified]
+```python
+async def _call(method: str, path: str, label: str, **kw) -> str | httpx.Response:
+    """The response, or the error string the agent should read instead."""
+    resp = await http.request(method, f"{API_BASE}{path}", **kw)
+    if resp.status_code != 200:
+        return f"Error from {label}: {resp.status_code} — {resp.text[:500]}"
+    return resp
+```
 
-`app/ingest.py`, `app/retrieve.py`, `app/db_postgres.py`, `app/db.py` and `app/chunk.py` are the original tutorial pipeline. Nothing at runtime imports them — `tests/test_config.py:25` already lists two of them as `_DEAD_MODULES` so the "only `app/config.py` loads dotenv" guard can pass, which is the tell: **the dead modules are the only reason that exemption exists**. Both still call `load_dotenv(override=True)` at import, the exact pattern `app/config.py` was written to eliminate. `app/ingest.py` writes to a `chunks(source, chunk_index, …)` schema that no longer exists.
+Worth doing mostly because the failure text is agent-visible: five copies is five chances for one tool to report a failure in a shape the model has not been taught to read.
 
-`app/__init__.pyc` is tracked (`git ls-files | grep pyc`), 102 bytes, magic `03f3 0d0a` — CPython **2.7** bytecode. `.gitignore` has `__pycache__/` but no `*.pyc`.
+## 7. A validator copied between two domain modules — `domain/debate.py:69`, `domain/risk.py:65` [verified]
 
-Deleting the five modules also removes the last reader of `EMBEDDING_MODEL` outside `EmbeddingService`, and lets `_DEAD_MODULES` come out of `test_config.py`.
+`_QUOTE_LABEL`, `_strip_quote_label` and the 17-line comment above them are byte-identical in both modules. `risk.py:49-52` says so explicitly: *"Same fix as domain/debate.py's `_QUOTE_LABEL`, same reason and same duplication trade as `_BLANK_SENTINELS` above."*
 
-### 7. Seven env reads bypass `require_env` [verified]
+For `_BLANK_SENTINELS` that trade is right — three lines, and the modules are otherwise independent. For `_QUOTE_LABEL` it is not, because the bulk of what is duplicated is not the three lines of code but the incident record above them: a dated NFLX case, the reasoning for stripping in the domain rather than in the check, and the scope limits. Two copies of an incident note drift, and the copy that drifts is the one nobody was looking at.
 
-`app/config.py` exists to turn a missing setting into a message naming `.env.example`. Seven reads still raise a bare `KeyError` or produce a confusing downstream failure:
+**Suggested change.** `domain/sanitize.py` already exists in the same package for exactly this kind of text hygiene. Move `_QUOTE_LABEL`/`strip_quote_label` there with the comment, import it in both. Leave `_BLANK_SENTINELS` alone — the existing note argues its case correctly.
 
-| file:line | variable | failure |
-|---|---|---|
-| `main.py:410`, `main.py:440` | `EDGAR_USER_AGENT` | `KeyError` → HTTP 500 |
-| `cli.py:169`, `cli.py:361` | `EDGAR_USER_AGENT` | `KeyError` traceback |
-| `repositories/db.py:13` | `POSTGRES_DATABASE_URL` | `KeyError` |
-| `db_postgres.py:8` | `POSTGRES_DATABASE_URL` | `KeyError` at import (dead module — see #6) |
-| `checkpointer.py:22` | `TRADING_CHECKPOINT_DB_URI` | `os.getenv` → `None` → `AsyncConnectionPool(conninfo=None)` |
+## 8. 23 nested `async with` in six repositories — `infrastructure/repositories/*.py` [verified]
 
-`AGENT_TOOL_CONCURRENCY` is read by the code and documented nowhere — it is the only variable missing from `.env.example` (the env cross-check found no others; the "documented but unread" names are all resolved dynamically through `models.ROLES`).
+Every repository method opens `async with get_connection() as conn:` then `async with conn.cursor() as cur:` on the next line. Ruff flags 23 of them, in `chunk_repo` (7), `filing_repo` (5), `metrics_repo` (4), `listed_security_repo` (3), `section_repo` (2) and `document_repo` (2). Nothing else in `app/` trips this rule.
 
-### 8. The cost log: two hardcoded paths, no rotation [from code]
+**Suggested change.** Not `ruff --fix` (which merely joins them into one long line). Add to `repositories/db.py`, beside `get_connection`:
 
-`Path("docs/cost-log.jsonl")` is written literally in two places — `researcher.log_cost:390` and `cost_log._COST_LOG_PATH:29` — with no shared constant and no env override. Both are relative to the process working directory, so a run started anywhere but the repo root silently creates a new `docs/` there and writes a log nothing reconciles against.
+```python
+@asynccontextmanager
+async def cursor():
+    async with get_connection() as conn, conn.cursor() as cur:
+        yield cur
+```
 
-The file is append-only and unbounded: 3,177 lines / 1.0 MB today. `_disk_logged_events` reads and JSON-parses the whole file once per run summary, filtering by `run_id`.
+Every method then opens `async with cursor() as cur:`, one indent level shallower. The few methods that need `conn` itself (for an explicit transaction) keep using `get_connection` directly.
 
-**Fix:** one `COST_LOG_PATH` constant resolved from the repo root (or `COST_LOG_PATH` env), imported by both. Rotate by month (`cost-log-2026-09.jsonl`) and have the reconciliation read only the current file plus the previous one.
+## 9. Eight definitions nothing calls [verified]
 
-### 9. Six helpers copied verbatim across three ports [verified]
+An AST pass over `app/` + `tests/` + `eval/` + `scripts/` + `migrations/`, counting attribute access as a call, finds these referenced nowhere but their own definition:
 
-`_accumulate` is byte-identical in `debate_port.py:1219`, `risk_port.py:418` and `synthesis_port.py:691`. Alongside it each port carries its own `_tool_block`, `_extract`, `_CORRECTION`, `_retry_messages` and `_assert_within_budget`, plus `_maybe_crash` with its own `_CRASH_AT`/`_CRASH_WHEN` pair. `news_digest_port` has a fourth `_assert_within_budget`.
+| Definition | Where |
+|---|---|
+| `FinancialMetricsResponse` (a response model no route declares) | `main.py:182` |
+| `RunLog.by_ticker` | `trading/domain/validation.py:90` |
+| `ListedSecurityRepository.get_by_ticker` | `repositories/listed_security_repo.py:36` |
+| `FilingRepository.list_by_status` | `repositories/filing_repo.py:61` (named only in a neighbouring docstring) |
+| `MetricsRepository.list_by_ticker` | `repositories/metrics_repo.py:160` |
+| `MetricsRepository.list_by_tickers` | `repositories/metrics_repo.py:173` |
+| `Chunk.is_embedded` | `domain/chunk.py:26` |
+| `FilingStatus.is_terminal` | `domain/values.py:20` |
+| `structured_call.crash_marker` | `trading/infrastructure/structured_call.py:151` |
 
-The three ports are 1,581 + 766 + 1,002 lines. A shared "forced tool call with one schema retry, cost accounting, a crash hook and a spend ceiling" helper would remove a few hundred lines, and — more valuable — would give the four budget ceilings one implementation to fix rather than four to keep in step.
+The last one is worth a second look rather than a plain delete: it was extracted as the shared way to read a crash point, and then no port adopted it — all three still read `os.getenv` inline (`debate_port.py:175-176`, `risk_port.py:80-81`, `synthesis_port.py:100`). Either use it in the three ports or drop it.
 
-### 10. `use_hybrid` is a knob connected to nothing [verified]
+`llm/client.py:230 is_anthropic` is exported through `llm/__init__.py` and called by nothing [verified], but it is a public API-surface predicate beside `resolve_provider`; leaving it is defensible.
 
-`RetrievalService.__init__` stores `self.use_hybrid` (`:41`) and no method ever reads it. Callers choose hybrid by *calling* `retrieve_hybrid`/`retrieve_full` directly. The parameter is nonetheless passed from `main.py:262`, `main.py:335`, `cli.py:402`, `eval/runner.py:130` and one test — and in `eval/runner.py` the same flag *does* steer behaviour via an `if`, so the two meanings sit one frame apart.
+## 10. Unused and duplicate imports [verified]
 
-This is the precise trap `models.py`'s docstring describes ("two variables that no code read at all — so changing them looked like it worked and did nothing"), recurring as a constructor argument.
+13 unused imports: `debate_port.py:53` (`create_with_temperature_fallback`), `fundamentals_port.py:5` (`json`), `risk_port.py:47` (`RiskScore`), `extraction_service.py:2` (`os`), `cli.py:8` (`asdict`), `domain/chunk.py:2` (`Field`), `edgar/client.py:6` (`sqlite3.connect`), `edgar/ticker_resolver.py:3` (`date`), `llm/openai_compat.py:26` (`os`), `filing_repo.py:1` (`date`), `section_repo.py:1` (`Json`), `main.py:51`, `main.py:56` (`RetrievedChunk`).
 
-### 11. Three small failures that read as success [from code]
+Two in `main.py` deserve naming separately:
 
-- **Silent price fetches.** `_try_yfinance:124` and `_try_finnhub:156` catch bare `Exception` and `return None`, with no logging. A rate limit, an auth failure and "this ticker has no data" are indistinguishable — and the fallback chain means a broken primary vendor looks like a normal secondary hit.
-- **Unguarded `content[0]`.** `llm.py:69` and `query_decomposer.py:160` read `resp.content[0].text` with no length check. The OpenAI-compat adapter returns no content blocks when the provider sends no text (output cut at the token limit is the common case), which surfaces as `IndexError` → HTTP 500 from `/ask`.
-- **`researcher --test` crashes.** `main()` sets `mode` on the `--news` and ticker branches only; the `--test` branch leaves it unbound, and line 748 reads `if mode != "test"`. `python -m app.agent.researcher --test` raises `UnboundLocalError` after the run completes. The docstring advertises the flag at the top of the file.
+- **`format_citation_tag` is imported twice**, at `main.py:37` and again at `main.py:44`.
+- **`main.py:51` imports the `metrics_repo` *module*, which is unused — and `main.py:366` binds a local `metrics_repo = MetricsRepository()` inside `/extract`.** Harmless today because nothing reads the module-level name. It is the setup for an `UnboundLocalError`: any future function that reads `metrics_repo.something` before assigning it will fail at runtime, not at import. Drop the module import; the class is already imported.
 
----
+`ruff --fix` handles the plain 11; do the `main.py` two by hand.
 
-## Low
+## 11. Three comments that describe the opposite of the code [verified]
 
-**Dead code and leftovers** (all verified by an AST pass; `from __future__ import annotations` false positives excluded)
+- **`tools.py:487` / `665` / `674`.** `USE_STUBS = False` is preceded by *"Toggle to False in step 2 once the HTTP branches are wired"*, and the branch below reads *"STEP 2: real HTTP calls. Un-stub by setting USE_STUBS = False"* — instructions to reach a state the file is already in. A third, `"STEP 2: confirm this route/param exists, or add it to main.py"`, sits above a route that has existed for months.
+  Note that **`USE_STUBS` and `_stub()` are not dead** — `tests/agent/test_ask_edgar_budget.py:103` sets it `True` to test the budget refusal without a server [verified], which contradicts the previous review's "scaffolding, delete it." Keep the mechanism, delete the three stale comments, and say what it is for: a test seam. Five tests also `monkeypatch.setattr(tools, "USE_STUBS", False)` when `False` is already the default — harmless, but they are pinning a default rather than changing anything.
+- **`number_matching.py:15-18`** ends *"folding them in is a separate change (docs/code_review.md, Medium #6)."* In the review it points at, Medium #6 is the dead PDF pipeline — the reference drifted when that document was rewritten. Worse, the change it invites is one this review recommends **against** (see below). Replace the pointer with the reason the three matchers stay separate.
 
-- `app/agent/trading/interface/cli.py:20` imports `RECURSION_LIMIT`, `_describe_stale_budget` and `_humanize` from `runner` and uses none of them — leftovers from the #82 extraction.
-- `runner._describe_stale_budget` takes `wall_clock_timeout_s` and never uses it.
-- `main.py:164` `FinancialMetricsResponse` — referenced nowhere.
-- `main.py:36` and `main.py:43` both import `format_citation_tag`.
-- `metrics_repo.py:6` `from sqlalchemy.dialects.postgresql import insert` — unused, and the only SQLAlchemy import in the repository layer.
-- `metrics_repo.py:5` imports `FinancialMetrics` and line 11 shadows it (see #1).
-- `edgar/client.py:6` `from sqlite3 import connect`; `edgar/ticker_resolver.py:3` `date`; `app/llm.py:5` `Chunk, Chunks`; `app/domain/chunk.py:2` `Field`; `section_repo.py:1` `Json`; `app/cli.py:8` `asdict`; `debate_port.py:47` `create_with_temperature_fallback`; `risk_port.py:38` `RISK_MAX_TURNS`; `eval/runner.py:9,14` `MetricsExtractor`, `init_pool`, `close_pool`.
-- `tools.py:487` `USE_STUBS = False`, `_stub()`, and the "STEP 2 / Un-stub by setting…" comments describe a wiring step finished long ago.
-- `MetricsRepository(session_factory=None)` — the parameter is stored and never read, and every call site passes `None`.
-- `Filing.transition_to` / `fail` are now called (ingestion retry, #89), so that item is closed.
-- A stale git worktree sits at `.claude/worktrees/inspiring-kilby-ec9f13` (detached at `c35b498`, last touched 2026-08-29) with a full duplicate of `app/` and `tests/`. It distorts any repo-wide grep.
+## 12. Two parameters passed and never read [verified]
 
-**Small correctness notes**
-
-- `calculate` returns a bare number. `_scale_by_value` normalises declared inputs to ones, so a difference of two thousands-denominated figures comes back 1000× the source table's scale with nothing saying so. `_scale_by_value` also keys by float value, so two inputs sharing a value but not a unit silently collide.
-- `chunk_repo.search_by_embedding`'s docstring still claims filters "execute as a Bitmap Index Scan BEFORE the HNSW similarity scan". pgvector does not combine indexes that way; with a selective filter it either sorts the filtered rows exactly or filters after the approximate scan, and the second can return fewer than `k` rows as the index grows. Consider `hnsw.iterative_scan` (pgvector ≥ 0.8) or exact search when a ticker filter is present.
-- `edgar/client.py:94,97` calls `asyncio.get_event_loop()` inside a coroutine; use `get_running_loop()`.
-- `list_filings` reads only `filings.recent` and ignores `filings.files`, so prolific filers are silently truncated (the README names this; the code does not).
-- `memo_verifier._appended` emits `["", "---"] + verdict_lines` while the report path emits `["", "---", ""] + verdict_lines` — one extra blank line, two spellings of the same separator.
-- `_sample_additional_risk_panel` runs a full 9-turn panel with no budget check between turns; the run-level check happens only *before* each sample. The port's own `NodeBudgetExceeded` is the only thing bounding a runaway inside one sample.
-- `tools.py:24` `API_BASE = "http://localhost:8000"` is a module constant with no env override, and every tool call constructs a fresh `httpx.AsyncClient` (`tools.py:601`) — no connection reuse, which #93 fixed everywhere else.
-
-**Dependencies**
-
-- `pyyaml` is imported by `researcher.py`, `eval/runner.py` and `eval/extract_runner.py`; `pandas` by `technical_indicators.py` and `price_data_port.py`. Neither is declared in `pyproject.toml` — both arrive transitively (`uvicorn[standard]`, `yfinance`). A transitive bump can remove either.
-
-**Documentation**
-
-- `architecture.md` exists at the repo root (644 lines) and in `docs/` (711 lines), and the two have **diverged**. `trading-agent-known-gaps.md` and `watchlist.yaml` are byte-identical duplicates in both places — and `researcher.WATCHLIST_PATH` reads the **root** copy, so `docs/watchlist.yaml` is a decoy that can drift without anything noticing.
-- The README's "Known limitations" still says *"The budget is checked on edges, not inside nodes… the documented 'overshoot by at most one call' bound is wrong for the most expensive node"*. PR #83 fixed that; the entry is now false.
-- README test counts are stale: "612 test functions (702 cases after parametrization)" vs. 881 passing today.
-- `app/llm.py`'s `SYSTEM_PROMPT`, behind every `/ask`, contains "the enough information", "fall back on generate knowledge", "No premable", and an unclosed quote at `- Be concise, No premable. no "Based on the provided context,`.
-- `docs/tutorial.md` is mode `600` where every other tracked file is `644`.
-
-**CI and tooling**
-
-- The workflow runs `pytest` only. No linter, no formatter, no type checker — every unused import in #12 would have been caught for free by `ruff check`.
-- No CLI command has a test (`app/cli.py` and `app/agent/trading/interface/cli.py` between them are 709 lines). #1 is the direct consequence.
-- `tests/agent/trading/test_manifest_merge.py:82` skips on a `docs/validation/` file that is gitignored, so it skips in CI too and reads as passing.
+- **`researcher.py:110` `_build_news_prompt(ticker, news_text)`** never uses `news_text`. Not a bug: both callers (`main.py:562`, `researcher.py:770`) pass the headline again in the *task* message, which is where the prompt's "Read the news/announcement below" actually points. Drop the parameter, or the next reader will spend the same ten minutes proving it is not a bug.
+- **`runner.py:114` `_describe_stale_budget(values, max_usd, wall_clock_timeout_s)`** never reads `wall_clock_timeout_s`, though it does compare the inherited `max_usd` against the flag just given. A resume whose inherited deadline disagrees with the `--timeout` just passed is exactly the disagreement this function exists to report, so this is either a missing check or a leftover parameter. Decide which; do not leave it as an argument that does nothing.
 
 ---
 
-## Suggested order of work
+## Checked, and deliberately not recommended
 
-1. **Fix what is broken (#1, #11).** `extract-metrics`, `researcher --test`, the two `content[0]` reads. Small, self-contained, each with a test.
-2. **Close the lookahead hole (#2).** This is the one finding that changes what the product's output *means*.
-3. **Make the measurements describe production (#3, #4, #5).** Eval on `retrieve_full` first, because #4 and #5 both want before/after numbers.
-4. **Delete what is dead (#6, #10, #12).** Largest reduction in reading surface per unit of risk, and it unblocks the `_DEAD_MODULES` exemption in `test_config.py`.
-5. **Consolidate (#7, #8, #9).** `require_env` everywhere, one cost-log path, one structured-call helper.
-6. **Add the tooling that would have found half of this (#14).**
+Rejecting these is part of the review — each looks like duplication and is not.
 
----
+- **The three number matchers** (`debate_port._flag_debate_numbers`, `technical_interpreter_port._flag_unmatched_numbers_against`, `application/number_matching`). They implement three *different rules* — exact containment, indicator-tolerance with percent/delta transforms, and token-anchored variant matching — and each docstring records live false positives that produced its tolerance. `debate_port`'s explains why a tolerance band goes blind on dense numeric text; `number_matching`'s explains why a substring check let fabricated figures verify. `synthesis_port._numeric_guard:495` already delegates to `debate_port`'s rather than writing a fourth. Merging them would silently re-tolerance two guards. The only change wanted here is deleting the stale invitation at `number_matching.py:18`.
+- **`_BLANK_SENTINELS` in `domain/debate.py:49` and `domain/risk.py:41`.** Three lines, argued for in place, and the two domains are otherwise independent. Correct call.
+- **`_maybe_crash` in the three ports.** Three lines each, each naming its own env var and label; the shared part (`force_crash`) is already shared.
+- **`_assert_within_budget` in the three ports.** Each is a four-line call into `structured_call.assert_within_budget` supplying its own ceiling and message. The shared part is already shared; what is left is configuration.
+- **`save_*_transcript` / `_format_*_markdown` across five ports.** They all route through one `_save_output`; the formatters render genuinely different documents.
+- **`cli.py`'s thin `@app.command` wrappers around `asyncio.run(_impl(...))`.** That is the Typer idiom, not duplication.
+- **`app/llm.py`.** A 92-line module at the top level while its peers sit under `application/` — but it has one importer and one job, and moving it is churn with no reader benefit. Mentioned only so the next reviewer can skip it.
 
-## Fix checklist
+## Suggested order
 
-`[x]` = done and tested, `[~]` = in progress, `[ ]` = not started. Each High item ships as its own PR.
+Cheap and independent first; the reorganisation last.
 
-**Status, 2026-09-12:** every High and Medium item is addressed across PRs #102–#107, which stack in that order (#102 → #103 → #104 → #105 → #106 → #107). Suite at the tip: 951 passed, 1 skipped. Six sub-items are left open and each says below why — all six need either the gitignored eval corpus or a live paid run.
+- [ ] `ruff check app --select F401 --fix`, then the two `main.py` import fixes by hand (#10)
+- [ ] Delete the three stale `STEP 2` comments and fix the `number_matching.py` pointer (#11)
+- [ ] Delete the eight uncalled definitions; decide `crash_marker`'s fate (#9)
+- [ ] Resolve the two dead parameters (#12)
+- [ ] `require_as_of` in `guards.py`, four call sites (#4)
+- [ ] `_retrieval()` in `main.py`, two call sites (#5)
+- [ ] `cursor()` in `db.py`, 23 call sites (#8)
+- [ ] `_call` helper in `tools.py._dispatch` (#6)
+- [ ] Move `_QUOTE_LABEL` to `domain/sanitize.py` (#7)
+- [ ] **Move `ANALYST_OUTPUTS` to `domain/trading_state.py`; convert the 9 deferred imports to top-level ones and delete their apologies (#1)**
+- [ ] Extract `vault.py` / usage helpers out of `researcher.py` (#2)
+- [ ] Split the shared third of `debate_port.py` into `evidence.py` (#3)
 
-### High
-
-**#1 `extract-metrics` crashes**: PR #102
-- [x] Rename the repository dataclass to `FinancialMetricsRow` and delete the shadowed `from app.application.extraction_service import FinancialMetrics` in `metrics_repo.py`
-- [x] One shared `build_metrics_row(extracted, ticker, fiscal_period, filing_type, filed_date, chunks)` used by both `main.extract` and `cli._run_extract_metrics`
-- [x] `_run_extract_metrics` opens and closes the pool like every other CLI coroutine
-- [x] Test: `extract-metrics` end to end against stubbed extractor and repository, asserting the row's `ticker`/`fiscal_period`/`source_citations`
-- [x] Test: at least one smoke test per `app.cli` command, so no shipped command is untested again
-
-**#2 `as_of_date` does not reach the fundamentals leg**: PR #103
-- [x] `get_fundamentals_report(ticker, as_of, ...)` — required, not defaulted
-- [x] `fundamentals_node` passes `state["as_of_date"]`; the port raises if it is missing, as `news_node`/`synthesizer_node` do
-- [x] The task prompt states the analysis date; `FundamentalsReport.generated_at` is set from it, not `date.today()`
-- [x] Fundamentals cache keyed on `(ticker, as_of)`; writes gated on `MOCK_FUNDAMENTALS` or moved under `MEMO_DIR`
-- [x] Until retrieval can be bounded by filing date, the port emits an explicit data gap naming the fundamentals leg as not point-in-time
-- [x] Test: a run with `as_of` in the past reaches the port with that date and never calls `date.today()`
-- [x] Update the README's "Known limitations" entry to match what ships
-
-### Medium
-
-**#3 Eval measures the production path**: PR #104
-- [x] `eval/runner.py` gains a `full` mode calling `retrieve_full`; make it the default
-- [ ] Re-run the 51-query BM25 comparison under `full` and record the numbers beside the #84 ones — **not done:** needs the gitignored `eval/test_set.yaml` and spends decomposer calls per question
-- [x] Delete `retrieve_with_decomposition` once nothing calls it
-- [ ] Key gold sets by `(accession, section_path, content hash)` instead of serial chunk id — **not done:** the test set is gitignored and absent from this checkout, so the migration cannot be written against real data
-- [ ] Commit a small `eval/test_set.yaml` (or a fixture subset) so eval can run in CI — **not done:** same reason. The harness itself is now unit-tested (`tests/test_retrieval_fusion.py`), which is what CI can run without a corpus
-
-**#4 Forced-memo turn misses the prompt cache**: PR #105
-- [x] Final forced-memo call sends `tools=TOOLS` and the structured `system` block with `cache_control`
-- [x] `_roll_cache_breakpoint(messages)` before the forced-memo call and before the `max_tokens` continuation call
-- [x] Continuation call also sends `tools=TOOLS`
-- [x] Test: both calls carry a `cache_control` breakpoint and the tool list
-- [ ] Confirm on one live run that `cache_read_ratio` in the `run_summary` line improves — **not done:** costs a real run; the mechanism is pinned by test instead
-
-**#5 Cross-sub-query merge**: PR #104
-- [x] `retrieve_full` sums each chunk's per-sub-query RRF contributions instead of taking the max
-- [x] ~~Same in `retrieve_with_decomposition` if it survives #3~~ — it did not survive; deleted in #104
-- [x] `gather_extraction_chunks` and `retrieve_for_extraction` run their fixed queries with `asyncio.gather`
-- [ ] Measure with the #3 harness before and after — **not done:** same corpus/spend constraint as #3's re-run
-
-**#6 Delete the dead PDF pipeline**: PR #106
-- [x] Delete `app/ingest.py`, `app/retrieve.py`, `app/db_postgres.py`, `app/db.py`, `app/chunk.py`
-- [x] `git rm --cached app/__init__.pyc`; add `*.pyc` to `.gitignore`
-- [x] Remove `_DEAD_MODULES` from `tests/test_config.py` — the dotenv guard then covers all of `app/`
-- [x] Drop the now-unused `Chunk`/`Chunks` import from `app/llm.py`
-- [x] Remove the stale `.claude/worktrees/inspiring-kilby-ec9f13` worktree (`git worktree remove`)
-
-**#7 One way to read a required setting**: PR #106
-- [x] `require_env` at `main.py:410,440`, `cli.py:169,361`, `repositories/db.py:13`, `checkpointer.py:22`
-- [x] Document `AGENT_TOOL_CONCURRENCY` in `.env.example`
-- [x] Test: every `os.environ[...]` in `app/` is gone, in the style of `test_only_app_config_loads_dotenv`
-
-**#8 Cost log**: PR #106
-- [x] One `COST_LOG_PATH`, resolved from the repo root and overridable by env, imported by `researcher.log_cost` and `cost_log.py`
-- [x] Monthly rotation; `_disk_logged_events` reads the current file plus the previous one
-- [x] Test: a process started from another working directory writes to the same file
-
-**#9 Shared structured-call helper**: PR #107
-- [x] One module owning `_accumulate`, `_tool_block`, `_extract`, `_CORRECTION`, `_retry_messages`, `_maybe_crash` and the spend ceiling
-- [x] debate, risk, synthesis and news ports call it; per-port constants stay per-port
-- [x] The four `_assert_within_budget` variants become one, raising `NodeBudgetExceeded` as they do now
-- [x] Existing port tests pass unchanged — this is a refactor, not a behaviour change
-
-**#10 Remove the `use_hybrid` knob**: PR #104
-- [x] Drop the parameter from `RetrievalService.__init__` and from `main.py:262,335`, `cli.py:402`, the test
-- [x] `eval/runner.py` keeps its own mode flag under a name that says it is the harness's (`mode=`), not the service's
-
-**#11 Failures that read as success**: PR #105
-- [x] `_try_yfinance` / `_try_finnhub` log the exception (vendor, ticker, `as_of`, exception type) before returning `None`
-- [x] Guard `resp.content` in `llm.py:69` and `query_decomposer.py:160`; return a clear error, not `IndexError`
-- [x] `researcher.main()` sets `mode = "test"` on the `--test` branch; test it
-- [x] Test: an empty-content provider response from `/ask` returns an explicit "the model returned no answer" body rather than a traceback. **Deviation:** a 200 with a plain answer, not a 4xx/5xx — the research agent treats a non-200 as a tool error and retries, which would spend a second call on a question the provider has already declined to answer
-
-### Low
-- [ ] Remove the unused imports and symbols listed under #12, including the duplicate `format_citation_tag` in `main.py` and `FinancialMetricsResponse`
-- [ ] Delete `USE_STUBS`, `_stub()` and the "STEP 2" comments from `tools.py`; drop the unused `session_factory` from `MetricsRepository`; drop the unused `wall_clock_timeout_s` from `_describe_stale_budget`
-- [ ] `calculate` returns its unit alongside the number; `_scale_by_value` keys on `(value, unit)` so same-valued inputs cannot collide
-- [ ] Correct the `search_by_embedding` filtering docstring; evaluate `hnsw.iterative_scan` or exact search under a ticker filter
-- [ ] `get_running_loop()` in `edgar/client.py`; read `filings.files` so prolific filers are not truncated
-- [ ] `API_BASE` reads an env var; build one `httpx.AsyncClient` per agent run instead of one per tool call
-- [ ] Add a budget check between turns inside `_sample_additional_risk_panel`
-- [ ] Declare `pyyaml` and `pandas` in `pyproject.toml`
-- [ ] Merge the duplicate docs: one `architecture.md`, one `trading-agent-known-gaps.md`, one `watchlist.yaml` (keep the root copy the code reads, or move the path into config and keep the `docs/` copy)
-- [ ] Refresh the README: drop the fixed "budget is checked on edges" limitation, update the test counts
-- [ ] Fix the `/ask` system-prompt typos in `app/llm.py`; `chmod 644 docs/tutorial.md`
-- [ ] Normalise `memo_verifier`'s two separator spellings
-
-### CI and tooling
-- [ ] Add `ruff check` (and `ruff format --check`) to `.github/workflows/tests.yml`; fix what it finds
-- [ ] Add a type checker in non-blocking mode first, then tighten — #1 is a type error a checker would have caught
-- [ ] Commit the `docs/validation/` fixture `test_manifest_merge.py` needs, or rewrite it against a temp file, so nothing skips in CI
-- [ ] Run `eval/` in CI against the committed test set once #3 lands
-
----
-
-## What this pass shipped
-
-PRs #102–#107, stacking in that order. Each is reviewable on its own top commit.
-
-| PR | Findings | Substance |
-|---|---|---|
-| #102 | High #1 | `extract-metrics` called five things that do not exist; the row type is renamed and built through one constructor. A migration adds the `reasoning` column all three read methods already selected. |
-| #103 | High #2 | `as_of` reaches the fundamentals leg and is enforced in the TOOLS — `filed_before` on every filing-reading call — not in the prompt. |
-| #104 | Medium #3, #5, #10 | The eval harness measures `retrieve_full`; sub-queries fuse by summing; `use_hybrid` removed. |
-| #105 | Medium #4, #11 | One request shape per turn, so the forced-memo call can hit the prefix cache; three silent failures now say something. |
-| #106 | Medium #6, #7, #8 | Dead PDF pipeline and a Python 2 `.pyc` deleted; `require_env` everywhere; one cost-log path, rotated monthly. |
-| #107 | Medium #9 | 250 lines out of three ports into one `structured_call` module. |
-
-Two findings grew in scope once opened, and both are worth knowing about:
-
-- **#1 was five bugs, not one.** `FilingStatus.INGESTED`, `list_by_state`, `set_state` and `Filing.fiscal_period` do not exist either. The command had never run. The repository's three read methods were also selecting a `reasoning` column the table never had.
-- **#4 is worse than it reads on Anthropic.** The providers this project runs on do automatic *prefix* caching and `cache_control` is stripped in translation, so dropping `tools` from the forced-memo call did not merely lose a breakpoint — it made a cache hit impossible.
-
-## What the previous review left open
-
-For the record, and because these are now folded into the checklist above rather than tracked separately:
-
-- Previous **High #1–#3** and **Medium #4–#13**: all shipped (PRs #82–#95). Spot-checked this review — CORS is scoped, `APP_API_KEY` guards the spending endpoints, ticker validation reaches the vault writer, Postgres binds to `127.0.0.1:6432`, the BM25 query ORs its terms, per-run state lives in ContextVars, `_chunk` is idempotent under a unique index, and `check_run_guards` is called from inside both expensive nodes.
-- Previous **Low**: every item still open. They appear above as #6, #9, #11, #12 and the Low section.
-- Previous **follow-ups left open** and still open: re-chunk and re-embed the corpus so the #94 table-aware chunking takes effect on already-ingested filings; run the synthesizer's verdict samples concurrently; give `ask_edgar` a filing-type and date filter; run `/trading/analyze` in the background behind a job id.
+Everything above #1 is local and safely reviewable in one PR each. #1 is the one with real leverage: it is a five-line move that deletes nine workarounds and the comments explaining them.
