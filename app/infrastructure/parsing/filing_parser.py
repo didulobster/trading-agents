@@ -436,7 +436,7 @@ def _add_fpages_heading(
     # Sections are keyed by their path when chunks are attached to them
     # (ingestion_service), so the new one must not duplicate an existing path.
     title = next(
-        (t for t in _FPAGES_TITLES if tuple([part, f"Item {item_no}", t]) not in taken),
+        (t for t in _FPAGES_TITLES if (part, f"Item {item_no}", t) not in taken),
         None,
     )
     if title is None:

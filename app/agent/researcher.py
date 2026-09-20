@@ -128,14 +128,12 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
         key_metrics = "- None specified (ticker not in watchlist)"
         risks_watching = "- None specified (ticker not in watchlist)"
  
-    prompt = NEWS_ASSESSMENT_PROMPT.format(
+    return NEWS_ASSESSMENT_PROMPT.format(
         ticker=ticker.upper(),
         thesis=thesis,
         key_metrics=key_metrics,
         risks_watching=risks_watching,
     )
- 
-    return prompt
 
 # Modes whose provenance must NOT fall back to the research agent's session
 # log. These are trading-pipeline artifacts that never call the research
@@ -307,7 +305,7 @@ def _print_usage_summary(
             f"  input={total_input:,}  cache_write={total_cache_write:,}  "
             f"cache_read={total_cache_read:,}  output={total_output:,}"
         )
-        _trace(f"  (pricing not configured for this model)")
+        _trace("  (pricing not configured for this model)")
         _trace(f"{'='*55}")
         return
 
@@ -321,7 +319,7 @@ def _print_usage_summary(
     _trace(f"  cache_write: {total_cache_write:>9,} tokens  ${cost_cache_write:.4f}")
     _trace(f"  cache_read:  {total_cache_read:>9,} tokens  ${cost_cache_read:.4f}")
     _trace(f"  output:      {total_output:>9,} tokens  ${cost_output:.4f}")
-    _trace(f"  ─────────────────────────────────")
+    _trace("  ─────────────────────────────────")
     _trace(f"  TOTAL COST:  ${total_cost:.4f}")
     _trace(f"{'='*55}")
 

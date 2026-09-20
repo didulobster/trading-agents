@@ -148,11 +148,6 @@ def force_crash(label: str, detail: str) -> NoReturn:
     os._exit(1)
 
 
-def crash_marker(at_env: str, when_env: str | None = None) -> tuple[str | None, str]:
-    """The configured crash point, read once at import as the ports do."""
-    return os.getenv(at_env), os.getenv(when_env or "", "before") or "before"
-
-
 def assert_within_budget(
     total_usd: float,
     ceiling_usd: float,

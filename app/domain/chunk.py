@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .values import SectionPath, Ticker
 from app.infrastructure.chunking.models import ChunkDraft
@@ -21,10 +21,6 @@ class Chunk(BaseModel):
     section_path: SectionPath
 
     created_at: datetime | None = None
-
-    @property
-    def is_embedded(self) -> bool:
-        return self.embedding is not None
 
 def chunk_from_draft(
     draft: ChunkDraft,

@@ -44,7 +44,6 @@ from app.agent.trading.domain.risk import (
     PERSONAS,
     Persona,
     RiskFactor,
-    RiskScore,
     RiskTurn,
     RiskTurnPayload,
 )

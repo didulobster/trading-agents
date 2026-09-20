@@ -2,7 +2,6 @@
 Deliberately calls the same path as `python -m app.agent.researcher TICKER`
 (full checklist mode) — not /ask, which is a different agent behavior.
 """
-import json
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
