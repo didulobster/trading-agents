@@ -48,7 +48,6 @@ app = typer.Typer()
 @app.callback()
 def main():
     """EDGAR RAG CLI."""
-    pass
 
 @app.command()
 def fetch(

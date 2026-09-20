@@ -162,10 +162,7 @@ def _should_skip_number(raw: str, context: str) -> bool:
 
     # Small integers are almost always enumeration, section numbers, or
     # counts the model constructed ("three risk factors", "1.", "top 5").
-    if val == int(val) and val < 100:
-        return True
-
-    return False
+    return val == int(val) and val < 100
 
 
 # ---------------------------------------------------------------------------

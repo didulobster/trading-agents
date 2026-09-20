@@ -128,14 +128,12 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
         key_metrics = "- None specified (ticker not in watchlist)"
         risks_watching = "- None specified (ticker not in watchlist)"
  
-    prompt = NEWS_ASSESSMENT_PROMPT.format(
+    return NEWS_ASSESSMENT_PROMPT.format(
         ticker=ticker.upper(),
         thesis=thesis,
         key_metrics=key_metrics,
         risks_watching=risks_watching,
     )
- 
-    return prompt
 
 # Modes whose provenance must NOT fall back to the research agent's session
 # log. These are trading-pipeline artifacts that never call the research
