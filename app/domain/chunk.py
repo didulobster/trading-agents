@@ -22,10 +22,6 @@ class Chunk(BaseModel):
 
     created_at: datetime | None = None
 
-    @property
-    def is_embedded(self) -> bool:
-        return self.embedding is not None
-
 def chunk_from_draft(
     draft: ChunkDraft,
     section_id: int,

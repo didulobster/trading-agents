@@ -305,7 +305,7 @@ def _print_usage_summary(
             f"  input={total_input:,}  cache_write={total_cache_write:,}  "
             f"cache_read={total_cache_read:,}  output={total_output:,}"
         )
-        _trace(f"  (pricing not configured for this model)")
+        _trace("  (pricing not configured for this model)")
         _trace(f"{'='*55}")
         return
 
@@ -319,7 +319,7 @@ def _print_usage_summary(
     _trace(f"  cache_write: {total_cache_write:>9,} tokens  ${cost_cache_write:.4f}")
     _trace(f"  cache_read:  {total_cache_read:>9,} tokens  ${cost_cache_read:.4f}")
     _trace(f"  output:      {total_output:>9,} tokens  ${cost_output:.4f}")
-    _trace(f"  ─────────────────────────────────")
+    _trace("  ─────────────────────────────────")
     _trace(f"  TOTAL COST:  ${total_cost:.4f}")
     _trace(f"{'='*55}")
 

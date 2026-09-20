@@ -56,26 +56,6 @@ class FilingRepository:
                 )
                 await conn.commit()
 
-    async def list_by_status(
-        self,
-        statuses: list[FilingStatus],
-        limit: int | None = None,
-    ) -> list[Filing]:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                query = """
-                    SELECT * FROM filings
-                    WHERE status = ANY(%s)
-                    ORDER BY filed_date DESC
-                """
-                params: tuple = ([s.value for s in statuses],)
-                if limit:
-                    query += " LIMIT %s"
-                    params = (*params, limit)
-                await cur.execute(query, params)
-                rows = await cur.fetchall()
-        return [Filing.model_validate(r) for r in rows]
-
     async def list_by_ticker_and_status(
         self,
         ticker: str,
@@ -83,9 +63,7 @@ class FilingRepository:
     ) -> list[Filing]:
         """One ticker's filings in any of `statuses`, oldest first.
 
-        `list_by_status` covers every ticker at once, which is what the
-        ingestion pipeline wants; a per-ticker command wants this. The
-        ticker lives on listed_securities, so this joins rather than
+        The ticker lives on listed_securities, so this joins rather than
         filtering `filings` alone.
 
         Oldest first because the caller is walking a company forward

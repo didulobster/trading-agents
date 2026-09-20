@@ -87,9 +87,6 @@ class BatteryManifest(BaseModel):
     wall_clock_timeout_s: float
     runs: list[RunRecord] = Field(default_factory=list)
 
-    def by_ticker(self, ticker: str) -> list[RunRecord]:
-        return [r for r in self.runs if r.ticker == ticker]
-
 
 # --- §7 stability: direction, not exact enum -------------------------------
 #

@@ -157,35 +157,6 @@ class MetricsRepository:
             return None
         return self._row_to_metrics(row)
 
-    async def list_by_ticker(self, ticker: str) -> list[FinancialMetricsRow]:
-        """All periods for one ticker, oldest first — this is your trend query."""
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"SELECT {_COLUMNS} FROM financial_metrics "
-                    f"WHERE ticker = %s ORDER BY filed_date ASC",
-                    (ticker.upper(),),
-                )
-                rows = await cur.fetchall()
-
-        return [self._row_to_metrics(r) for r in rows]
-
-    async def list_by_tickers(self, tickers: list[str]) -> list[FinancialMetricsRow]:
-        """
-        Cross-ticker comparison — same columns, multiple tickers.
-        e.g. FIG vs ADBE gross_margin_pct side by side.
-        """
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"SELECT {_COLUMNS} FROM financial_metrics "
-                    f"WHERE ticker = ANY(%s) ORDER BY ticker ASC, filed_date ASC",
-                    ([t.upper() for t in tickers],),
-                )
-                rows = await cur.fetchall()
-
-        return [self._row_to_metrics(r) for r in rows]
-
     @staticmethod
     def _row_to_metrics(row: dict) -> FinancialMetricsRow:
         """Shared row → dataclass conversion. Mirror of Chunk.model_validate pattern."""

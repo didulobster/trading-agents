@@ -33,16 +33,6 @@ class ListedSecurityRepository:
             "updated_at": row["updated_at"],
         })
 
-    async def get_by_ticker(self, ticker: str) -> ListedSecurity | None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT * FROM listed_securities WHERE ticker = %s",
-                    (ticker.upper(),),
-                )
-                row = await cur.fetchone()
-        return ListedSecurity.model_validate(row) if row else None
-
     async def get_by_cik(self, cik: str) -> ListedSecurity | None:
         async with get_connection() as conn:
             async with conn.cursor() as cur:

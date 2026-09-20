@@ -15,10 +15,6 @@ class FilingStatus(str, Enum):
     EMBEDDED = "embedded"
     FAILED = "failed"
     METRICS_EXTRACTED = "metrics_extracted"
-    
-    @property
-    def is_terminal(self) -> bool:
-        return self in {FilingStatus.EMBEDDED, FilingStatus.FAILED}
 
 
 # -------------------- Value objects --------------------

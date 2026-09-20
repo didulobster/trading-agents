@@ -176,12 +176,6 @@ class ExtractRequest(BaseModel):
     filed_after: date | None = None
     filed_before: date | None = None
 
-class FinancialMetricsResponse(BaseModel):
-    ticker: str
-    fiscal_period: str
-    metrics: FinancialMetrics   # the Pydantic model from point 2
-    citations: list[str]
-
 class NewsAssessRequest(BaseModel):
     # See AskRequest: unknown fields are rejected, not dropped.
     model_config = ConfigDict(extra="forbid")
