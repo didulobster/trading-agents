@@ -46,6 +46,7 @@ from app.agent.trading.infrastructure.structured_call import (
     assert_within_budget,
     call_with_schema_retry,
     force_crash,
+    inline_refs,
 )
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
@@ -68,7 +69,6 @@ from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
 from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.infrastructure.debate_port import (
-    _inline_refs,
     create_with_temperature_fallback,
     reasoning_config,
     render_transcript,
@@ -597,7 +597,7 @@ def _submit_tool(name: str, description: str, payload_cls) -> dict:
         "name": name,
         "description": description,
         "strict": True,
-        "input_schema": _inline_refs(payload_cls.model_json_schema()),
+        "input_schema": inline_refs(payload_cls.model_json_schema()),
     }
 
 

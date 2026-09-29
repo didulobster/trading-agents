@@ -27,6 +27,7 @@ from app.agent.trading.infrastructure.structured_call import (
     assert_within_budget,
     call_with_schema_retry,
     force_crash,
+    inline_refs,
 )
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
@@ -49,7 +50,6 @@ from app.agent.trading.domain.risk import (
     RiskTurnPayload,
 )
 from app.agent.trading.infrastructure.debate_port import (
-    _inline_refs,
     create_with_temperature_fallback,
     reasoning_config,
     render_transcript as render_debate_transcript,
@@ -282,7 +282,7 @@ RISK_SUBMIT_TOOL = {
     "name": "submit_risk_turn",
     "description": "Submit this turn's risk-panel contribution. Call exactly once.",
     "strict": True,
-    "input_schema": _inline_refs(RiskTurnPayload.model_json_schema()),
+    "input_schema": inline_refs(RiskTurnPayload.model_json_schema()),
 }
 
 
