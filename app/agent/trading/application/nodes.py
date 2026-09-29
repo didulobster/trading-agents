@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 
 from app.infrastructure.llm import get_client
 
+from app.agent.trading.application import risk_nodes
 from app.agent.trading.application.guards import check_run_guards
 from app.agent.trading.application.risk_ledger import (
     build_risk_ledger,
@@ -30,7 +31,7 @@ from app.agent.trading.domain.news_digest import (
 )
 from app.agent.trading.domain.risk import PERSONAS
 from app.agent.trading.domain.technical_report import TechnicalReport
-from app.agent.trading.domain.trading_state import TradingState
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS, TradingState
 from app.agent.trading.infrastructure.fundamentals_port import get_fundamentals_report
 from app.agent.trading.infrastructure.news_data_port import fetch_company_news, filter_and_dedup
 from app.agent.trading.infrastructure.news_digest_port import build_digest
@@ -299,16 +300,6 @@ async def sentiment_node(state: TradingState) -> dict:
             excluded_by_relevance=excluded,
         )
     }
-
-
-# What each analyst leg is expected to leave behind in state. A partial run is
-# a legitimate mode (--only), so a missing report is recorded as a data gap
-# rather than raising — but the memo must never present a gap as a finding.
-ANALYST_OUTPUTS = {
-    "fundamentals": "fundamentals_report",
-    "technical": "technical_report",
-    "news": "news_digest",
-}
 
 
 def _missing_analyst_gaps(missing: list[str], failures: list[str]) -> list[str]:
@@ -630,11 +621,6 @@ async def _sample_additional_risk_panel(state: TradingState) -> tuple[list, list
     these extra samples live and die inside this one synthesizer node call,
     same resumability granularity `run_synthesis` already had before this
     change."""
-    # Local import: risk_nodes -> risk_port -> debate_port -> nodes (for
-    # ANALYST_OUTPUTS) is a real cycle at module-load time — same reason
-    # every debate_port import inside synthesis_port.py is function-local.
-    import app.agent.trading.application.risk_nodes as risk_nodes
-
     turns: list = []
     cost_events: list = []
     for i in range(RISK_MAX_TURNS):

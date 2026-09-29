@@ -12,9 +12,11 @@ TECHNICAL_MODEL = model_for("technical")
 warn_if_unpriced(TECHNICAL_MODEL, "technical")
 
 from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.agent.trading.application.technical_indicators import derive_relations
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
+from app.agent.trading.infrastructure.evidence import unmatched_by_tolerance
 
 TECHNICAL_INTERPRETER_SYSTEM_PROMPT = """\
 You are a technical analysis interpreter. You will be given a set of already-computed
@@ -45,114 +47,6 @@ the specific line you mean: "the MACD line", "the signal line", or "the histogra
 
 Respond in 3-5 sentences of plain-language interpretation. No preamble, no headers.
 """
-
-
-_MA_LABELS = {"sma_50": "50-day average", "sma_200": "200-day average"}
-
-
-def _band_distance(close: float, lower: float, upper: float) -> str:
-    """How FAR price sits from the Bollinger bands, as a clause to append.
-
-    The side alone was not enough. On the FIG run (2026-08-29) the bear's
-    whole technical leg was how overextended the close was — "3.5% above the
-    upper Bollinger band" — a figure the relations did not state, so the model
-    computed it from two pack values and the numeric guard reported it as
-    possibly fabricated. It was neither fabricated nor wrong; it was
-    (close − upper) / close, while the natural reading of "3.5% above the
-    band" is (close − upper) / upper = 3.66%. Two defensible denominators and
-    nothing telling the model which, on a number a reader takes at face value.
-
-    So Python decides it, like every other comparison here, and the text names
-    the denominator rather than leaving it inferable. Distances are measured
-    against the BAND, the reference the phrase "above the band" is about.
-
-    Only the bands the claim can be about: when price has broken out, the far
-    band's distance is not a fact anyone argues from, and every number added
-    here is one more value the containment guard has to hold. Within the
-    bands, both distances are stated — "near the upper band" is a claim
-    debaters make constantly, and it needs the same grounding as a breakout.
-    """
-    def pct(band: float) -> float:
-        return (close - band) / band * 100
-
-    if upper > 0 and close > upper:
-        return f" — price is {pct(upper):.2f}% ABOVE the upper band (as a percentage of that band)"
-    if lower > 0 and close < lower:
-        return f" — price is {abs(pct(lower)):.2f}% BELOW the lower band (as a percentage of that band)"
-    # Within the bands. A band of zero or less has no percentage to be a
-    # denominator of — bb_lower can go negative on a volatile enough series —
-    # so each side is stated only if it is meaningful, rather than dropping
-    # both because one was not.
-    parts = []
-    if upper > 0:
-        parts.append(f"{abs(pct(upper)):.2f}% BELOW the upper band")
-    if lower > 0:
-        parts.append(f"{pct(lower):.2f}% ABOVE the lower band")
-    if not parts:
-        return ""
-    suffix = "each as a percentage" if len(parts) > 1 else "as a percentage"
-    return f" — price is {' and '.join(parts)} ({suffix} of that band)"
-
-
-def derive_relations(ind: TechnicalIndicators) -> list[str]:
-    """State the comparisons in code rather than leaving them to the model.
-
-    A live MSFT run produced "trading above its 50-day moving average (around
-    419) but below its 200-day average (around 429)" while the last close was
-    483.24 — above both. The model had collapsed two different facts, where
-    price sits relative to each average and where the averages sit relative to
-    each other, into one wrong claim. Every number in that sentence was
-    genuine, so the flagged-numbers guard had nothing to catch.
-
-    This is the same move as joining news items by index instead of letting
-    the model retype them: whatever Python can decide, Python decides.
-    """
-    close = ind.last_close
-    rel: list[str] = []
-
-    for field, label in _MA_LABELS.items():
-        value = getattr(ind, field)
-        if value is not None:
-            side = "ABOVE" if close > value else "BELOW"
-            rel.append(f"last close ({close:.2f}) is {side} the {label} ({value:.2f})")
-
-    if ind.sma_50 is not None and ind.sma_200 is not None:
-        side = "ABOVE" if ind.sma_50 > ind.sma_200 else "BELOW"
-        rel.append(
-            f"the 50-day average ({ind.sma_50:.2f}) is {side} the 200-day average "
-            f"({ind.sma_200:.2f}) — this is a statement about the two averages, "
-            f"NOT about where price sits"
-        )
-
-    if ind.macd is not None and ind.macd_signal is not None:
-        side = "ABOVE" if ind.macd > ind.macd_signal else "BELOW"
-        rel.append(f"the MACD line ({ind.macd:.4f}) is {side} its signal line "
-                   f"({ind.macd_signal:.4f})")
-
-    if ind.rsi_14 is not None:
-        band = (
-            "OVERBOUGHT (>70)" if ind.rsi_14 > 70
-            else "OVERSOLD (<30)" if ind.rsi_14 < 30
-            else "NEITHER overbought nor oversold (between 30 and 70)"
-        )
-        rel.append(f"RSI ({ind.rsi_14:.2f}) is {band}")
-
-    if ind.bb_upper is not None and ind.bb_lower is not None:
-        where = (
-            "ABOVE the upper band" if close > ind.bb_upper
-            else "BELOW the lower band" if close < ind.bb_lower
-            else "WITHIN the bands"
-        )
-        rel.append(f"last close ({close:.2f}) is {where} "
-                   f"({ind.bb_lower:.2f} to {ind.bb_upper:.2f})"
-                   + _band_distance(close, ind.bb_lower, ind.bb_upper))
-
-    if ind.volume_vs_20d_avg is not None:
-        side = "ABOVE" if ind.volume_vs_20d_avg > 1 else "BELOW"
-        rel.append(f"latest volume is {side} its 20-day average "
-                   f"({ind.volume_vs_20d_avg:.4f}x)")
-
-    return rel
 
 
 async def interpret_indicators(
@@ -270,123 +164,6 @@ def flag_contradicted_claims(
     return flags
 
 
-# A number with an optional sign, where '-' is read as a sign only if the
-# preceding character can't make it a separator instead: a digit or '.' means
-# a numeric range ("318.73-352.11"), a '%' means a percentage range
-# ("88%-89%"). Both are ordinary phrasings, and reading their hyphen as a
-# minus turns the second endpoint into a negative number that matches no
-# indicator value.
-_SIGNED_NUMBER = r"(?<![\d.%])-?\d+\.?\d*"
-
-# Window labels, stripped before the value-check because they name a period
-# rather than report a measurement. Two spellings, both seen live:
-#
-#   "the 200-day average"            -> the plain compound
-#   "the 50- and 200-day averages"   -> a suspended hyphen, where the noun is
-#                                       carried by the second term only
-#
-# The second cost a false positive: "200-day" was stripped, the dangling "50-"
-# was not, and the orphaned 50 matched no indicator value. The lookahead is
-# restricted to a following conjunction so this only ever fires on a genuine
-# suspended compound — matching any digit-hyphen-space would eat the first
-# endpoint of a spaced range like "318.73 - 352.11".
-_PERIOD_LABEL = re.compile(r"\b\d+-day\b|\b\d+-(?=\s+(?:and|or|to)\s)")
-
-
-def _flag_unmatched_numbers_against(text: str, known_values: list[float]) -> list[str]:
-    """Cheap guard, not a full verifier: extract numbers mentioned in the interpretation
-    and check each is within rounding tolerance of some value actually in `indicators`.
-    Flags (doesn't block) anything that doesn't match — surfaced in TechnicalReport for
-    human review, same spirit as the 'Unverified Figures' section in memo_verifier.
-
-    Still a review signal rather than an auto-reject: it can produce false positives on
-    narrative numbers that reference thresholds rather than indicator values themselves.
-    The RSI band edges were the recurring instance of that and are now exempted near
-    RSI context (see _is_rsi_band_reference) — they were unmatchable by construction,
-    and the derived-relations block made the model restate them on every run, so the
-    guard was reporting the same two numbers forever. Other threshold vocabulary
-    (Bollinger deviations, MACD zero-line talk) has not shown up in practice and is
-    left alone rather than pre-emptively exempted.
-
-    Three known transformations are normalized before flagging, each patched from a
-    real false positive rather than designed upfront — coverage is only as good as
-    the phrasing actually tested, not something derivable from first principles:
-
-    1. Period-descriptor phrases ("50-day", "200-day") are stripped before scanning,
-       since those are label numbers (the SMA/RSI window length), not data values. This
-       narrows the false-positive surface but opens a corresponding gap: a fabricated
-       period ("the 55-day average") would slip through unflagged, since it's stripped
-       before the value-check ever sees it. See
-       test_flag_unmatched_numbers_does_not_catch_fabricated_period_label for that
-       documented boundary.
-    2. "N%" mentions are checked against known_values/100 as well as known_values
-       directly — confirmed necessary when volume_vs_20d_avg=0.529 was faithfully
-       reported as "53%" and would otherwise have been flagged as fabricated.
-    3. "N% above/below" mentions are checked against (known_value - 1) * 100 —
-       a distinct transform from #2: "22% above the 20-day average" describes a
-       *delta* from a ratio-type value (volume_vs_20d_avg=1.2153 -> (1.2153-1)*100
-       = 21.5% =~ "around 22"), not the raw ratio-as-percentage. Matched (and
-       consumed) before the general percent pattern so the two don't collide.
-       Both endpoints of a range ("21%-22% above the 20-day average") are
-       captured by the one match, because only the endpoint touching the
-       keyword carries the "above/below" context — matching it alone leaves
-       the other orphaned for the general percent rule, which then tests a
-       delta as though it were a ratio and flags faithful text.
-
-    A leading '-' counts as a sign only where it can't be a range separator
-    (_SIGNED_NUMBER). Negative indicator values are ordinary — a bearish
-    macd_histogram of -1.2158 gets reported as "around -1.22" — so the sign
-    has to parse, but reading every hyphen as one turned a faithful
-    "318.73-352.11" band into a fabricated "-352.11" and flagged a real
-    bb_upper value. This is a parsing fix, not a tolerance one: unlike the
-    threshold false positives above ("RSI above 70"), the number was a
-    genuine indicator value that the scanner mangled before comparing it.
-    """
-    # Normalize U+2212 MINUS SIGN to ASCII before anything reads a sign. The
-    # model writes typographic minus roughly one run in four — "negative
-    # histogram of −3.23" — and _SIGNED_NUMBER only knows the ASCII hyphen, so
-    # a faithful -3.2298 parsed as positive 3.23 and matched nothing. Python
-    # agrees on the narrower alphabet: float("−3.23") raises.
-    #
-    # Only U+2212, not the dashes. En dash is the conventional range separator
-    # ("318.73–352.11"), and the whole reason _SIGNED_NUMBER carries a
-    # lookbehind is that reading a separator as a sign turned a real Bollinger
-    # band into a fabricated negative.
-    text = text.replace("−", "-")
-    text_no_periods = _PERIOD_LABEL.sub("", text)
-
-    flagged: list[str] = []
-
-    above_below_pattern = re.compile(
-        rf"({_SIGNED_NUMBER})%(?:\s*-\s*({_SIGNED_NUMBER})%)?\s*(?:above|below)"
-    )
-    for endpoints in above_below_pattern.findall(text_no_periods):
-        for m in (e for e in endpoints if e):
-            delta_pct = float(m)
-            if not any(abs(delta_pct - (kv - 1) * 100) <= max(1.0, abs(kv) * 2) for kv in known_values):
-                flagged.append(f"{m}% above/below")
-    text_no_above_below = above_below_pattern.sub("", text_no_periods)
-
-    percent_pattern = re.compile(rf"({_SIGNED_NUMBER})%")
-    for m in percent_pattern.findall(text_no_above_below):
-        ratio = float(m) / 100
-        if not any(abs(ratio - kv) <= max(0.01, abs(kv) * 0.02) for kv in known_values):
-            flagged.append(f"{m}%")
-    text_no_percents = percent_pattern.sub("", text_no_above_below)
-
-    for match in re.finditer(_SIGNED_NUMBER, text_no_percents):
-        m = match.group()
-        val = float(m)
-        if any(abs(val - kv) <= max(0.5, abs(kv) * 0.02) for kv in known_values):
-            continue
-        if _is_rsi_band_reference(val, text_no_percents, match.start(), match.end()):
-            continue
-        flagged.append(m)
-
-    return flagged
-
-
-
 def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[str]:
     """Unchanged public signature — the Phase 3 tests keep passing untouched.
 
@@ -396,47 +173,10 @@ def _flag_unmatched_numbers(text: str, indicators: TechnicalIndicators) -> list[
     `model_dump()` — would make the debate depend on a duck-typed shim that
     no test covers.
     """
-    return _flag_unmatched_numbers_against(
+    return unmatched_by_tolerance(
         text,
         [v for v in indicators.model_dump().values() if isinstance(v, (int, float))],
     )
-
-
-# The conventional RSI band edges. These are constants of the indicator, not
-# values read off it, so they can never appear in `indicators` and were
-# guaranteed to flag — "RSI above 70" was documented as a known false positive
-# from the start, and adding a relations block that says "NEITHER overbought
-# nor oversold (between 30 and 70)" made the model echo them every run.
-#
-# Only 30 and 70. The 20/80 variant exists, but every value added here is a
-# value the guard can no longer catch anywhere it appears, and 20 and 80 are
-# far likelier to collide with a genuine price or indicator reading.
-_RSI_BAND_VALUES = {30.0, 70.0}
-
-# Required nearby for the exemption to apply, so 30 and 70 stay checkable
-# everywhere else — a fabricated "P/E ratio of 30" is still flagged.
-_RSI_CONTEXT = re.compile(r"\brsi\b|overbought|oversold", re.I)
-
-# Asymmetric because the giveaway usually precedes the number ("RSI ...
-# between 30 and 70") and only sometimes follows it ("70, neither overbought
-# nor oversold"). Wide enough to reach back past "sits comfortably in neutral
-# territory between 30 and", narrow enough not to borrow an RSI mention from
-# a neighbouring sentence.
-_RSI_LOOKBEHIND = 90
-_RSI_LOOKAHEAD = 60
-
-
-def _is_rsi_band_reference(value: float, text: str, start: int, end: int) -> bool:
-    """True when a number is one of the RSI band edges, used as a threshold.
-
-    Scoped by proximity rather than exempted outright: this narrows the
-    guard's blind spot to "30 or 70 written within a sentence's reach of the
-    word RSI", instead of blinding it to those two values everywhere.
-    """
-    if value not in _RSI_BAND_VALUES:
-        return False
-    window = text[max(0, start - _RSI_LOOKBEHIND) : end + _RSI_LOOKAHEAD]
-    return _RSI_CONTEXT.search(window) is not None
 
 
 def _format_technical_markdown(report: TechnicalReport) -> str:

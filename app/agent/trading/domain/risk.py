@@ -48,7 +48,7 @@ def _normalize_blank(value: object) -> object:
 
 # Same fix as domain/debate.py's `_QUOTE_LABEL`, same reason and same
 # duplication trade as `_BLANK_SENTINELS` above: the risk panel's
-# `evidence_quote` is checked by the same `_norm` containment, so it is
+# `evidence_quote` is checked by the same `quote_is_backed` containment, so it is
 # reachable by the same label.
 # The field asks for a verbatim span, and the model sometimes labels the span
 # as one: `"Verbatim: Operating cash flow ($10,149,273k FY2025; ...) trailed

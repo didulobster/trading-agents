@@ -49,8 +49,9 @@ That is the design the project set out to build, and it is the design that shipp
 
 **Size.** About 16,300 lines of Python under `app/`, and 612 test functions under `tests/`, of which
 464 sit under `tests/agent/trading/`. The largest single file is
-`app/agent/trading/infrastructure/debate_port.py` at 1,615 lines — which tells you something true
-about the project: most of the code is not "call the model", it is **checking what the model said**.
+`app/agent/tools.py` at 1,162 lines, but the one to notice is
+`app/agent/trading/infrastructure/evidence.py` at 799 — which tells you something true about the
+project: most of the code is not "call the model", it is **checking what the model said**.
 
 ---
 
@@ -354,8 +355,8 @@ class RiskFactor(BaseModel):
 Numbers are then checked by **containment**, not tolerance:
 
 ```python
-# app/agent/trading/infrastructure/debate_port.py
-def _flag_debate_numbers(text: str, evidence_pack: str) -> list[str]:
+# app/agent/trading/infrastructure/evidence.py
+def unbacked_figures(text: str, evidence_pack: str) -> list[str]:
     """Every figure in a debate turn must appear verbatim in the evidence pack.
 
     Containment rather than the Phase 3 tolerance match, and the difference
@@ -375,6 +376,7 @@ figure's own precision, not by a tolerance band), percent transforms, and sign/m
 Quote checking normalises both sides before comparing:
 
 ```python
+# app/agent/trading/infrastructure/evidence.py
 _QUOTE_NOISE = re.compile(r'[\s"\u201c\u201d\u2018\u2019\'*_`]+')
 
 
@@ -382,16 +384,11 @@ def _norm(text: str) -> str:
     return _QUOTE_NOISE.sub("", text).lower()
 
 
-def check_quotes(payload: DebateTurnPayload, texts: dict[str, str]) -> list[str]:
-    """claim_ids whose evidence_quote is not actually in the report it names."""
-    return [
-        claim.claim_id
-        for claim in payload.claims
-        if claim.evidence_ref != "none"
-        and claim.evidence_quote
-        and _norm(claim.evidence_quote) not in _norm(texts.get(claim.evidence_ref, ""))
-    ]
+def quote_is_backed(quote: str, source: str) -> bool:
+    return _norm(quote) in _norm(source)
 ```
+
+The debate and the risk panel each loop their own payload's quotes through `quote_is_backed`.
 
 Stripping markdown emphasis from both sides is safe by construction — the markers cannot make a
 false quote match a real span, they can only stop formatting from deciding the answer.
@@ -833,7 +830,7 @@ a validated settings object that fails with a message naming the variable and it
    philosophy: pure, exhaustively tested, one termination lever, dead branches deleted.
 4. `app/agent/trading/application/nodes.py` — the caveat functions, which are where the memo's
    honesty actually comes from.
-5. `app/agent/trading/infrastructure/debate_port.py` — the guards. Long, but it is where the
-   hard-won knowledge lives.
+5. `app/agent/trading/infrastructure/evidence.py` — the evidence pack and the grounding checks.
+   Long, but it is where the hard-won knowledge lives.
 6. `trading-agent-known-gaps.md` — read the dated section for whatever you are about to change.
    Most surprises in this codebase have already been surprising once and were written down.

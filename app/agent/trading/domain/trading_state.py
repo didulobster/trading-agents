@@ -9,6 +9,15 @@ from app.agent.trading.domain.news_digest import NewsDigest, SentimentSummary
 from app.agent.trading.domain.risk import RiskTurn
 from app.agent.trading.domain.technical_report import TechnicalReport
 
+# What each analyst leg is expected to leave behind in state. A partial run is
+# a legitimate mode (--only), so a missing report is recorded as a data gap
+# rather than raising — but the memo must never present a gap as a finding.
+ANALYST_OUTPUTS = {
+    "fundamentals": "fundamentals_report",
+    "technical": "technical_report",
+    "news": "news_digest",
+}
+
 
 class TradingState(TypedDict, total=False):
     ticker: str

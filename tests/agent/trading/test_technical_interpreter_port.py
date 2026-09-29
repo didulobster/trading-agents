@@ -506,15 +506,15 @@ def test_the_stated_distance_clears_the_numeric_guard():
     """The point of the change: the figure is citable, so a debater quoting it
     is no longer reported as possibly fabricating it — while a differently
     derived variant of the same fact still is."""
-    from app.agent.trading.infrastructure.debate_port import _flag_debate_numbers
+    from app.agent.trading.infrastructure.evidence import unbacked_figures
 
     ind = _msft_indicators()
     ind.bb_lower, ind.bb_upper = 22.6721, 29.53888645766271
     ind.last_close = 30.6200008392334
     pack = "\n".join(derive_relations(ind))
 
-    assert _flag_debate_numbers("price closed 3.66% above the upper band", pack) == []
-    assert _flag_debate_numbers("price closed 3.5% above the upper band", pack) == ["3.5%"]
+    assert unbacked_figures("price closed 3.66% above the upper band", pack) == []
+    assert unbacked_figures("price closed 3.5% above the upper band", pack) == ["3.5%"]
 
 
 def test_a_band_that_cannot_be_a_denominator_drops_only_its_own_side():

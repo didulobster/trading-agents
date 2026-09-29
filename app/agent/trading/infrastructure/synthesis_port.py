@@ -33,12 +33,6 @@ number or a quote. Every narrative sentence cites `[C:claim_id]` (a debate
 claim) or `[RFnn]` (a risk-ledger factor); Python resolves those, renders
 their evidence, and runs a numeric fabrication guard on the rendered text.
 Evidence quality is computed from observables, never model-emitted.
-
-Imports from debate_port are LOCAL to each function rather than at module
-level — see the identical note in the pre-rewrite version of this module
-and in risk_port.py: debate_port imports `ANALYST_OUTPUTS` from
-application.nodes at its OWN module level, and nodes.py imports from this
-module, so a top-level import here completes the cycle.
 """
 
 from __future__ import annotations
@@ -52,6 +46,7 @@ from app.agent.trading.infrastructure.structured_call import (
     assert_within_budget,
     call_with_schema_retry,
     force_crash,
+    inline_refs,
 )
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
@@ -71,7 +66,18 @@ from app.agent.trading.domain.decision_memo import (
 )
 from app.agent.trading.domain.risk import RiskLedgerEntry, RiskTurn
 from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
+from app.agent.trading.infrastructure.debate_port import (
+    create_with_temperature_fallback,
+    reasoning_config,
+    render_transcript,
+)
+from app.agent.trading.infrastructure.evidence import (
+    build_evidence_pack,
+    report_texts,
+    unbacked_figures,
+)
 
 # Follows the project-wide model from .env (LLM_CLAUDE_MODEL), same override
 # pattern as DEBATE_MODEL/RISK_MODEL — NOT pinned to Sonnet. The spec names
@@ -251,11 +257,6 @@ def build_research_pack(state) -> str:
     """Reports + debate transcript ONLY — the Research Manager never sees
     the risk ledger, by design (it synthesizes the debate; risk review is a
     separate, later judgment)."""
-    from app.agent.trading.infrastructure.debate_port import (
-        build_evidence_pack,
-        render_transcript,
-    )
-
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     return (
         build_evidence_pack(state)
@@ -295,11 +296,6 @@ def _render_research_output(research: ResearchManagerPayload) -> str:
 def build_risk_judge_pack(
     state, ledger: list[RiskLedgerEntry], research: ResearchManagerPayload
 ) -> str:
-    from app.agent.trading.infrastructure.debate_port import (
-        build_evidence_pack,
-        render_transcript,
-    )
-
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
     return (
         build_evidence_pack(state)
@@ -402,8 +398,6 @@ def compute_evidence_quality(
     output, matching the reasoning `contested_share` was supposed to
     capture without the cliff.
     """
-    from app.agent.trading.application.nodes import ANALYST_OUTPUTS
-
     coverage = sum(1 for key in ANALYST_OUTPUTS.values() if state.get(key)) / len(ANALYST_OUTPUTS)
     mean_spread = sum(e.normalized_spread for e in ledger) / len(ledger) if ledger else 0.0
     risk_turns: list[RiskTurn] = state.get("risk_turns") or []
@@ -458,8 +452,6 @@ def _grounded_corpus(state) -> str:
     here has a source. A figure that appears only downstream of here was
     produced by a model, whatever else is true of it.
     """
-    from app.agent.trading.infrastructure.debate_port import report_texts
-
     return "\n".join(report_texts(state).values())
 
 
@@ -490,13 +482,11 @@ def _numeric_corpus(state, ledger: list[RiskLedgerEntry], debate_turns: list[Deb
 
 def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[str], list[str]]:
     """Returns (block_flags, gap_flags). Exact containment, not
-    tolerance-band matching — see debate_port's module docstring for why
+    tolerance-band matching — see evidence.unbacked_figures for why
     tolerance bands go blind on dense numeric text."""
-    from app.agent.trading.infrastructure.debate_port import _flag_debate_numbers
-
     return (
-        _flag_debate_numbers(block_text, corpus),
-        _flag_debate_numbers(other_text, corpus),
+        unbacked_figures(block_text, corpus),
+        unbacked_figures(other_text, corpus),
     )
 
 
@@ -509,7 +499,7 @@ def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[
 # the same containment methodology as `_numeric_guard`, not a second
 # implementation, run once more over the assembled whole rather than one
 # call's fragment — deliberately not app/application/citation_verifier's
-# tolerance-band matching (see debate_port.py's module docstring for why
+# tolerance-band matching (see evidence.unbacked_figures for why
 # that goes blind on a corpus this dense: bands overlap and a fabricated
 # figure lands inside somebody's band).
 # ---------------------------------------------------------------------------
@@ -603,22 +593,14 @@ def verify_decision_memo(
 # ---------------------------------------------------------------------------
 
 def _submit_tool(name: str, description: str, payload_cls) -> dict:
-    from app.agent.trading.infrastructure.debate_port import _inline_refs
-
     return {
         "name": name,
         "description": description,
         "strict": True,
-        "input_schema": _inline_refs(payload_cls.model_json_schema()),
+        "input_schema": inline_refs(payload_cls.model_json_schema()),
     }
 
 
-# Built lazily (a function, not a module-level constant) rather than eagerly
-# at import time — same reason every debate_port import in this module is
-# local to a function: computing this eagerly here calls _submit_tool ->
-# debate_port -> application.nodes at MODULE LOAD time, and nodes.py is
-# what imports run_synthesis FROM this module, so an eager build here
-# completes the cycle before either module finishes loading.
 def _research_manager_tool() -> dict:
     return _submit_tool(
         "submit_research_synthesis", "Submit the debate synthesis. Call exactly once.",
@@ -637,11 +619,6 @@ async def _call_model(
     client: LLMClient, model: str, tool: dict, system_blocks: list[dict],
     messages: list[dict], temperature: float | None,
 ):
-    from app.agent.trading.infrastructure.debate_port import (
-        create_with_temperature_fallback,
-        reasoning_config,
-    )
-
     return await create_with_temperature_fallback(
         client,
         model=model,

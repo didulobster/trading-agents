@@ -27,6 +27,7 @@ from app.agent.trading.infrastructure.structured_call import (
     assert_within_budget,
     call_with_schema_retry,
     force_crash,
+    inline_refs,
 )
 from app.infrastructure.llm import LLMClient, get_client
 from app.infrastructure.llm.models import model_for, warn_if_unpriced
@@ -36,9 +37,10 @@ from app.agent.researcher import (
     _save_output,
     log_cost,
 )
-from app.agent.trading.application.risk_ledger import build_slate, contested_ids
+from app.agent.trading.application.risk_ledger import build_risk_ledger, build_slate, contested_ids
 from app.agent.trading.domain.debate import DebateTurn, canonical_claims
 from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.domain.risk import (
     PERSONAS,
@@ -48,14 +50,15 @@ from app.agent.trading.domain.risk import (
     RiskTurnPayload,
 )
 from app.agent.trading.infrastructure.debate_port import (
-    _flag_debate_numbers,
-    _inline_refs,
-    _flag_direction_claims,
-    _norm,
     create_with_temperature_fallback,
     reasoning_config,
     render_transcript as render_debate_transcript,
+)
+from app.agent.trading.infrastructure.evidence import (
+    contradicted_directions,
+    quote_is_backed,
     report_texts,
+    unbacked_figures,
 )
 
 Phase = Literal["enumerate", "score", "adjudicate", "respond"]
@@ -224,8 +227,6 @@ def _build_system(persona: Persona) -> str:
 # ---------------------------------------------------------------------------
 
 def build_risk_evidence_pack(state) -> str:
-    from app.agent.trading.application.nodes import ANALYST_OUTPUTS
-
     texts = report_texts(state)
     order = list(ANALYST_OUTPUTS) + ["sentiment"]
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
@@ -281,7 +282,7 @@ RISK_SUBMIT_TOOL = {
     "name": "submit_risk_turn",
     "description": "Submit this turn's risk-panel contribution. Call exactly once.",
     "strict": True,
-    "input_schema": _inline_refs(RiskTurnPayload.model_json_schema()),
+    "input_schema": inline_refs(RiskTurnPayload.model_json_schema()),
 }
 
 
@@ -318,13 +319,13 @@ def _is_falsifiable_trigger(trigger: str) -> bool:
 def check_quotes(factors: list[RiskFactor], texts: dict[str, str], debate_corpus: str) -> list[str]:
     """factor_ids (post-assembly, so real ids) whose evidence_quote is not
     actually in the source it names. Same normalization as debate_port's
-    check_quotes — imported `_norm`, not reimplemented."""
+    check_quotes — the one `quote_is_backed`, not reimplemented."""
     flagged = []
     for factor in factors:
         if factor.evidence_ref == "none" or not factor.evidence_quote:
             continue
         corpus = debate_corpus if factor.evidence_ref == "debate" else texts.get(factor.evidence_ref, "")
-        if _norm(factor.evidence_quote) not in _norm(corpus):
+        if not quote_is_backed(factor.evidence_quote, corpus):
             flagged.append(factor.factor_id)
     return flagged
 
@@ -380,10 +381,10 @@ def _check_turn(
     # own assertion to back itself.
     number_corpus = "\n\n".join(texts.values()) + "\n\n" + debate_corpus + "\n\n" + prior_risk_corpus
     scan_text = payload.argument + "\n" + "\n".join(s.rationale for s in payload.scores)
-    flags.extend(f"unbacked_number: {n}" for n in _flag_debate_numbers(scan_text, number_corpus))
+    flags.extend(f"unbacked_number: {n}" for n in unbacked_figures(scan_text, number_corpus))
     # Same text, the other question: not where the figures came from, but
     # whether the sentence describing them has them moving the right way.
-    flags.extend(f"contradicted_direction: {d}" for d in _flag_direction_claims(scan_text))
+    flags.extend(f"contradicted_direction: {d}" for d in contradicted_directions(scan_text))
 
     return flags, unquoted
 
@@ -610,8 +611,6 @@ def _format_risk_markdown(ticker: str, turns: list[RiskTurn], terminated_by: str
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
     flagged = [f for t in turns for f in t.guard_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
-
-    from app.agent.trading.application.risk_ledger import build_risk_ledger
 
     ledger = build_risk_ledger(turns)
     contested = [e for e in ledger if e.contested]

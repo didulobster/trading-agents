@@ -18,6 +18,7 @@ in as arguments.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from typing import Any, Awaitable, Callable, NoReturn
@@ -174,3 +175,69 @@ def assert_within_budget(
         f"{what} cost ${total_usd:.4f}{context} exceeds the "
         f"${ceiling_usd:.2f} {budget} — check {check} before rerunning"
     )
+
+
+# JSON Schema keywords a strict tool schema rejects. Dropped from the wire
+# format only — pydantic still enforces every one of them on the way back in,
+# so the constraint is not lost, just not advertised. Where the bound matters
+# to the model (claims 1..5) it is restated in prose in the field
+# description.
+#
+# `minimum`/`maximum` joined this set in Phase 6, found live: RiskScore's
+# `severity`/`likelihood` (pydantic `ge=1, le=5`) 400'd every risk-panel turn
+# with "For 'integer' type, properties maximum, minimum are not supported" —
+# unlike Phase 5's array-length bounds, which were anticipated from the API
+# docs, this one was not caught until a real call hit it. Same fix: state the
+# 1-5 range in the field description (domain/risk.py), and rely on pydantic
+# to still enforce it once the value comes back.
+_STRICT_UNSUPPORTED = frozenset(
+    {"minItems", "maxItems", "minLength", "maxLength", "pattern", "format", "minimum", "maximum"}
+)
+
+
+def inline_refs(schema: dict) -> dict:
+    """Splice $defs into the tree and drop the key.
+
+    `model_json_schema()` emits `$defs` + `$ref` for the nested DebateClaim.
+    $ref resolution inside a tool `input_schema` has not been reliable in my
+    experience and cannot be verified from here, so the refs are inlined
+    before sending. DebateClaim is flat by design, which keeps this walk to a
+    single level and non-recursive.
+    """
+    schema = copy.deepcopy(schema)
+    defs = schema.pop("$defs", {})
+
+    def walk(node):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                merged = walk(defs[ref.rsplit("/", 1)[-1]])
+                # sibling keys (description, default) win over the target's
+                merged.update({k: walk(v) for k, v in node.items() if k != "$ref"})
+                return merged
+            out = {
+                k: walk(v)
+                for k, v in node.items()
+                if k not in _STRICT_UNSUPPORTED
+            }
+            # `strict: true` requires additionalProperties: false on every
+            # object in the tree, and every property listed in `required` —
+            # pydantic omits the defaulted ones, so they are added back here
+            # rather than by deleting the defaults from the domain type.
+            if out.get("type") == "object" and "properties" in out:
+                out["additionalProperties"] = False
+                out["required"] = list(out["properties"])
+                # A `default` on a field the model is now REQUIRED to emit is
+                # a contradiction, and the one it reads as permission to send
+                # an empty string — which is the failure the 'none' sentinel
+                # exists to avoid. Strip it from the wire schema; pydantic
+                # keeps it for Python-side construction.
+                for prop in out["properties"].values():
+                    if isinstance(prop, dict):
+                        prop.pop("default", None)
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+
+    return walk(schema)
