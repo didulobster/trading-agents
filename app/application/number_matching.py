@@ -12,8 +12,8 @@ as an integer truncation of a more precise figure (text "1,364.1", number
 1364), or as a rounding of it within half a step of the number's own
 displayed precision (text "10874.36", number "10,874.4").
 
-The debate and technical guards (debate_port._flag_debate_numbers,
-technical_interpreter_port._flag_unmatched_numbers_against) still carry their
+The trading pipeline's grounding checks (evidence.unbacked_figures,
+evidence.unmatched_by_tolerance) still carry their
 own matchers, with deliberately different tolerances; folding them in is a
 separate change (docs/code_review.md, Medium #6).
 """

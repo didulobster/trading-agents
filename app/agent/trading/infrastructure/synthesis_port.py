@@ -68,13 +68,15 @@ from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
 from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.infrastructure.debate_port import (
-    _flag_debate_numbers,
     _inline_refs,
-    build_evidence_pack,
     create_with_temperature_fallback,
     reasoning_config,
     render_transcript,
+)
+from app.agent.trading.infrastructure.evidence import (
+    build_evidence_pack,
     report_texts,
+    unbacked_figures,
 )
 
 # Follows the project-wide model from .env (LLM_CLAUDE_MODEL), same override
@@ -480,11 +482,11 @@ def _numeric_corpus(state, ledger: list[RiskLedgerEntry], debate_turns: list[Deb
 
 def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[str], list[str]]:
     """Returns (block_flags, gap_flags). Exact containment, not
-    tolerance-band matching — see debate_port's module docstring for why
+    tolerance-band matching — see evidence.unbacked_figures for why
     tolerance bands go blind on dense numeric text."""
     return (
-        _flag_debate_numbers(block_text, corpus),
-        _flag_debate_numbers(other_text, corpus),
+        unbacked_figures(block_text, corpus),
+        unbacked_figures(other_text, corpus),
     )
 
 
@@ -497,7 +499,7 @@ def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[
 # the same containment methodology as `_numeric_guard`, not a second
 # implementation, run once more over the assembled whole rather than one
 # call's fragment — deliberately not app/application/citation_verifier's
-# tolerance-band matching (see debate_port.py's module docstring for why
+# tolerance-band matching (see evidence.unbacked_figures for why
 # that goes blind on a corpus this dense: bands overlap and a fabricated
 # figure lands inside somebody's band).
 # ---------------------------------------------------------------------------

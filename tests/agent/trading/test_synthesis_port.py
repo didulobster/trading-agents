@@ -424,7 +424,7 @@ async def test_happy_path_assembles_a_complete_memo():
 # Post-hoc memo verification (Phase 7) — verify_decision_memo re-checks the
 # FULLY ASSEMBLED memo, independent of the per-call guards above that only
 # ever see one call's own payload fields. Same containment methodology
-# (_numeric_guard/_flag_debate_numbers), not a second implementation.
+# (_numeric_guard/evidence.unbacked_figures), not a second implementation.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio

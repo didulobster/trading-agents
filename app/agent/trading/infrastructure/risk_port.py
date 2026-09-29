@@ -49,14 +49,16 @@ from app.agent.trading.domain.risk import (
     RiskTurnPayload,
 )
 from app.agent.trading.infrastructure.debate_port import (
-    _flag_debate_numbers,
     _inline_refs,
-    _flag_direction_claims,
-    _norm,
     create_with_temperature_fallback,
     reasoning_config,
     render_transcript as render_debate_transcript,
+)
+from app.agent.trading.infrastructure.evidence import (
+    contradicted_directions,
+    quote_is_backed,
     report_texts,
+    unbacked_figures,
 )
 
 Phase = Literal["enumerate", "score", "adjudicate", "respond"]
@@ -317,13 +319,13 @@ def _is_falsifiable_trigger(trigger: str) -> bool:
 def check_quotes(factors: list[RiskFactor], texts: dict[str, str], debate_corpus: str) -> list[str]:
     """factor_ids (post-assembly, so real ids) whose evidence_quote is not
     actually in the source it names. Same normalization as debate_port's
-    check_quotes — imported `_norm`, not reimplemented."""
+    check_quotes — the one `quote_is_backed`, not reimplemented."""
     flagged = []
     for factor in factors:
         if factor.evidence_ref == "none" or not factor.evidence_quote:
             continue
         corpus = debate_corpus if factor.evidence_ref == "debate" else texts.get(factor.evidence_ref, "")
-        if _norm(factor.evidence_quote) not in _norm(corpus):
+        if not quote_is_backed(factor.evidence_quote, corpus):
             flagged.append(factor.factor_id)
     return flagged
 
@@ -379,10 +381,10 @@ def _check_turn(
     # own assertion to back itself.
     number_corpus = "\n\n".join(texts.values()) + "\n\n" + debate_corpus + "\n\n" + prior_risk_corpus
     scan_text = payload.argument + "\n" + "\n".join(s.rationale for s in payload.scores)
-    flags.extend(f"unbacked_number: {n}" for n in _flag_debate_numbers(scan_text, number_corpus))
+    flags.extend(f"unbacked_number: {n}" for n in unbacked_figures(scan_text, number_corpus))
     # Same text, the other question: not where the figures came from, but
     # whether the sentence describing them has them moving the right way.
-    flags.extend(f"contradicted_direction: {d}" for d in _flag_direction_claims(scan_text))
+    flags.extend(f"contradicted_direction: {d}" for d in contradicted_directions(scan_text))
 
     return flags, unquoted
 
