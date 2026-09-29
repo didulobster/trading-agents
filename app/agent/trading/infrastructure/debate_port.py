@@ -63,7 +63,7 @@ from app.agent.researcher import (
     _save_output,
     log_cost,
 )
-from app.agent.trading.application.nodes import ANALYST_OUTPUTS
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.domain.debate import (
     DebateTurn,
     DebateTurnPayload,

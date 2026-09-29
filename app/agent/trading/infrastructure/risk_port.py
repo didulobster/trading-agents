@@ -36,9 +36,10 @@ from app.agent.researcher import (
     _save_output,
     log_cost,
 )
-from app.agent.trading.application.risk_ledger import build_slate, contested_ids
+from app.agent.trading.application.risk_ledger import build_risk_ledger, build_slate, contested_ids
 from app.agent.trading.domain.debate import DebateTurn, canonical_claims
 from app.agent.trading.domain.sanitize import EXTERNAL_TEXT_FRAMING
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 from app.agent.trading.infrastructure.cost_log import new_event_id, record_cost_event
 from app.agent.trading.domain.risk import (
     PERSONAS,
@@ -224,8 +225,6 @@ def _build_system(persona: Persona) -> str:
 # ---------------------------------------------------------------------------
 
 def build_risk_evidence_pack(state) -> str:
-    from app.agent.trading.application.nodes import ANALYST_OUTPUTS
-
     texts = report_texts(state)
     order = list(ANALYST_OUTPUTS) + ["sentiment"]
     debate_turns: list[DebateTurn] = state.get("debate_turns") or []
@@ -610,8 +609,6 @@ def _format_risk_markdown(ticker: str, turns: list[RiskTurn], terminated_by: str
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
     flagged = [f for t in turns for f in t.guard_flags]
     unquoted = [c for t in turns for c in t.unquoted_evidence]
-
-    from app.agent.trading.application.risk_ledger import build_risk_ledger
 
     ledger = build_risk_ledger(turns)
     contested = [e for e in ledger if e.contested]

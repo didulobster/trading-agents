@@ -29,7 +29,7 @@ version calibrated against the transcript that showed it — not against a
 guess. See known-gaps.md.
 """
 
-from app.agent.trading.application.nodes import ANALYST_OUTPUTS
+from app.agent.trading.domain.trading_state import ANALYST_OUTPUTS
 
 MAX_ROUNDS = 3
 MAX_TURNS = 2 * MAX_ROUNDS
