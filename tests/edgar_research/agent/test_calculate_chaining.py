@@ -130,3 +130,54 @@ async def test_a_run_that_has_retrieved_nothing_cannot_calculate_with_made_up_fi
 
     assert result.startswith("Rejected")
     assert tools.get_calc_results() == []
+
+
+# ---------------------------------------------------------------------------
+# Found on the 2026-10-11 ACN run after #139/#140
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_an_error_carries_no_unit_note():
+    """`Error evaluating '(11474 -  ? )' ... (in ones: ...)` — the note
+    describes a number, and an error is not one."""
+    result = await _calc("(11474 -  ? )", _retrieved(11474, "millions"))
+
+    assert result.startswith("Error evaluating")
+    assert "ones" not in result
+
+
+@pytest.mark.anyio
+async def test_the_unit_note_does_not_call_a_ratio_a_dollar_amount():
+    """25.66 was a growth rate; "in ones" read as if it were dollars."""
+    result = await _calc("(11474 - 9131) / 9131 * 100", _retrieved(11474, "millions"), _retrieved(9131, "millions"))
+
+    assert "converted to ones before calculating" in result
+
+
+@pytest.mark.anyio
+async def test_a_hand_scaled_expression_is_told_to_use_the_declared_value():
+    """The agent declared 34 billions and still wrote 34000000000 in the
+    expression; the rejection never said why that could not work."""
+    _retrieved(34, "billions")
+    _retrieved(30, "billions")
+    result = await _calc("(34000000000 - 30000000000) / 30000000000 * 100",
+                         _retrieved(34, "billions"), _retrieved(30, "billions"))
+
+    assert result.startswith("Rejected")
+    assert "exactly as declared" in result
+
+
+@pytest.mark.parametrize("memo", [
+    "The change was -0.551142522485972%, a decline.",
+    "The change was -0.55%, a decline.",
+    "Diluted shares declined 0.55%.",
+])
+def test_a_negative_result_is_recognised_however_the_memo_states_it(memo):
+    """The verifier read "-0.55" as "0.55" and matched results only at one or
+    two decimals, so every negative calculated figure — and any stated at
+    full precision — was listed as unverified."""
+    report = verify_answer(memo, {0: "diluted shares 632,435,108 and 635,940,044"},
+                           computed_values=[-0.551142522485972])
+
+    assert report.unverified == []
+    assert [f.kind for f in report.verified] == ["computed"]
