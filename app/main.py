@@ -51,8 +51,7 @@ app = FastAPI(title="RAG Skeleton", lifespan=lifespan)
 
 # Browsers may call this API only from these origins. It was "*", which let
 # ANY page open in the user's browser send requests to localhost:8000 — and
-# /ask, /extract, /ingest, /news-assess and /trading/analyze all spend API
-# credits. The default is the Vite dev server the removed edgar-ui ran on;
+# /ask, /extract, /ingest and /trading/analyze all spend API credits. The default is the Vite dev server the removed edgar-ui ran on;
 # set CORS_ALLOW_ORIGINS (comma-separated) for anything else, or to "" to
 # allow no browser origin at all.
 CORS_ALLOW_ORIGINS = [

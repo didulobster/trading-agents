@@ -145,8 +145,8 @@ async def test_a_narrower_window_the_model_chose_is_left_alone(monkeypatch):
 
 @pytest.mark.anyio
 async def test_an_unbounded_run_sends_no_bound(monkeypatch):
-    """The standalone research CLI and /news-assess answer about now, and
-    their behaviour is unchanged."""
+    """The standalone research CLI answers about now, and its behaviour is
+    unchanged."""
     sent = _capture(monkeypatch)
     tools.reset_run_provenance()      # no as_of
 

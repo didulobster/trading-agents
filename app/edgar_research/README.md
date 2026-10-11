@@ -22,7 +22,6 @@ uv run uvicorn app.main:app --reload
 | `POST /ingest` | embeddings | Run the ingestion pipeline for one ticker | agent tool `ingest_ticker` |
 | `POST /latest-filings` | — | List a ticker's filings on EDGAR and mark which are already in the corpus | agent tool `check_latest_filings` |
 | `GET /corpus-status` | — | What is in the corpus, with integrity issues and searchable sections | agent tool `check_corpus` |
-| `POST /news-assess` | LLM | Run the Research agent to assess one headline against the watchlist thesis | you |
 | `GET /health` | — | The commit this server process is running | agent tools, once per process |
 
 `GET /health` is served by `app/main.py`; the rest by [api.py](./api.py).
@@ -96,16 +95,6 @@ curl -s 'localhost:8000/corpus-status?ticker=AVGO&filed_before=2026-03-01'
 
 Both parameters are optional. Returns `summary`, `issues`, `per_filing` and
 `sections_available`: the section names `/ask`'s `section_path_contains` will match.
-
-### `POST /news-assess`
-
-```bash
-curl -s localhost:8000/news-assess -H 'Content-Type: application/json' \
-  -d '{"ticker": "AVGO", "headline": "AVGO announces $10B buyback"}'
-```
-
-Returns `{ticker, headline, assessment}`. The thesis it assesses against comes from
-`watchlist.yaml` in the working directory; a ticker not listed there gets generic framing.
 
 ### `GET /health`
 

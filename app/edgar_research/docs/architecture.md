@@ -195,7 +195,6 @@ FastAPI router (`api.py`, mounted by `app/main.py`). All endpoints are JSON; the
 | `/ingest` | POST | Run the full ingestion pipeline for one ticker (discover → download → parse → chunk → embed) |
 | `/latest-filings` | POST | Check SEC EDGAR for a ticker's recent filings and compare against what is already in the corpus |
 | `/corpus-status` | GET | Cross-check filing status against chunk/embedding counts. Same logic as the CLI command |
-| `/news-assess` | POST | Run the research agent in news-assessment mode — cross-reference a headline against the watchlist thesis and filing corpus, return a verdict |
 
 
 ## Evaluation

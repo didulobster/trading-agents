@@ -297,7 +297,7 @@ app/
   edgar_research/            EDGAR Research context (CONTEXT.md, docs/)
     domain/ application/ infrastructure/  ingestion, retrieval, grounded answers, verifiers
     agent/                   Research agent: researcher.py prompts.py tools.py
-    api.py                   /ask /extract /ingest /corpus-status /latest-filings /news-assess
+    api.py                   /ask /extract /ingest /corpus-status /latest-filings
     cli.py                   ingest / corpus-status / eval / extract-metrics
     eval/                    retrieval and extraction evaluation harness
     scripts/                 retrieval probes (run with python -m)
