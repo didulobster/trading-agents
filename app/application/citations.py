@@ -1,4 +1,4 @@
-from app.infrastructure.repositories.chunk_repo import RetrievedChunk
+from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 
 
 def format_citation_tag(chunk: RetrievedChunk) -> str:

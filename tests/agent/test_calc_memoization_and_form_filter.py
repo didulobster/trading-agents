@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 import app.agent.tools as tools
-from app.infrastructure.edgar.client import (
+from app.edgar_research.infrastructure.edgar.client import (
     DOMESTIC_FORM_TYPES,
     FOREIGN_PRIVATE_ISSUER_FORM_TYPES,
     periodic_forms,

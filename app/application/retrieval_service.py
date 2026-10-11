@@ -3,7 +3,7 @@ from datetime import date
 import logging
 
 from app.application.query_decomposer import DecompositionResult, QueryDecomposer
-from app.infrastructure.repositories.chunk_repo import (
+from app.edgar_research.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
     ChunkSearchFilters,
     RetrievedChunk,

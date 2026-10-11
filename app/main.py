@@ -42,21 +42,21 @@ from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService, _fuse_across_queries
 
-from app.infrastructure.build_info import build_info
+from app.edgar_research.infrastructure.build_info import build_info
 from app.shared.llm.models import model_for
-from app.infrastructure.edgar.client import EdgarClient, periodic_forms
-from app.infrastructure.edgar.ticker_resolver import TickerResolver
-from app.infrastructure.queries.corpus_status import CorpusStatusQuery
-from app.infrastructure.repositories.db import init_pool, close_pool, get_connection
-from app.infrastructure.repositories.chunk_repo import (
+from app.edgar_research.infrastructure.edgar.client import EdgarClient, periodic_forms
+from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
+from app.edgar_research.infrastructure.queries.corpus_status import CorpusStatusQuery
+from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool, get_connection
+from app.edgar_research.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
     ChunkSearchFilters,
 )
-from app.infrastructure.repositories.document_repo import DocumentRepository
-from app.infrastructure.repositories.filing_repo import FilingRepository
-from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
-from app.infrastructure.repositories.section_repo import SectionRepository
-from app.infrastructure.repositories.metrics_repo import (
+from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
+from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
+from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
+from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
+from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
@@ -68,7 +68,7 @@ claude_model = model_for("answer")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.infrastructure.build_info import describe
+    from app.edgar_research.infrastructure.build_info import describe
     logging.info("serving code at %s", describe())
     await init_pool()
     # Built once and shared, instead of per request: every /ask and /extract

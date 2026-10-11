@@ -9,19 +9,19 @@ from app.edgar_research.domain.listed_security import ListedSecurity
 from app.edgar_research.domain.section import Section
 from app.edgar_research.domain.values import FilingStatus
 
-from app.infrastructure.chunking.section_chunker import chunk_filing
-from app.infrastructure.edgar.client import EdgarClient
-from app.infrastructure.edgar.models import FilingSummary
-from app.infrastructure.edgar.ticker_resolver import TickerResolver
-from app.infrastructure.parsing.filing_parser import parse_filing
+from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
+from app.edgar_research.infrastructure.edgar.client import EdgarClient
+from app.edgar_research.infrastructure.edgar.models import FilingSummary
+from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
+from app.edgar_research.infrastructure.parsing.filing_parser import parse_filing
 
-from app.infrastructure.repositories.chunk_repo import ChunkRepository
-from app.infrastructure.repositories.document_repo import DocumentRepository
-from app.infrastructure.repositories.filing_repo import FilingRepository
-from app.infrastructure.repositories.listed_security_repo import (
+from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
+from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
+from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
+from app.edgar_research.infrastructure.repositories.listed_security_repo import (
     ListedSecurityRepository,
 )
-from app.infrastructure.repositories.section_repo import SectionRepository
+from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
 
 from .embedding_service import EmbeddingService
 
@@ -262,7 +262,7 @@ class IngestionService:
 
             # Convert persisted sections back into parser-shaped objects
             # for the chunker, since chunk_filing operates on ParsedSection
-            from app.infrastructure.parsing.models import ParsedSection
+            from app.edgar_research.infrastructure.parsing.models import ParsedSection
             parsed = [
                 ParsedSection(
                     section_path=s.section_path,

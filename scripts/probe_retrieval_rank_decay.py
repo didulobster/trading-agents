@@ -22,8 +22,8 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 from app.application.embedding_service import EmbeddingService
 from app.application.retrieval_service import RetrievalService
-from app.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
-from app.infrastructure.repositories.db import init_pool, close_pool
+from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
+from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
 
 V = Path("/Users/wilsonsmacmini/Documents/Obsidian Vault/EDGAR-MEMO/memos")
 

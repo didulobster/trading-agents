@@ -1,8 +1,8 @@
 import re
 from datetime import date
 
-from app.infrastructure.queries.models import CorpusSummaryRow, FilingDetail, FilingIssue
-from app.infrastructure.repositories.db import get_connection
+from app.edgar_research.infrastructure.queries.models import CorpusSummaryRow, FilingDetail, FilingIssue
+from app.edgar_research.infrastructure.repositories.db import get_connection
 
 _ITEM_LABEL = re.compile(r"^Item (\d{1,2})([A-Z]?)$")
 

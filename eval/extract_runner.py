@@ -8,7 +8,7 @@ from app.application.embedding_service import EmbeddingService
 from app.application.extraction_service import MetricsExtractor
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
-from app.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
+from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
 from eval.question_embedding_cache import QuestionEmbeddingCache
 
 

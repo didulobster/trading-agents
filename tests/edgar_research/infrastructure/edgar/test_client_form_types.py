@@ -12,7 +12,7 @@ so the coroutine is driven via asyncio.run() rather than pytest.mark.asyncio.
 import asyncio
 from pathlib import Path
 
-from app.infrastructure.edgar.client import (
+from app.edgar_research.infrastructure.edgar.client import (
     DOMESTIC_FORM_TYPES,
     FOREIGN_PRIVATE_ISSUER_FORM_TYPES,
     EdgarClient,

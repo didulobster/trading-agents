@@ -33,7 +33,7 @@ from pathlib import Path
 
 from bs4 import XMLParsedAsHTMLWarning
 
-from app.infrastructure.parsing.filing_parser import (
+from app.edgar_research.infrastructure.parsing.filing_parser import (
     _item_to_part_20f,
     _locate_item_headings,
     parse_filing,

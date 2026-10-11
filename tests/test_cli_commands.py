@@ -27,7 +27,7 @@ import app.cli as cli
 from app.application.extraction_service import FinancialMetrics
 from app.edgar_research.domain.filing import Filing
 from app.edgar_research.domain.values import FilingStatus
-from app.infrastructure.repositories.metrics_repo import (
+from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )

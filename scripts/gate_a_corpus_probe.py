@@ -22,12 +22,12 @@ load_dotenv(override=True)
 
 from app.application.embedding_service import EmbeddingService  # noqa: E402
 from app.application.retrieval_service import RetrievalService  # noqa: E402
-from app.infrastructure.queries.corpus_status import CorpusStatusQuery  # noqa: E402
-from app.infrastructure.repositories.chunk_repo import (  # noqa: E402
+from app.edgar_research.infrastructure.queries.corpus_status import CorpusStatusQuery  # noqa: E402
+from app.edgar_research.infrastructure.repositories.chunk_repo import (  # noqa: E402
     ChunkRepository,
     ChunkSearchFilters,
 )
-from app.infrastructure.repositories.db import close_pool, init_pool  # noqa: E402
+from app.edgar_research.infrastructure.repositories.db import close_pool, init_pool  # noqa: E402
 
 TICKERS = ["AVGO", "ACN", "NFLX", "FIG", "ASML", "MSFT"]
 

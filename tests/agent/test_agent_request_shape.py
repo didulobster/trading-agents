@@ -178,7 +178,7 @@ def test_response_text_joins_every_text_block_not_just_the_first():
 @pytest.mark.anyio
 async def test_ask_returns_an_explicit_empty_answer_rather_than_a_500(monkeypatch):
     from app.edgar_research.domain.chunk import Chunk
-    from app.infrastructure.repositories.chunk_repo import RetrievedChunk
+    from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
     import app.llm as llm
 
     chunk = Chunk(

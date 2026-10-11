@@ -2,7 +2,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 from .values import SectionPath, Ticker
-from app.infrastructure.chunking.models import ChunkDraft
+from app.edgar_research.infrastructure.chunking.models import ChunkDraft
 
 
 class Chunk(BaseModel):

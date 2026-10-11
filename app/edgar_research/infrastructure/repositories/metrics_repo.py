@@ -22,7 +22,7 @@ from typing import Literal
 
 from app.application.extraction_service import FinancialMetrics
 
-from app.infrastructure.repositories.db import get_connection
+from app.edgar_research.infrastructure.repositories.db import get_connection
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import logging
 
 from app.shared.token_usage import TokenUsage, response_text
 from dataclasses import dataclass, field
-from app.infrastructure.repositories.chunk_repo import RetrievedChunk
+from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 from app.application.citations import format_citation_tag, format_context_block
 from app.shared.llm import get_client
 from app.shared.llm.models import model_for

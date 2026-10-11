@@ -575,7 +575,7 @@ async def _warn_if_server_is_stale(http) -> None:
     if _SERVER_VERSION_CHECKED:
         return
     _SERVER_VERSION_CHECKED = True
-    from app.infrastructure.build_info import COMMIT
+    from app.edgar_research.infrastructure.build_info import COMMIT
 
     try:
         resp = await http.get(f"{API_BASE}/health", timeout=5)
