@@ -7,7 +7,7 @@ which also carries the identity of the filing those figures came from. This
 module imported the first and then shadowed it with the second on the next
 line, so the name meant different things either side of one import.
 
-`app/cli.py` read that the way anyone would and passed the extractor's
+`app/edgar_research/cli.py` read that the way anyone would and passed the extractor's
 output straight to `upsert`, whose first statement is `metrics.ticker` — a
 field the extractor's model does not have. The row type is now
 `FinancialMetricsRow`, and `from_extraction` is the one place that turns the

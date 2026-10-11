@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from app.agent.prompts import ANALYST_SYSTEM_PROMPT as PROMPT
+from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT as PROMPT
 
 RUBRIC = PROMPT.split("## Red-flag rubric")[1].split("## Assessment")[0]
 

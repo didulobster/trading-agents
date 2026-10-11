@@ -1,6 +1,6 @@
-import app.agent.researcher as researcher
+import app.edgar_research.agent.researcher as researcher
 from app.shared import vault
-from app.agent.tools import record_log_line, reset_run_provenance
+from app.edgar_research.agent.tools import record_log_line, reset_run_provenance
 
 
 def setup_function():

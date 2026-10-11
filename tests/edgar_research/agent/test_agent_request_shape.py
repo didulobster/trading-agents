@@ -28,7 +28,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.agent.researcher as researcher
+import app.edgar_research.agent.researcher as researcher
 from app.shared.token_usage import response_text
 
 
@@ -179,7 +179,7 @@ def test_response_text_joins_every_text_block_not_just_the_first():
 async def test_ask_returns_an_explicit_empty_answer_rather_than_a_500(monkeypatch):
     from app.edgar_research.domain.chunk import Chunk
     from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
-    import app.llm as llm
+    import app.edgar_research.llm as llm
 
     chunk = Chunk(
         id=1, section_id=1, content="Revenue was $64.9 billion.", chunk_index=0,

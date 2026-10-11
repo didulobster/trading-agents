@@ -60,7 +60,7 @@ from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
-from app.llm import answer_question
+from app.edgar_research.llm import answer_question
 
 
 logging.basicConfig(level=logging.INFO)
@@ -235,7 +235,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     for a server bound to 127.0.0.1 (uvicorn's default). Set it whenever the
     server is reachable by anything but you: every spending endpoint then
     needs a matching `X-API-Key` header, and the research agent's own tool
-    calls send it automatically (app/agent/tools.py reads the same variable).
+    calls send it automatically (app/edgar_research/agent/tools.py reads the same variable).
     Read per request so a test or a restart-free change can move it.
     """
     expected = os.getenv("APP_API_KEY")
@@ -547,7 +547,7 @@ async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
     if not req.ticker.strip():
         raise HTTPException(400, "ticker must not be empty")
 
-    from app.agent.researcher import run_agent, _build_news_prompt
+    from app.edgar_research.agent.researcher import run_agent, _build_news_prompt
 
     ticker = req.ticker.strip().upper()
     prompt = _build_news_prompt(ticker, req.headline)

@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 import app.main as main
 
 

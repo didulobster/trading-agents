@@ -18,7 +18,7 @@ Wrong fiscal-year attribution of a real figure used to be an unmitigated
 miss here too — a value from one period, mislabeled and used as another
 period's input, is individually real and passes this check every time.
 That specific case is now caught one layer upstream, in
-validate_calculate_inputs (app/agent/tools.py, check 4): every calculate()
+validate_calculate_inputs (app/edgar_research/agent/tools.py, check 4): every calculate()
 input declares a fiscal_period, and that check confirms the declared
 period's year actually appears near where the value was retrieved. This
 verifier still can't catch a mislabeled figure that never went through

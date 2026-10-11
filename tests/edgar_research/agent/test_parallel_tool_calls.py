@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.agent.researcher as researcher
+import app.edgar_research.agent.researcher as researcher
 from app.shared.cost import UsageSummary
 
 

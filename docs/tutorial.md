@@ -40,7 +40,7 @@ that calls the EDGAR RAG research agent that already existed:
 ```python
 # app/agent/trading/infrastructure/fundamentals_port.py
 """Wraps researcher.py's existing agent for the trading pipeline.
-Deliberately calls the same path as `python -m app.agent.researcher TICKER`
+Deliberately calls the same path as `python -m app.edgar_research.agent.researcher TICKER`
 (full checklist mode) — not /ask, which is a different agent behavior.
 """
 ```
@@ -49,7 +49,7 @@ That is the design the project set out to build, and it is the design that shipp
 
 **Size.** About 16,300 lines of Python under `app/`, and 612 test functions under `tests/`, of which
 464 sit under `tests/agent/trading/`. The largest single file is
-`app/agent/tools.py` at 1,162 lines, but the one to notice is
+`app/edgar_research/agent/tools.py` at 1,162 lines, but the one to notice is
 `app/agent/trading/infrastructure/evidence.py` at 799 — which tells you something true about the
 project: most of the code is not "call the model", it is **checking what the model said**.
 
@@ -799,7 +799,7 @@ journals*, not entry points — neither tells a newcomer how to get a run to wor
 environment variables are hard requirements read at *import* time:
 
 ```python
-# app/agent/researcher.py
+# app/edgar_research/agent/researcher.py
 MAX_TURNS = int(os.environ["LOOP_MAX_TURNS"])
 ...
 MEMO_DIR = Path.home() / os.environ["MEMO_DIR"]

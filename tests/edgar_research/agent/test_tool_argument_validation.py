@@ -11,8 +11,8 @@ on node completion.
 
 import pytest
 
-from app.agent import tools as tool_mod
-from app.agent.tools import TOOLS, _strictify, _validate_tool_inputs, execute_tool
+from app.edgar_research.agent import tools as tool_mod
+from app.edgar_research.agent.tools import TOOLS, _strictify, _validate_tool_inputs, execute_tool
 
 
 # ---------------------------------------------------------------------------

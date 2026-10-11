@@ -7,13 +7,13 @@ and continues until it produces a final answer or hits the turn limit.
  
 Usage:
     # Step-1 loop verification (stubbed tools, test prompt):
-    uv run python -m app.agent.researcher --test
+    uv run python -m app.edgar_research.agent.researcher --test
  
     # Full research run:
-    uv run python -m app.agent.researcher AVGO
+    uv run python -m app.edgar_research.agent.researcher AVGO
  
     # News assessment against watchlist thesis:
-    uv run python -m app.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
+    uv run python -m app.edgar_research.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
 """
 
 from __future__ import annotations
@@ -36,8 +36,8 @@ from typing import Callable
 import yaml
 
 from datetime import date, datetime
-from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
+from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
+from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.edgar_research.application.memo_verifier import verify_memo
 from app.shared.llm import MODEL_PRICING, get_client
 from app.shared.llm.models import model_for
@@ -326,7 +326,7 @@ async def run_agent(
     by that one call, the same bound the edge guard documents.
 
     `as_of` is the run's analysis date. It becomes the upper bound every
-    filing-reading tool applies to itself (app/agent/tools.py), so a
+    filing-reading tool applies to itself (app/edgar_research/agent/tools.py), so a
     historical run cannot read a filing published after the date it claims
     to analyse. None leaves the run unbounded — right for the standalone
     CLI and for news assessment, wrong for anything the trading graph calls.

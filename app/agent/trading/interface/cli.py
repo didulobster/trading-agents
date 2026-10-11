@@ -193,7 +193,7 @@ async def run(
 def main() -> None:
     # This entry point configured no logging at all, so every logger.info in
     # the pipeline went nowhere and WARNING arrived only via Python's
-    # handler-of-last-resort, unformatted and without a logger name. app/cli.py
+    # handler-of-last-resort, unformatted and without a logger name. app/edgar_research/cli.py
     # has always done this; the trading CLI — the one that spends the most per
     # invocation, and whose failures cost a whole run — did not.
     logging.basicConfig(

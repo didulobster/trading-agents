@@ -62,7 +62,7 @@ def test_only_app_config_loads_dotenv():
 
 
 @pytest.mark.parametrize("module", [
-    "main.py", "cli.py", "agent/researcher.py", "agent/trading/interface/cli.py",
+    "main.py", "edgar_research/cli.py", "edgar_research/agent/researcher.py", "agent/trading/interface/cli.py",
 ])
 def test_entry_points_load_env_before_any_other_app_import(module):
     """Settings are read at import time all over the app (every port's

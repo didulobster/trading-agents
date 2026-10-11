@@ -1,7 +1,7 @@
 """The CLI commands run at all.
 
 `extract-metrics` shipped broken and stayed broken because nothing in the
-suite invoked any `app.cli` command. It called five things that do not
+suite invoked any `app.edgar_research.cli` command. It called five things that do not
 exist:
 
   - `FilingStatus.INGESTED` — the enum has no such member
@@ -23,7 +23,7 @@ from datetime import date
 import pytest
 from typer.testing import CliRunner
 
-import app.cli as cli
+import app.edgar_research.cli as cli
 from app.edgar_research.application.extraction_service import FinancialMetrics
 from app.edgar_research.domain.filing import Filing
 from app.edgar_research.domain.values import FilingStatus
@@ -69,7 +69,7 @@ def test_from_extraction_carries_both_halves():
 
 
 def test_upsert_names_the_mistake_instead_of_raising_attributeerror():
-    """The exact call `app/cli.py` used to make."""
+    """The exact call `app/edgar_research/cli.py` used to make."""
     import asyncio
     with pytest.raises(TypeError) as exc:
         asyncio.run(MetricsRepository().upsert(_extracted()))

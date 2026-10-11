@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import app.agent.researcher as researcher
+import app.edgar_research.agent.researcher as researcher
 
 SOURCE = Path(researcher.__file__).read_text()
 

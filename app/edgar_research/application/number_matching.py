@@ -1,7 +1,7 @@
 """Deciding whether a number appears in text — token-anchored, one implementation.
 
 Moved out of citation_verifier.py so the `calculate` provenance checks in
-app/agent/tools.py use the same rule. They had their own substring version
+app/edgar_research/agent/tools.py use the same rule. They had their own substring version
 (`any(v in corpus for v in variants)`), which is exactly the weakness the
 verifier's docstring records fixing: a figure "verified" by occurring inside
 an unrelated larger number. Any two-digit integer was "retrieved" because it

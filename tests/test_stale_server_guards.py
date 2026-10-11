@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 import app.main as main
 
 

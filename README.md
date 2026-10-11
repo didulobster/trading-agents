@@ -13,7 +13,7 @@ date and produces a decision memo: a bull case, a bear case, a risk ledger, a ve
 
 The seam is the Fundamentals Analyst. It is not a new agent — it is a thin wrapper
 (`app/agent/trading/infrastructure/fundamentals_port.py`) around the EDGAR research agent
-that already existed, calling the same path as `python -m app.agent.researcher TICKER`.
+that already existed, calling the same path as `python -m app.edgar_research.agent.researcher TICKER`.
 
 About 16,300 lines of Python under `app/`, 612 test functions under `tests/`. The largest
 single file is `infrastructure/debate_port.py` — which says something true about the
@@ -157,7 +157,7 @@ rather than a code change.
 ### 1. Ingest filings into the corpus
 
 ```bash
-uv run python -m app.cli ingest AVGO --type 10-K --limit 4 --since 2023
+uv run python -m app.edgar_research.cli ingest AVGO --type 10-K --limit 4 --since 2023
 ```
 
 Runs the full pipeline for one ticker: discover → download → parse → chunk → embed. The
@@ -168,7 +168,7 @@ Then verify what actually landed. Status alone is not integrity: a filing can re
 `EMBEDDED` while a parser silently produced one chunk where ~100 were expected.
 
 ```bash
-uv run python -m app.cli corpus-status --ticker AVGO --verbose
+uv run python -m app.edgar_research.cli corpus-status --ticker AVGO --verbose
 ```
 
 This cross-check is the first step of every session, not an occasional audit.
@@ -180,7 +180,7 @@ uv run uvicorn app.main:app --reload
 ```
 
 The agent tool layer calls this over HTTP at a hardcoded `http://localhost:8000`
-(`app/agent/tools.py`), so **the server must be running on port 8000 before any agent or
+(`app/edgar_research/agent/tools.py`), so **the server must be running on port 8000 before any agent or
 trading run** — the fundamentals leg goes through it.
 
 | Endpoint | Purpose |
@@ -196,8 +196,8 @@ trading run** — the fundamentals leg goes through it.
 ### 3. Run the EDGAR research agent
 
 ```bash
-uv run python -m app.agent.researcher AVGO                    # full research checklist
-uv run python -m app.agent.researcher AVGO --news "AVGO announces 10B buyback"
+uv run python -m app.edgar_research.agent.researcher AVGO                    # full research checklist
+uv run python -m app.edgar_research.agent.researcher AVGO --news "AVGO announces 10B buyback"
 ```
 
 Tool traces go to stderr, the memo to stdout — `2>/dev/null` yields a clean memo.
@@ -301,14 +301,15 @@ are exhaustively testable in milliseconds at zero API cost.
 ```
 app/
   main.py                    FastAPI server
-  cli.py                     ingest / corpus-status / eval / extract-metrics
-  agent/
-    researcher.py prompts.py tools.py      EDGAR research agent (raw tool-use, no framework)
-    trading/
-      domain/                pure types and rules
-      application/           nodes, routers, guards
-      infrastructure/        LLM ports, graph, checkpointer, cost log
-  edgar_research/            EDGAR Research: glossary, docs, domain/, application/, infrastructure/
+  edgar_research/            EDGAR Research context (CONTEXT.md, docs/)
+    domain/ application/ infrastructure/  ingestion, retrieval, /ask, verifiers
+    agent/                   Research agent: researcher.py prompts.py tools.py
+    llm.py                   grounded answer generation behind /ask
+    cli.py                   ingest / corpus-status / eval / extract-metrics
+  agent/trading/             Trading pipeline
+    domain/                  pure types and rules
+    application/             nodes, routers, guards
+    infrastructure/          LLM ports, graph, checkpointer, cost log
   shared/                    shared kernel: llm/ (provider routing, model table, pricing),
                              config, cost log path, token usage
 .github/workflows/tests.yml   CI: pytest against a real pgvector service
