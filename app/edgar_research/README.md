@@ -2,7 +2,8 @@
 
 Ingests SEC EDGAR filings into a Postgres + pgvector corpus and answers questions over it,
 from one grounded answer (`/ask`) up to a full fundamentals memo written by the Research
-agent. Glossary: [CONTEXT.md](./CONTEXT.md). Architecture: [docs/architecture.md](./docs/architecture.md).
+agent. Glossary: [CONTEXT.md](./CONTEXT.md). Architecture: [docs/architecture.md](./docs/architecture.md). Using it for real research:
+[docs/using-it-for-research.md](./docs/using-it-for-research.md).
 
 Run everything from the repo root, after the setup in the [root README](../../README.md#setup).
 
