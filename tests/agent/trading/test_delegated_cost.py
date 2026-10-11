@@ -136,28 +136,29 @@ def test_the_server_endpoint_helper_emits_per_model_usage():
 
 @pytest.mark.anyio
 async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkeypatch):
+    from app.edgar_research.fundamentals_memo import FundamentalsMemo
     from app.shared.cost import UsageSummary, compute_cost
     from app.agent.trading.infrastructure import fundamentals_port as port
 
-    async def fake_run_agent(task, system_prompt, **_):
-        return "# memo", UsageSummary()
+    async def fake_memo(ticker, as_of, **_):
+        return FundamentalsMemo(
+            text="# memo", model="gpt-5.6-luna", usage=UsageSummary(), provenance="",
+            tool_usage=[
+                ("deepseek-v4-flash", TokenUsage(input_tokens=115_681, output_tokens=11_750)),
+                ("gpt-5.6-luna", TokenUsage(input_tokens=2_000, output_tokens=300)),
+            ],
+        )
 
     logged = []
 
-    def fake_log_cost(ticker, mode, usage, model=port.AGENT_MODEL, *, run_id=None, event_id=None):
+    def fake_log_cost(ticker, mode, usage, model, *, run_id=None, event_id=None):
         logged.append((mode, model))
         return compute_cost(usage, model)
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
-    monkeypatch.setattr(port, "run_agent", fake_run_agent)
+    monkeypatch.setattr(port, "write_fundamentals_memo", fake_memo)
     monkeypatch.setattr(port, "log_cost", fake_log_cost)
-    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
-    monkeypatch.setattr(port, "AGENT_MODEL", "gpt-5.6-luna")
-
-    tools._record_delegated_usage(_header(
-        ("deepseek-v4-flash", TokenUsage(input_tokens=115_681, output_tokens=11_750)),
-        ("gpt-5.6-luna", TokenUsage(input_tokens=2_000, output_tokens=300)),
-    ))
+    monkeypatch.setattr(port, "save_output", lambda *a, **k: "vault/path")
 
     report = await port.get_fundamentals_report("ACN", date(2026, 8, 19), run_id="r1")
 
@@ -166,26 +167,6 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
     assert ("trading-fundamentals-tools", "deepseek-v4-flash") in logged
     # Priced at DeepSeek's rate, not the agent's: 115681*0.44 + 11750*1.32.
     assert by_model["deepseek-v4-flash"].usd == pytest.approx(0.066410, abs=1e-6)
-
-
-@pytest.mark.anyio
-async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
-    from app.shared.cost import UsageSummary
-    from app.agent.trading.infrastructure import fundamentals_port as port
-
-    async def fake_run_agent(task, system_prompt, **_):
-        return "# memo", UsageSummary()
-
-    monkeypatch.setattr(port, "_USE_MOCK", False)
-    monkeypatch.setattr(port, "run_agent", fake_run_agent)
-    monkeypatch.setattr(port, "log_cost", lambda *a, **k: 0.01)
-    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
-
-    tools._record_delegated_usage(
-        _Resp({USAGE_HEADER: TokenUsage(input_tokens=10).model_dump_json()})
-    )
-    report = await port.get_fundamentals_report("ACN", date(2026, 8, 19), run_id="r1")
-    assert [e.model for e in report.tool_cost_events] == [port.AGENT_MODEL]
 
 
 def test_a_report_with_the_old_single_tool_event_keeps_its_spend():
