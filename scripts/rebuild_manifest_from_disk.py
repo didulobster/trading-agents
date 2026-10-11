@@ -24,7 +24,7 @@ from app.trading.domain.validation import BatteryManifest, RunRecord
 
 # One definition of the legacy-`confidence` fallback, in the script that
 # writes manifests in the first place.
-from run_p9_battery import _quality_and_agreement
+from scripts.run_p9_battery import _quality_and_agreement
 
 COST_LOG = Path("docs/cost-log.jsonl")
 _RAW = re.compile(r"## Raw memo\s*\n+```json\n(.*?)\n```", re.S)
