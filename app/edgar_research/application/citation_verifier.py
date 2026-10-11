@@ -169,6 +169,19 @@ def _should_skip_number(raw: str, context: str) -> bool:
 # Verification
 # ---------------------------------------------------------------------------
 
+def _with_percent(values) -> list[float]:
+    """Each calculate() result, and the same result as a percent: a passing
+    call returning the fraction 0.2623 backs a memo's "26.2%"."""
+    out: list[float] = []
+    for v in values or []:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        out += [f, f * 100]
+    return out
+
+
 def _computed_forms(values) -> set[str]:
     """String forms a calculate() result may take in the answer text."""
     out: set[str] = set()
@@ -204,7 +217,7 @@ def _split_retried_rejected(
 ) -> list[dict]:
     """Rejected attempts whose result was never matched by a later passing
     calculate() call — i.e. still lacking a validated derivation."""
-    computed = list(computed_values or [])
+    computed = _with_percent(computed_values)
     out = []
     for r in rejected or []:
         try:
@@ -344,7 +357,7 @@ def verify_answer(
     Returns a VerificationReport. `unverified` is what needs a human look.
     """
     report = VerificationReport()
-    computed = _computed_forms(computed_values)
+    computed = _computed_forms(_with_percent(computed_values))
     # A rejected attempt later backed by a passing calculate() call (same
     # numeric result) is validated, regardless of whether the caller already
     # filtered it out — don't rely solely on the caller's bookkeeping.
