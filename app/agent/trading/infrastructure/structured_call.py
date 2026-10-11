@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable, NoReturn
 
 from pydantic import ValidationError
 
-from app.agent.researcher import UsageSummary
+from app.shared.cost import UsageSummary
 from app.agent.trading.domain.budget import NodeBudgetExceeded
 
 CORRECTION = (

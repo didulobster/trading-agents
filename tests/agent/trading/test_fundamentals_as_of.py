@@ -185,7 +185,7 @@ async def test_the_report_is_dated_by_the_analysis_date_not_the_wall_clock(monke
     captured = {}
 
     async def fake_run_agent(task, system_prompt, **kw):
-        from app.agent.researcher import UsageSummary
+        from app.shared.cost import UsageSummary
         captured["task"], captured["as_of"] = task, kw.get("as_of")
         return "# memo", UsageSummary()
 

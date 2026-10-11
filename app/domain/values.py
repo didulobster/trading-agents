@@ -5,6 +5,8 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, Field
 
+from app.shared.ticker import normalize_ticker
+
 # -------------------- Enums --------------------
 
 class FilingStatus(str, Enum):
@@ -26,25 +28,6 @@ def _validate_cik(v: str | int) -> str:
         raise ValueError(f"CIK must be numeric: {v!r}")
     return s.zfill(10)
 
-# First character alphanumeric: the ticker becomes a vault directory name
-# (researcher._save_output), and the old pattern `[A-Z0-9.\-]{1,10}` accepted
-# ".." — a path-traversal segment. Class shares like BRK.B and BF-B still pass.
-_TICKER_RE = re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,9}")
-
-
-def _validate_ticker(v: str) -> str:
-    s = str(v).strip().upper()
-    if not _TICKER_RE.fullmatch(s):
-        raise ValueError(f"Invalid ticker: {v!r}")
-    return s
-
-
-def normalize_ticker(v: str) -> str:
-    """Strip and upper-case a ticker, or raise ValueError if it cannot be
-    one. The single rule every entry point (HTTP, CLI) and the vault writer
-    apply."""
-    return _validate_ticker(v)
-
 def _validate_accession(v: str) -> str:
     s = v.strip()
     # SEC format: 10-2-6 digits, separated by dashes
@@ -53,7 +36,7 @@ def _validate_accession(v: str) -> str:
     return s
 
 CIK = Annotated[str, BeforeValidator(_validate_cik)]
-Ticker = Annotated[str, BeforeValidator(_validate_ticker)]
+Ticker = Annotated[str, BeforeValidator(normalize_ticker)]
 AccessionNumber = Annotated[str, BeforeValidator(_validate_accession)]
 
 # SectionPath is just a list of strings, but we name it for clarity

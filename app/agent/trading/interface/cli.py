@@ -12,7 +12,8 @@ import logging
 import sys
 from datetime import date
 
-from app.agent.researcher import _ticker_arg, vault_run
+from app.agent.researcher import vault_run
+from app.shared.ticker import ticker_arg
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph
 from app.agent.trading.infrastructure.run_log import capture_terminal_log
@@ -200,7 +201,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     parser = argparse.ArgumentParser(description="Run the trading pipeline for a single ticker")
-    parser.add_argument("ticker", type=_ticker_arg)
+    parser.add_argument("ticker", type=ticker_arg)
     parser.add_argument("--thread-id", default=None)
     parser.add_argument(
         "--as-of",

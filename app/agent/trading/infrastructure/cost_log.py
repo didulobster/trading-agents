@@ -1,7 +1,7 @@
 """Turns an already-logged LLM call into the `CostEvent` that rides in
 `TradingState.cost_events`, and writes the run-level summary line.
 
-Deliberately NOT a wrapper around `researcher.log_cost` — every port module
+Deliberately NOT a wrapper around `shared.cost.log_cost` — every port module
 already calls `log_cost(...)` directly, and several tests monkeypatch that
 exact call (`monkeypatch.setattr(port, "log_cost", ...)`) to keep from
 writing to the real `docs/cost-log.jsonl` during a run that never touches
@@ -20,7 +20,7 @@ import logging
 import uuid
 from datetime import date, datetime
 
-from app.agent.researcher import UsageSummary
+from app.shared.cost import UsageSummary
 from app.agent.trading.domain.budget import CostEvent, RunBudget, RunTermination, total_spend
 from app.shared.cost_log_path import cost_log_path, readable_logs
 

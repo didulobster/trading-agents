@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 import app.agent.researcher as researcher
 import app.agent.tools as tools
 import app.main as main
-from app.domain.values import normalize_ticker
+from app.shared.ticker import normalize_ticker, ticker_arg
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +48,8 @@ def test_the_vault_writer_refuses_a_bad_ticker_even_if_an_entry_point_let_it_thr
 
 def test_the_cli_rejects_a_bad_ticker_as_a_usage_error():
     with pytest.raises(argparse.ArgumentTypeError):
-        researcher._ticker_arg("../x")
-    assert researcher._ticker_arg("acn") == "ACN"
+        ticker_arg("../x")
+    assert ticker_arg("acn") == "ACN"
 
 
 # ---------------------------------------------------------------------------

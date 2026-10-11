@@ -136,7 +136,7 @@ def test_the_server_endpoint_helper_emits_per_model_usage():
 
 @pytest.mark.anyio
 async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkeypatch):
-    from app.agent.researcher import UsageSummary, _compute_cost
+    from app.shared.cost import UsageSummary, compute_cost
     from app.agent.trading.infrastructure import fundamentals_port as port
 
     async def fake_run_agent(task, system_prompt, **_):
@@ -146,7 +146,7 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
 
     def fake_log_cost(ticker, mode, usage, model=port.AGENT_MODEL, *, run_id=None, event_id=None):
         logged.append((mode, model))
-        return _compute_cost(usage, model)
+        return compute_cost(usage, model)
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
@@ -170,7 +170,7 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
 
 @pytest.mark.anyio
 async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
-    from app.agent.researcher import UsageSummary
+    from app.shared.cost import UsageSummary
     from app.agent.trading.infrastructure import fundamentals_port as port
 
     async def fake_run_agent(task, system_prompt, **_):

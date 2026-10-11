@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-from app.agent.researcher import UsageSummary
+from app.shared.cost import UsageSummary
 from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.infrastructure import news_digest_port
 from app.agent.trading.infrastructure.news_digest_port import (

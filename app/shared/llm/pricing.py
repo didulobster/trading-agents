@@ -1,9 +1,8 @@
 """Cost config — price per million tokens, keyed by model id.
 
 Lives here rather than in `researcher.py` because pricing is a property of
-the provider, not of the research agent: three ports and the budget
-assertions all read this table, and `researcher.py` re-exports it as
-`_MODEL_PRICING` so every existing import keeps working.
+the provider, not of the research agent: the ports and the budget
+assertions all read this table through `app.shared.cost`.
 
 Why a table at all: the per-turn budget assertions are the only thing
 standing between a prompt-bloat regression and an unbounded bill, and an

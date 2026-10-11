@@ -58,11 +58,8 @@ from app.shared.llm import (  # noqa: F401
 )
 from app.shared.llm.models import model_for, warn_if_unpriced
 
-from app.agent.researcher import (
-    UsageSummary,
-    _save_output,
-    log_cost,
-)
+from app.agent.researcher import _save_output
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.debate import (
     DebateTurn,
     DebateTurnPayload,

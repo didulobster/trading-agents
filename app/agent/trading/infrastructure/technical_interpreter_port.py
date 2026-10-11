@@ -11,7 +11,8 @@ from app.shared.llm.models import model_for, warn_if_unpriced
 TECHNICAL_MODEL = model_for("technical")
 warn_if_unpriced(TECHNICAL_MODEL, "technical")
 
-from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.agent.researcher import _save_output
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.application.technical_indicators import derive_relations
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport

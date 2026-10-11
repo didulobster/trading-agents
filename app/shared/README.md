@@ -75,8 +75,8 @@ fire today — it is carried because the retired `deepseek-chat` capped at
 8192, where an unclamped request would have failed on the final turn of a
 run already paid for.
 
-Cost config moved to `llm/pricing.py` and is re-exported from `researcher.py`
-as `_MODEL_PRICING`. `LLM_PRICING_OVERRIDES` (JSON, env) merges over it, so
+Cost config lives in `llm/pricing.py`; `cost.py` prices usage and appends the cost log.
+`LLM_PRICING_OVERRIDES` (JSON, env) merges over it, so
 a repriced model is a config change rather than a code change — and a
 malformed override raises at import rather than leaving a stale rate in
 place, because an unpriced or mispriced model makes the per-run budget

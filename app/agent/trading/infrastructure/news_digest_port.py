@@ -14,7 +14,8 @@ from app.shared.llm.models import model_for, warn_if_unpriced
 NEWS_DIGEST_MODEL = model_for("news_digest")
 warn_if_unpriced(NEWS_DIGEST_MODEL, "news")
 
-from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.agent.researcher import _save_output
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.domain.news_digest import (
