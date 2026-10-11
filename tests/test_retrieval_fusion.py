@@ -26,7 +26,7 @@ import pytest
 import eval.runner as runner
 from app.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.edgar_research.domain.chunk import Chunk
-from app.infrastructure.repositories.chunk_repo import RetrievedChunk
+from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 
 
 def _rc(cid: int, sim: float, vec: float | None = None) -> RetrievedChunk:

@@ -12,7 +12,7 @@ look like ['Part II', 'Item 9A', 'Controls and Procedures'].
 
 from __future__ import annotations
 
-from app.infrastructure.queries.corpus_status import _item_sort_key, _ITEM_LABEL
+from app.edgar_research.infrastructure.queries.corpus_status import _item_sort_key, _ITEM_LABEL
 
 
 def test_item_labels_are_recognised():

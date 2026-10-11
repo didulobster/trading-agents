@@ -19,23 +19,23 @@ from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
 from app.edgar_research.domain.values import FilingStatus
-from app.infrastructure.edgar.client import EdgarClient
-from app.infrastructure.edgar.ticker_resolver import TickerResolver
-from app.infrastructure.chunking.section_chunker import chunk_filing
-from app.infrastructure.parsing.filing_parser import parse_filing
-from app.infrastructure.queries.models import FilingDetail, FilingIssue
-from app.infrastructure.repositories.chunk_repo import ChunkRepository
-from app.infrastructure.repositories.db import close_pool, init_pool
-from app.infrastructure.repositories.document_repo import DocumentRepository
-from app.infrastructure.repositories.filing_repo import FilingRepository
-from app.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
+from app.edgar_research.infrastructure.edgar.client import EdgarClient
+from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
+from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
+from app.edgar_research.infrastructure.parsing.filing_parser import parse_filing
+from app.edgar_research.infrastructure.queries.models import FilingDetail, FilingIssue
+from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
+from app.edgar_research.infrastructure.repositories.db import close_pool, init_pool
+from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
+from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
+from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.application.citations import format_citation_tag
 from eval.runner import DEFAULT_MODE
-from app.infrastructure.repositories.metrics_repo import (
+from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
-from app.infrastructure.repositories.section_repo import SectionRepository
+from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
 from eval.extraction_report import serialize_extraction_result
 from eval.runner import serialize_result
 
@@ -230,11 +230,11 @@ async def _smoke_persist(ticker: str) -> None:
     from app.edgar_research.domain.listed_security import ListedSecurity
     from app.edgar_research.domain.filing import Filing
     from app.edgar_research.domain.values import FilingStatus
-    from app.infrastructure.repositories.db import init_pool, close_pool
-    from app.infrastructure.repositories.listed_security_repo import (
+    from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
+    from app.edgar_research.infrastructure.repositories.listed_security_repo import (
         ListedSecurityRepository,
     )
-    from app.infrastructure.repositories.filing_repo import FilingRepository
+    from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 
     await init_pool()
     try:
@@ -267,8 +267,8 @@ async def _smoke_persist(ticker: str) -> None:
         await close_pool()
 
 async def _corpus_status(ticker: str | None, verbose: bool) -> None:
-    from app.infrastructure.repositories.db import init_pool, close_pool
-    from app.infrastructure.queries.corpus_status import CorpusStatusQuery
+    from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
+    from app.edgar_research.infrastructure.queries.corpus_status import CorpusStatusQuery
 
     await init_pool()
     try:

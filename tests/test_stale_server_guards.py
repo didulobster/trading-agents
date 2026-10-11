@@ -70,7 +70,7 @@ def test_the_commit_is_snapshotted_at_import_not_recomputed():
     exactly the comparison that needs to be able to fail."""
     import inspect
 
-    from app.infrastructure import build_info as bi
+    from app.edgar_research.infrastructure import build_info as bi
 
     source = inspect.getsource(bi)
     assert "COMMIT: str | None = _head()" in source
@@ -78,7 +78,7 @@ def test_the_commit_is_snapshotted_at_import_not_recomputed():
 
 
 def test_git_being_unavailable_is_not_an_error(monkeypatch):
-    from app.infrastructure import build_info as bi
+    from app.edgar_research.infrastructure import build_info as bi
 
     monkeypatch.setattr(bi, "_git", lambda *a: None)
     assert bi._head() is None
@@ -116,7 +116,7 @@ def _reset():
 
 @pytest.mark.anyio
 async def test_a_mismatched_server_is_called_out(monkeypatch, caplog):
-    monkeypatch.setattr("app.infrastructure.build_info.COMMIT", "aaaaaaa")
+    monkeypatch.setattr("app.edgar_research.infrastructure.build_info.COMMIT", "aaaaaaa")
     with caplog.at_level(logging.WARNING, logger=tools.logger.name):
         await tools._warn_if_server_is_stale(_Http(_Resp({"commit": "bbbbbbb"})))
     assert "running bbbbbbb" in caplog.text and "aaaaaaa" in caplog.text
@@ -133,7 +133,7 @@ async def test_a_server_with_no_health_endpoint_is_called_out(monkeypatch, caplo
 
 @pytest.mark.anyio
 async def test_a_matching_server_is_silent(monkeypatch, caplog):
-    monkeypatch.setattr("app.infrastructure.build_info.COMMIT", "aaaaaaa")
+    monkeypatch.setattr("app.edgar_research.infrastructure.build_info.COMMIT", "aaaaaaa")
     with caplog.at_level(logging.WARNING, logger=tools.logger.name):
         await tools._warn_if_server_is_stale(_Http(_Resp({"commit": "aaaaaaa"})))
     assert caplog.text == ""
@@ -149,7 +149,7 @@ async def test_the_check_runs_once_per_process_not_per_tool_call(monkeypatch):
             calls.append(url)
             return _Resp({"commit": "aaaaaaa"})
 
-    monkeypatch.setattr("app.infrastructure.build_info.COMMIT", "aaaaaaa")
+    monkeypatch.setattr("app.edgar_research.infrastructure.build_info.COMMIT", "aaaaaaa")
     http = _Counting(None)
     for _ in range(5):
         await tools._warn_if_server_is_stale(http)

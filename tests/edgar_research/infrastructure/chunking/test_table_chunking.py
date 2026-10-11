@@ -10,13 +10,13 @@ so every later piece is a column of figures with no years on it. On
 excerpts that contained it.
 """
 
-from app.infrastructure.chunking.section_chunker import (
+from app.edgar_research.infrastructure.chunking.section_chunker import (
     _ENCODER,
     _split_headings,
     _table_context,
     chunk_filing,
 )
-from app.infrastructure.parsing.models import ParsedSection
+from app.edgar_research.infrastructure.parsing.models import ParsedSection
 
 
 def _rows(n: int, prefix: str = "Line item") -> list[str]:

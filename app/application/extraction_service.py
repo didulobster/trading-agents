@@ -6,7 +6,7 @@ from app.shared.llm import get_client
 from app.shared.llm.models import model_for
 from pydantic import BaseModel, field_validator
 
-from app.infrastructure.repositories.chunk_repo import RetrievedChunk
+from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 
 
 class FinancialMetrics(BaseModel):

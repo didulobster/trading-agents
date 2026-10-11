@@ -18,7 +18,7 @@ from pathlib import Path
 
 from bs4 import XMLParsedAsHTMLWarning
 
-from app.infrastructure.parsing.filing_parser import parse_filing
+from app.edgar_research.infrastructure.parsing.filing_parser import parse_filing
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 

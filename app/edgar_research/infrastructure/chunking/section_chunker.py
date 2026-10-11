@@ -1,7 +1,7 @@
 import re
 
 import tiktoken
-from app.infrastructure.parsing.models import ParsedSection
+from app.edgar_research.infrastructure.parsing.models import ParsedSection
 from .models import ChunkDraft
 
 # cl100k_base matches GPT-4 / text-embedding-3-* tokenization closely enough
