@@ -3,15 +3,22 @@ published module, EDGAR Research never imports Trading, and the shared
 kernel imports neither (see docs/adr/0001-two-contexts-one-package.md).
 
 `app/main.py` is the composition root that mounts both, so it is exempt.
+Each context's tests follow its code's rule: a Trading test reaching an
+EDGAR Research private would pin what the seam is meant to hide.
 """
 
 import ast
 from pathlib import Path
 
-APP = Path(__file__).resolve().parents[1] / "app"
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+APP = REPO / "app"
 TRADING = APP / "trading"
 EDGAR_RESEARCH = APP / "edgar_research"
 SHARED = APP / "shared"
+TRADING_TESTS = REPO / "tests" / "trading"
+EDGAR_RESEARCH_TESTS = REPO / "tests" / "edgar_research"
 PUBLISHED = "app.edgar_research.fundamentals_memo"
 
 
@@ -27,9 +34,9 @@ def _imported_names(root: Path) -> list[tuple[str, str]]:
     for path in root.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Import):
-                found += [(str(path.relative_to(APP)), a.name) for a in node.names]
+                found += [(str(path.relative_to(REPO)), a.name) for a in node.names]
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                found += [(str(path.relative_to(APP)), f"{node.module}.{a.name}") for a in node.names]
+                found += [(str(path.relative_to(REPO)), f"{node.module}.{a.name}") for a in node.names]
     return found
 
 
@@ -37,17 +44,19 @@ def _under(name: str, package: str) -> bool:
     return name == package or name.startswith(package + ".")
 
 
-def test_trading_reaches_edgar_research_only_through_the_published_module():
+@pytest.mark.parametrize("root", [TRADING, TRADING_TESTS], ids=["code", "tests"])
+def test_trading_reaches_edgar_research_only_through_the_published_module(root):
     offenders = [
-        (path, name) for path, name in _imported_names(TRADING)
+        (path, name) for path, name in _imported_names(root)
         if _under(name, "app.edgar_research") and not _under(name, PUBLISHED)
     ]
     assert offenders == []
 
 
-def test_edgar_research_never_imports_trading():
+@pytest.mark.parametrize("root", [EDGAR_RESEARCH, EDGAR_RESEARCH_TESTS], ids=["code", "tests"])
+def test_edgar_research_never_imports_trading(root):
     offenders = [
-        (path, name) for path, name in _imported_names(EDGAR_RESEARCH)
+        (path, name) for path, name in _imported_names(root)
         if _under(name, "app.trading")
     ]
     assert offenders == []

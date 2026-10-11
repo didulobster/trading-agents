@@ -1223,10 +1223,10 @@ def test_the_debate_model_follows_the_project_wide_setting():
     node."""
     import os
 
-    from app.edgar_research.agent.researcher import AGENT_MODEL
+    from app.shared.llm.models import DEFAULT_MODEL_ENV
 
     if not os.getenv("TRADING_DEBATE_MODEL"):
-        assert port.DEBATE_MODEL == AGENT_MODEL
+        assert port.DEBATE_MODEL == os.environ[DEFAULT_MODEL_ENV]
 
 
 def test_the_debate_model_is_priced_so_the_budget_assertion_can_fire():
