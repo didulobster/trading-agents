@@ -55,17 +55,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os  # noqa: E402
 import re
 import shutil
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
-
-import os  # noqa: E402
 
 # MOCK_FUNDAMENTALS is read at import time by fundamentals_port, and the
 # pipeline runs in a subprocess that inherits this environment. Set before
@@ -76,6 +71,10 @@ os.environ["MOCK_FUNDAMENTALS"] = "1"
 # directory (for `run_p9_battery`) both have to be importable.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from app.shared.config import load_env
+
+load_env()
 
 from run_p9_battery import run_one  # noqa: E402
 

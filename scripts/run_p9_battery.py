@@ -22,9 +22,9 @@ from datetime import date, datetime, timezone
 from importlib import metadata
 from pathlib import Path
 
-from dotenv import load_dotenv
+from app.shared.config import load_env
 
-load_dotenv(override=True)
+load_env()
 
 import os  # noqa: E402
 
