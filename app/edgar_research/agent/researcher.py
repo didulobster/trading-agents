@@ -6,14 +6,11 @@ Runs a tool-use conversation: the model plans, calls tools, reads results,
 and continues until it produces a final answer or hits the turn limit.
  
 Usage:
-    # Step-1 loop verification (stubbed tools, test prompt):
-    uv run python -m app.edgar_research.agent.researcher --test
- 
     # Full research run:
     uv run python -m app.edgar_research.agent.researcher AVGO
  
     # News assessment against watchlist thesis:
-    uv run python -m app.edgar_research.agent.researcher --news AVGO "Broadcom announces 10B share repurchase"
+    uv run python -m app.edgar_research.agent.researcher AVGO --news "Broadcom announces 10B share repurchase"
 """
 
 from __future__ import annotations
@@ -36,7 +33,7 @@ from typing import Callable
 import yaml
 
 from datetime import date, datetime
-from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
+from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.edgar_research.application.memo_verifier import verify_memo
 from app.shared.llm import MODEL_PRICING, get_client
@@ -495,14 +492,7 @@ async def run_agent(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDGAR research agent")
-    parser.add_argument(
-        "ticker", nargs="?", type=ticker_arg, help="Ticker to research (omit with --test)"
-    )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Run the step-1 loop verification against stubbed tools",
-    )
+    parser.add_argument("ticker", type=ticker_arg, help="Ticker to research")
     parser.add_argument(
         "--news",
         type=str,
@@ -512,35 +502,22 @@ def main() -> None:
     args = parser.parse_args()
     today = datetime.today().isoformat()
     task = f"Today's date is {today}. "
-    if args.test:
-        task += "Run the test task described in your instructions."
-        prompt = STEP1_TEST_PROMPT
-        # Assigned on every branch. It was not: `--test` left it unbound and
-        # the `mode != "test"` check below raised UnboundLocalError after the
-        # run had already completed — on the flag this module's own docstring
-        # advertises first.
-        mode = "test"
-    elif args.ticker and args.news:
-        ticker = args.ticker.upper()
+    ticker = args.ticker.upper()
+    if args.news:
         prompt = _build_news_prompt(ticker, args.news)
         task += f"Assess this news for {ticker}:\n\n{args.news}"
         mode = "news"
-    elif args.ticker:
-        task += f"Run the full research checklist for {args.ticker}."
+    else:
+        task += f"Run the full research checklist for {ticker}."
         prompt = ANALYST_SYSTEM_PROMPT
         mode = "research"
-    else:
-        parser.error("provide a ticker, or use --test")
 
     result, usage = asyncio.run(run_agent(task, prompt))
     print(result)
 
-    cost = log_cost(args.ticker.upper(), mode, usage, AGENT_MODEL) if args.ticker else None
-
-    # Save to file (skip for test mode)
-    if mode != "test" and args.ticker:
-        path = save_memo(result, args.ticker.upper(), mode, cost_usd=cost)
-        _trace(f"\nSaved to {path}")
+    cost = log_cost(ticker, mode, usage, AGENT_MODEL)
+    path = save_memo(result, ticker, mode, cost_usd=cost)
+    _trace(f"\nSaved to {path}")
 
     _print_usage_summary(
         usage.input_tokens, usage.cache_write_tokens,

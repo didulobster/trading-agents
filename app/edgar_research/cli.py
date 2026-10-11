@@ -8,7 +8,7 @@ import asyncio  # noqa: E402
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -30,14 +30,11 @@ from app.edgar_research.infrastructure.repositories.document_repo import Documen
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.edgar_research.application.citations import format_citation_tag
-from app.edgar_research.eval.runner import DEFAULT_MODE
 from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
 from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
-from app.edgar_research.eval.extraction_report import serialize_extraction_result
-from app.edgar_research.eval.runner import serialize_result
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -114,12 +111,6 @@ def inspect_chunks(
             preview += "…"
         typer.echo(preview)
 
-@app.command(name="smoke-persist")
-def smoke_persist(ticker: str = "AAPL"):
-    """Smoke test the vertical slice: Insert one ListedSecurity + Filing to verify the repository layer."""
-    import asyncio
-    asyncio.run(_smoke_persist(ticker))
-
 @app.command(name="ingest")
 def ingest_cmd(
     ticker: str,
@@ -140,30 +131,6 @@ def corpus_status_cmd(
 ):
     """Print a summary of what's actually in the corpus."""
     asyncio.run(_corpus_status(ticker, verbose))
-
-@app.command(name="eval")
-def eval_cmd(
-    test_set: Path = Path("app/edgar_research/eval/test_set.yaml"),
-    mode: str = typer.Option(
-        DEFAULT_MODE, "--mode",
-        help="full (what /ask does) | hybrid (what extraction does) | vector (baseline)",
-    ),
-):
-    """Run the evaluation harness against the current retrieval pipeline.
-
-    Defaults to `full`, the path POST /ask actually takes. The old
-    --decompose/--hybrid flags selected two paths nothing in production
-    used, and no flag combination could reach the real one.
-    """
-    asyncio.run(_run_eval(test_set, 10, mode))
-
-@app.command(name="eval-extraction")
-def eval_extraction_cmd(
-    test_set: Path = Path("app/edgar_research/eval/extraction_truth.yaml"),
-    k: int = typer.Option(5, "--k"),
-):
-    """Validate extraction output against hand-verified filing numbers."""
-    asyncio.run(_run_extraction_eval(test_set, k))
 
 @app.command(name="extract-metrics")
 def extract_metrics_cmd(
@@ -197,74 +164,6 @@ async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None
         for f in filings:
             path = await client.download_filing(cik, f)
             typer.echo(f"  cached at {path}  ({path.stat().st_size:,} bytes)")
-
-def _prune_old_results(prefix: str, keep: int = 10) -> None:
-    files = sorted(Path("eval").glob(f"{prefix}-*.json"), key=lambda p: p.name)
-    for stale in files[:-keep]:
-        stale.unlink()
-
-
-async def _run_eval(test_set_path: Path, k, mode: str) -> None:
-    from app.edgar_research.eval.runner import run_eval
-    from app.edgar_research.eval.report import report
-
-    await init_pool()
-    try:
-        results = await run_eval(test_set_path, k, mode)
-        print(report(results))
-
-        # Save raw results for diffing across runs
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"app/edgar_research/eval/results-{timestamp}.json")
-        results_path.write_text(json.dumps(
-            [serialize_result(r) for r in results], indent=2
-        ))
-        print(f"\nRaw results saved to {results_path}")
-        _prune_old_results("results")
-    finally:
-        await close_pool()
-
-
-async def _smoke_persist(ticker: str) -> None:
-    from datetime import date
-    from app.edgar_research.domain.listed_security import ListedSecurity
-    from app.edgar_research.domain.filing import Filing
-    from app.edgar_research.domain.values import FilingStatus
-    from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
-    from app.edgar_research.infrastructure.repositories.listed_security_repo import (
-        ListedSecurityRepository,
-    )
-    from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
-
-    await init_pool()
-    try:
-        sec_repo = ListedSecurityRepository()
-        fil_repo = FilingRepository()
-
-        security = ListedSecurity(
-            cik="320193", ticker=ticker, exchange="NASDAQ", name="Apple Inc."
-        )
-        security = await sec_repo.upsert(security)
-        typer.echo(f"Saved security: id={security.id} cik={security.cik}")
-
-        filing = Filing(
-            security_id=security.id,
-            filing_type="10-K",
-            filed_date=date(2022, 10, 28),
-            period_of_report=date(2022, 9, 24),
-            accession_number="0000320193-22-000108",
-            status=FilingStatus.DISCOVERED,
-        )
-        filing = await fil_repo.upsert(filing)
-        typer.echo(f"Saved filing: id={filing.id} status={filing.status}")
-
-        await fil_repo.mark_status(filing.id, FilingStatus.DOWNLOADED)
-        typer.echo("Transitioned to DOWNLOADED")
-
-        roundtrip = await fil_repo.get_by_accession(filing.accession_number)
-        typer.echo(f"Roundtrip: {roundtrip}")
-    finally:
-        await close_pool()
 
 async def _corpus_status(ticker: str | None, verbose: bool) -> None:
     from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
@@ -479,26 +378,6 @@ async def _run_extract_metrics(ticker: str, k: int) -> None:
     finally:
         await close_pool()
 
-
-# async wrapper — matches _run_eval structure
-async def _run_extraction_eval(test_set_path: Path, k: int) -> None:
-    from app.edgar_research.eval.extract_runner import run_extraction_eval
-    from app.edgar_research.eval.extraction_report import extraction_report
-
-    await init_pool()
-    try:
-        results = await run_extraction_eval(test_set_path, k)
-        print(extraction_report(results))
-
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"app/edgar_research/eval/extraction-results-{timestamp}.json")
-        results_path.write_text(json.dumps(
-            [serialize_extraction_result(r) for r in results], indent=2
-        ))
-        print(f"\nRaw results saved to {results_path}")
-        _prune_old_results("extraction-results")
-    finally:
-        await close_pool()
 
 if __name__ == "__main__":
     app()

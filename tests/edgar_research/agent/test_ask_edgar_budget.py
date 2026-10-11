@@ -99,8 +99,30 @@ def test_the_cap_is_configurable_without_a_code_change():
 async def test_the_last_permitted_call_is_the_nth_not_the_nth_minus_one(monkeypatch):
     """Off-by-one guard. With the cap at N the agent gets N calls, not N-1:
     the check is `>= cap` against a counter incremented AFTER the check
-    passes. Stubbed transport so this asserts the boundary, not the network."""
-    monkeypatch.setattr(tools, "USE_STUBS", True)
+    passes. A fake transport, so this asserts the boundary, not the network."""
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+        text = '{"answer": "a", "chunks": []}'
+
+        def json(self):
+            return {"answer": "a", "chunks": []}
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, **kw):
+            return _Resp()
+
+        async def post(self, url, json=None, **kw):
+            return _Resp()
+
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: _Client())
     tools._state().ask_edgar_calls = tools.ASK_EDGAR_MAX_CALLS - 1
 
     allowed = await tools._dispatch("ask_edgar", {"question": "the Nth call"})

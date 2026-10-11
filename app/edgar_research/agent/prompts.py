@@ -6,23 +6,6 @@ definitions in tools.py. Iterate on the research methodology here
 without touching orchestration logic in researcher.py.
 """
 
-# ---------------------------------------------------------------------------
-# Step-1 test prompt: used to verify the orchestration loop dispatches tool
-# calls correctly against stubbed tools. Keep it for regression-testing the
-# loop after changes.
-# ---------------------------------------------------------------------------
-
-STEP1_TEST_PROMPT = """You are testing a tool-use loop. You have access to
-research tools for SEC filings, but most are stubbed with fake data right
-now — treat their output as real for the purpose of this test.
-
-Your task: call check_corpus for AVGO, then ask_edgar one question about
-AVGO's revenue, then use calculate to compute what percentage 25484 is of
-63887, then summarize what you found in 2-3 sentences.
-
-Always use calculate for arithmetic — never compute percentages yourself.
-"""
-
 
 # ---------------------------------------------------------------------------
 # The real analyst prompt. Encodes the 12-item research checklist derived from

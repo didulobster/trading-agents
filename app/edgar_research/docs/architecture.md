@@ -198,7 +198,7 @@ FastAPI router (`api.py`, mounted by `app/main.py`). All endpoints are JSON; the
 
 
 ## Evaluation
-Retrieval quality is measured by an evaluation harness (`eval/`) against a hand-curated test set of 8 questions across 5 categories:
+Retrieval quality was measured by an evaluation harness (`eval/`) against a hand-curated test set of 8 questions across 5 categories. The harness was removed on 2026-10-11: its gold sets were chunk ids, which change on every re-ingest and once inverted a verdict, and the test set was never committed. Retrieval changes are now measured by answer content, with the probes in `scripts/`. The numbers below are the record of what it measured:
 - `numeric_table` (1 question)
 - `numeric_prose` (2 questions)
 - `narrative_single_section` (1 question)

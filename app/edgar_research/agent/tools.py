@@ -481,11 +481,8 @@ def _validate_tool_inputs(name: str, inputs: dict) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Dispatch. Each branch prints its call/result so you can watch the agent
-# reason. Replace the stub branches in step 2.
+# reason.
 # ---------------------------------------------------------------------------
-
-# Toggle to False in step 2 once the HTTP branches are wired and tested.
-USE_STUBS = False
 
 
 async def execute_tool(name: str, inputs: dict) -> str:
@@ -659,11 +656,6 @@ async def _dispatch(name: str, inputs: dict) -> str:
             )
         run.ask_edgar_calls += 1
 
-    if USE_STUBS:
-        return _stub(name, inputs)
-
-    # STEP 2: real HTTP calls. Un-stub by setting USE_STUBS = False and
-    # confirming each endpoint below matches your FastAPI routes.
     # The server's optional shared secret (see main.require_api_key). Sent
     # only when configured, so an unauthenticated local server is unchanged.
     api_key = os.getenv("APP_API_KEY")
@@ -671,7 +663,6 @@ async def _dispatch(name: str, inputs: dict) -> str:
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as http:
         await _warn_if_server_is_stale(http)
         if name == "check_corpus":
-            # STEP 2: confirm this route/param exists, or add it to main.py
             resp = await http.get(
                 f"{API_BASE}/corpus-status",
                 params={"ticker": inputs["ticker"], **_as_of_bound()},
@@ -783,23 +774,6 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
     return f"Unknown tool: {name}"
 
-
-def _stub(name: str, inputs: dict) -> str:
-    if name == "check_corpus":
-        return (
-            "STUB: AVGO has 3 filings, 2023-12-14 to 2025-12-18, 487 chunks."
-        )
-    if name == "ask_edgar":
-        return (
-            "STUB ANSWER: Broadcom's semiconductor solutions revenue was "
-            "$36,858 million in FY2025 vs $30,096 million in FY2024, +22%. "
-            "[AVGO 10-K 2025 §Item 7]"
-        )
-    if name == "ingest_ticker":
-        return f"STUB: ingested {inputs.get('ticker')}, {inputs.get('limit', 3)} filings."
-    if name == "extract_metrics":
-        return "STUB: revenue=63887, gross_margin_pct=68.0, confidence=stated"
-    return f"Unknown tool: {name}"
 
 # ---------------------------------------------------------------------------
 # 2. Validator — rejects literals the model didn't account for

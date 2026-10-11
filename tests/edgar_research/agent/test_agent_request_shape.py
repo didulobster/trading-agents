@@ -142,19 +142,6 @@ async def test_the_memo_turns_are_forbidden_from_calling_a_tool(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# `--test` no longer crashes after the run
-# ---------------------------------------------------------------------------
-
-def test_the_test_flag_assigns_a_mode(monkeypatch):
-    """`mode` was unbound on this branch, so `mode != "test"` raised
-    UnboundLocalError after the run had already completed and been paid for."""
-    import inspect
-    source = inspect.getsource(researcher.main)
-    test_branch = source.split("if args.test:")[1].split("elif")[0]
-    assert 'mode = "test"' in test_branch
-
-
-# ---------------------------------------------------------------------------
 # A response with no content blocks
 # ---------------------------------------------------------------------------
 
