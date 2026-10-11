@@ -185,14 +185,14 @@ async def test_the_report_is_dated_by_the_analysis_date_not_the_wall_clock(monke
     captured = {}
 
     async def fake_run_agent(task, system_prompt, **kw):
-        from app.agent.researcher import UsageSummary
+        from app.shared.cost import UsageSummary
         captured["task"], captured["as_of"] = task, kw.get("as_of")
         return "# memo", UsageSummary()
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
     monkeypatch.setattr(port, "log_cost", lambda *a, **k: 0.01)
-    monkeypatch.setattr(port, "_save_output", lambda *a, **k: "vault/path")
+    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
     monkeypatch.setattr(port, "get_delegated_usage", lambda: {})
     monkeypatch.setattr(port, "_CACHE_DIR", __import__("pathlib").Path("/tmp/_fundamentals_test"))
 

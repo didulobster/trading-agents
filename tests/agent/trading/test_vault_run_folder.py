@@ -6,14 +6,14 @@ stacks. `technical` and `fundamentals` save from inside their nodes while
 the graph is still executing; `sentiment`, `decision` and the debate
 transcript save from the CLI after `ainvoke` returns. Anything derived per
 call splits them, so this exercises both halves rather than calling
-`_save_output` five times in a row.
+`save_output` five times in a row.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
 
-import app.agent.researcher as researcher
+from app.shared import vault
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, DebateTurnPayload
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict, EvidenceQuality
 from app.agent.trading.domain.news_digest import NewsDigest, NewsItem, SentimentSummary
@@ -118,9 +118,9 @@ def _result() -> dict:
 
 
 def test_mid_run_and_end_of_run_artifacts_share_one_folder(tmp_path, monkeypatch):
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
 
-    with researcher.vault_run(STARTED):
+    with vault.vault_run(STARTED):
         # written from inside technical_node, mid-graph
         technical = save_technical_report(_technical(), cost_usd=0.001)
         # written from the CLI once ainvoke has returned
@@ -139,9 +139,9 @@ def test_mid_run_and_end_of_run_artifacts_share_one_folder(tmp_path, monkeypatch
 
 
 def test_the_debate_transcript_joins_its_run(tmp_path, monkeypatch):
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
 
-    with researcher.vault_run(STARTED):
+    with vault.vault_run(STARTED):
         transcript = save_debate_transcript("acn", [_turn()], "round_cap")
 
     assert transcript == (
@@ -154,9 +154,9 @@ def test_a_partial_run_writes_only_what_it_produced(tmp_path, monkeypatch):
     """`--only technical` has no digest and no debate. The folder should hold
     what the run actually made, and the run log rides with the memo instead
     of the sentiment report."""
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
 
-    with researcher.vault_run(STARTED):
+    with vault.vault_run(STARTED):
         save_technical_report(_technical())
         _save_vault_artifacts(
             {"ticker": "ACN", "decision_memo": _memo()}, "the captured run log"
@@ -179,12 +179,12 @@ def test_a_failed_verification_memo_saves_from_inside_the_graph_with_a_banner(
     the graph is still executing, not from the CLI after ainvoke returns —
     and lands in the SAME run folder, distinctly named so it never
     collides with a successful ACN-decision.md."""
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
     verification = MemoVerification(
         passed=False, unbacked_numbers=["91.4"], unresolved_references=["RF99"],
     )
 
-    with researcher.vault_run(STARTED):
+    with vault.vault_run(STARTED):
         path = save_failed_decision_memo(_memo(), verification)
 
     run_dir = tmp_path / "ACN" / "20260822" / "2026-0822-070153"

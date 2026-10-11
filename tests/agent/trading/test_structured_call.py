@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from app.agent.researcher import UsageSummary
+from app.shared.cost import UsageSummary
 from app.agent.trading.domain.budget import NodeBudgetExceeded
 from app.agent.trading.infrastructure.structured_call import (
     accumulate,

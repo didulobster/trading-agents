@@ -17,7 +17,7 @@ import pytest
 import app.agent.tools as tools
 from app.agent.trading.domain.budget import CostEvent, RunBudget, total_spend
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
-from app.domain.token_usage import (
+from app.shared.token_usage import (
     USAGE_HEADER,
     TokenUsage,
     decode_usage_header,
@@ -136,7 +136,7 @@ def test_the_server_endpoint_helper_emits_per_model_usage():
 
 @pytest.mark.anyio
 async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkeypatch):
-    from app.agent.researcher import UsageSummary, _compute_cost
+    from app.shared.cost import UsageSummary, compute_cost
     from app.agent.trading.infrastructure import fundamentals_port as port
 
     async def fake_run_agent(task, system_prompt, **_):
@@ -146,12 +146,12 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
 
     def fake_log_cost(ticker, mode, usage, model=port.AGENT_MODEL, *, run_id=None, event_id=None):
         logged.append((mode, model))
-        return _compute_cost(usage, model)
+        return compute_cost(usage, model)
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
     monkeypatch.setattr(port, "log_cost", fake_log_cost)
-    monkeypatch.setattr(port, "_save_output", lambda *a, **k: "vault/path")
+    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
     monkeypatch.setattr(port, "AGENT_MODEL", "gpt-5.6-luna")
 
     tools._record_delegated_usage(_header(
@@ -170,7 +170,7 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
 
 @pytest.mark.anyio
 async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
-    from app.agent.researcher import UsageSummary
+    from app.shared.cost import UsageSummary
     from app.agent.trading.infrastructure import fundamentals_port as port
 
     async def fake_run_agent(task, system_prompt, **_):
@@ -179,7 +179,7 @@ async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
     monkeypatch.setattr(port, "log_cost", lambda *a, **k: 0.01)
-    monkeypatch.setattr(port, "_save_output", lambda *a, **k: "vault/path")
+    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
 
     tools._record_delegated_usage(
         _Resp({USAGE_HEADER: TokenUsage(input_tokens=10).model_dump_json()})

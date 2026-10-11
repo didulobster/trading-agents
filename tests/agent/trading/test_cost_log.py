@@ -56,7 +56,7 @@ def _isolated_cost_log(tmp_path, monkeypatch):
 
 
 def _log_path():
-    from app.infrastructure.cost_log_path import cost_log_path
+    from app.shared.cost_log_path import cost_log_path
 
     return cost_log_path()
 
@@ -157,7 +157,7 @@ def test_the_path_follows_the_repo_not_the_working_directory(monkeypatch, tmp_pa
     log_run_summary never read — and that reconciliation is what catches
     spend a crashed node never returned to state."""
     import os
-    from app.infrastructure.cost_log_path import cost_log_dir
+    from app.shared.cost_log_path import cost_log_dir
 
     monkeypatch.delenv("COST_LOG_DIR", raising=False)
     here = cost_log_dir()
@@ -169,7 +169,7 @@ def test_the_path_follows_the_repo_not_the_working_directory(monkeypatch, tmp_pa
 def test_one_file_per_month(monkeypatch):
     from datetime import date
 
-    from app.infrastructure.cost_log_path import cost_log_path
+    from app.shared.cost_log_path import cost_log_path
 
     monkeypatch.delenv("COST_LOG_DIR", raising=False)
     assert cost_log_path(date(2026, 9, 12)).name == "cost-log-2026-09.jsonl"
@@ -181,7 +181,7 @@ def test_a_run_that_straddles_a_month_boundary_is_still_reconcilable(monkeypatch
     that starts on the 31st and ends on the 1st has lines in two files."""
     from datetime import date
 
-    from app.infrastructure.cost_log_path import readable_logs
+    from app.shared.cost_log_path import readable_logs
 
     monkeypatch.setenv("COST_LOG_DIR", str(tmp_path))
     (tmp_path / "cost-log-2026-08.jsonl").write_text("")
@@ -194,7 +194,7 @@ def test_the_pre_rotation_file_stays_reachable(monkeypatch, tmp_path):
     """Every run before this change wrote to docs/cost-log.jsonl."""
     from datetime import date
 
-    from app.infrastructure.cost_log_path import readable_logs
+    from app.shared.cost_log_path import readable_logs
 
     monkeypatch.setenv("COST_LOG_DIR", str(tmp_path))
     (tmp_path / "cost-log.jsonl").write_text("")

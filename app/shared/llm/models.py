@@ -11,7 +11,7 @@ variable: every other role falls back to it when its own variable is unset.
 One knob still configures the whole pipeline; ten knobs are there when a
 role needs to differ.
 
-    uv run python -m app.infrastructure.llm.models
+    uv run python -m app.shared.llm.models
 
 prints the resolved table — role, variable, model, provider, priced — which
 is the fastest way to answer "what is this run actually going to use".
@@ -22,8 +22,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from app.config import require_env
-from app.infrastructure.llm.pricing import MODEL_PRICING
+from app.shared.config import require_env
+from app.shared.llm.pricing import MODEL_PRICING
 
 # The project-wide default. Required: there is no sensible built-in model id
 # to fall back to, and guessing one would mean spending money on a model
@@ -117,12 +117,12 @@ def warn_if_unpriced(model: str, label: str, budget_usd: float | None = None) ->
     print(
         f"[{label}] WARNING: no pricing configured for {model} — its calls "
         f"will log cost as null and {budget}. Add it to MODEL_PRICING in "
-        f"app/infrastructure/llm/pricing.py, or set LLM_PRICING_OVERRIDES."
+        f"app/shared/llm/pricing.py, or set LLM_PRICING_OVERRIDES."
     )
 
 
 def describe() -> str:
-    from app.infrastructure.llm.client import resolve_provider
+    from app.shared.llm.client import resolve_provider
 
     rows = []
     for role in ROLES:
@@ -149,7 +149,7 @@ def describe() -> str:
 
 
 if __name__ == "__main__":
-    from app.config import load_env
+    from app.shared.config import load_env
 
     load_env()
     print(describe())

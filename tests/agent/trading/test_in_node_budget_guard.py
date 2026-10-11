@@ -17,11 +17,12 @@ from types import SimpleNamespace
 import pytest
 
 import app.agent.researcher as researcher
+from app.shared.cost import UsageSummary
 import app.agent.trading.application.nodes as nodes
 import app.agent.trading.infrastructure.fundamentals_port as port
 from app.agent.trading.domain.budget import CostEvent, RunBudget
 from app.agent.trading.domain.decision_memo import Verdict
-from app.domain.token_usage import TokenUsage
+from app.shared.token_usage import TokenUsage
 
 from tests.agent.trading.test_risk_verdict_sampling import (
     _memo,
@@ -175,7 +176,7 @@ async def test_without_a_check_the_loop_is_unchanged(agent, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _agent_usage(input_tokens: int = 0):
-    u = researcher.UsageSummary()
+    u = UsageSummary()
     u.input_tokens = input_tokens
     return u
 

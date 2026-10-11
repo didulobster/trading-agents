@@ -3,15 +3,16 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.infrastructure.llm import get_client
-from app.infrastructure.llm.models import model_for, warn_if_unpriced
+from app.shared.llm import get_client
+from app.shared.llm.models import model_for, warn_if_unpriced
 
 # Its own knob (TRADING_TECHNICAL_MODEL), defaulting to the
 # project-wide model — which is all this role had before.
 TECHNICAL_MODEL = model_for("technical")
 warn_if_unpriced(TECHNICAL_MODEL, "technical")
 
-from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.shared.vault import save_output
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.application.technical_indicators import derive_relations
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.technical_report import TechnicalIndicators, TechnicalReport
@@ -79,7 +80,9 @@ async def interpret_indicators(
     usage.cache_read_tokens = u.cache_read_input_tokens
     usage.output_tokens = u.output_tokens
     event_id = new_event_id("technical")
-    cost = log_cost(ticker, "trading-technical", usage, run_id=run_id, event_id=event_id)
+    cost = log_cost(
+        ticker, "trading-technical", usage, model=TECHNICAL_MODEL, run_id=run_id, event_id=event_id,
+    )
     cost_event = record_cost_event(event_id, "technical", usage, TECHNICAL_MODEL, cost)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
@@ -231,4 +234,6 @@ def _format_technical_markdown(report: TechnicalReport) -> str:
 
 def save_technical_report(report: TechnicalReport, cost_usd: float | None = None) -> Path:
     content = _format_technical_markdown(report)
-    return _save_output(content, report.ticker.upper(), "technical", cost_usd=cost_usd)
+    return save_output(
+        content, report.ticker.upper(), "technical", cost_usd=cost_usd, model=TECHNICAL_MODEL,
+    )

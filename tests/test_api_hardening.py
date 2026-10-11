@@ -16,10 +16,10 @@ import argparse
 import pytest
 from fastapi.testclient import TestClient
 
-import app.agent.researcher as researcher
+from app.shared import vault
 import app.agent.tools as tools
 import app.main as main
-from app.domain.values import normalize_ticker
+from app.shared.ticker import normalize_ticker, ticker_arg
 
 
 # ---------------------------------------------------------------------------
@@ -40,16 +40,16 @@ def test_anything_that_could_be_a_path_or_is_not_a_ticker_is_rejected(raw):
 
 
 def test_the_vault_writer_refuses_a_bad_ticker_even_if_an_entry_point_let_it_through(tmp_path, monkeypatch):
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path / "vault")
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path / "vault")
     with pytest.raises(ValueError):
-        researcher._save_output("memo", "../../escaped", "fundamentals")
+        vault.save_output("memo", "../../escaped", "fundamentals")
     assert not any(tmp_path.rglob("*.md"))
 
 
 def test_the_cli_rejects_a_bad_ticker_as_a_usage_error():
     with pytest.raises(argparse.ArgumentTypeError):
-        researcher._ticker_arg("../x")
-    assert researcher._ticker_arg("acn") == "ACN"
+        ticker_arg("../x")
+    assert ticker_arg("acn") == "ACN"
 
 
 # ---------------------------------------------------------------------------

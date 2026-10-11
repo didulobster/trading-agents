@@ -1233,9 +1233,9 @@ def test_the_debate_model_is_priced_so_the_budget_assertion_can_fire():
     """An unpriced model makes every turn cost None, which sums to 0.00 and
     can never trip the ceiling — the budget assertion would be silently
     absent rather than merely loose."""
-    from app.agent.researcher import _MODEL_PRICING
+    from app.shared.llm import MODEL_PRICING
 
-    assert port.DEBATE_MODEL in _MODEL_PRICING
+    assert port.DEBATE_MODEL in MODEL_PRICING
 
 
 def test_cost_is_computed_at_the_debate_model_s_rate_not_the_researcher_s():
@@ -1244,14 +1244,14 @@ def test_cost_is_computed_at_the_debate_model_s_rate_not_the_researcher_s():
     TRADING_DEBATE_MODEL can point the debate somewhere else — and a Sonnet
     debate priced as Haiku is understated ~3x, which is exactly the wrong
     number for a budget assertion to wave through."""
-    from app.agent.researcher import _compute_cost, UsageSummary
+    from app.shared.cost import compute_cost, UsageSummary
 
     usage = UsageSummary()
     usage.input_tokens = 1_000_000
     usage.output_tokens = 0
 
-    assert _compute_cost(usage, "claude-sonnet-5") == 3.0
-    assert _compute_cost(usage, "claude-haiku-4-5-20251001") == 1.0
+    assert compute_cost(usage, "claude-sonnet-5") == 3.0
+    assert compute_cost(usage, "claude-haiku-4-5-20251001") == 1.0
 
 
 @pytest.mark.parametrize(

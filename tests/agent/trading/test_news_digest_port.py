@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-from app.agent.researcher import UsageSummary
+from app.shared.cost import UsageSummary
 from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.infrastructure import news_digest_port
 from app.agent.trading.infrastructure.news_digest_port import (
@@ -253,7 +253,7 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
         )
 
     def fake_log_cost(ticker, mode, usage, *args, **kwargs):
-        log_calls.append((ticker, mode, usage.input_tokens, usage.output_tokens))
+        log_calls.append((ticker, mode, usage.input_tokens, usage.output_tokens, kwargs.get("model")))
         return 0.0123
 
     monkeypatch.setattr(news_digest_port, "_summarize_batch", fake_summarize)
@@ -267,7 +267,8 @@ async def test_build_digest_batches_and_logs_cost_once(monkeypatch):
     assert len(items) == BATCH_SIZE + 3
     assert issues == []
     # one summed log line per run, not one per batch
-    assert log_calls == [("ACN", "trading-news", 200, 100)]
+    # priced at the digest's own model, not the research agent's default
+    assert log_calls == [("ACN", "trading-news", 200, 100, news_digest_port.NEWS_DIGEST_MODEL)]
     assert cost == 0.0123
 
 

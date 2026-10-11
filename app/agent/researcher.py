@@ -21,16 +21,13 @@ from __future__ import annotations
 if __name__ == "__main__":
     # Run as a script, this module is its own entry point: load .env before
     # the imports below read their settings. Imported as a library it leaves
-    # that to whichever entry point imported it (see app/config.py).
-    from app.config import load_env
+    # that to whichever entry point imported it (see app/shared/config.py).
+    from app.shared.config import load_env
 
     load_env()
 
 import argparse
 import asyncio
-import contextlib
-from contextvars import ContextVar
-import json
 import logging
 import os
 from pathlib import Path
@@ -42,11 +39,12 @@ from datetime import date, datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
-from app.domain.values import normalize_ticker
-from app.infrastructure.llm import MODEL_PRICING, get_client
-from app.infrastructure.llm.models import model_for
-from app.config import require_env
-from app.infrastructure.cost_log_path import cost_log_path
+from app.shared.llm import MODEL_PRICING, get_client
+from app.shared.llm.models import model_for
+from app.shared.config import require_env
+from app.shared.cost import UsageSummary, log_cost
+from app.shared.ticker import ticker_arg
+from app.shared.vault import save_output
 
 logger = logging.getLogger(__name__)
 
@@ -67,22 +65,6 @@ TURN_WARN_AT = 8
 # the non-streaming client's read timeout.
 AGENT_MAX_TOKENS = 16000
 WATCHLIST_PATH = Path("watchlist.yaml")
-MEMO_DIR = Path.home() / require_env("MEMO_DIR")
-
-# Cost config — per million tokens. The table moved to
-# app/infrastructure/llm/pricing.py when the provider layer landed, because
-# pricing is a property of the provider rather than of this agent. Re-exported
-# under the old name so the three ports and the budget assertions that import
-# `_MODEL_PRICING` from here keep working.
-_MODEL_PRICING = MODEL_PRICING
-
-
-def _ticker_arg(value: str) -> str:
-    """argparse `type=` for a ticker: normalized, or a clean usage error."""
-    try:
-        return normalize_ticker(value)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 def _trace(msg: str) -> None:
@@ -135,159 +117,16 @@ def _build_news_prompt(ticker: str, news_text: str) -> str:
         risks_watching=risks_watching,
     )
 
-# Modes whose provenance must NOT fall back to the research agent's session
-# log. These are trading-pipeline artifacts that never call the research
-# tools, so at their save time the session log may still hold whatever
-# trace the preceding fundamentals run left behind — writing it would pair
-# the wrong evidence with the report. They supply their own provenance or
-# get none.
-_NO_SESSION_LOG_MODES = {
-    "technical", "sentiment", "decision", "decision_failed", "decision_aborted",
-    "debate", "risk",
-}
+def save_memo(content: str, ticker: str, mode: str, cost_usd: float | None = None) -> Path:
+    """Save a Research agent artifact to the vault, with the run's session log
+    as its provenance sidecar: every terminal trace line plus untruncated tool
+    results, so any figure in it can be traced to (or shown absent from) the
+    exact turn and tool output that produced it."""
+    return save_output(
+        content, ticker, mode,
+        cost_usd=cost_usd, provenance=get_session_log(), model=AGENT_MODEL,
+    )
 
-
-# The vault filename stem for each mode, minus the ticker. "fundamentals" is
-# the mode but "fundamental" is the filename, which is a wart old enough to
-# be in people's muscle memory — kept rather than fixed, since renaming it
-# would orphan every existing note's links.
-_MODE_STEMS = {
-    "news": "news",
-    "technical": "technical",
-    "fundamentals": "fundamental",
-    "sentiment": "sentiment",
-    "decision": "decision",
-    "decision_failed": "decision-FAILED",
-    "decision_aborted": "decision-ABORTED",
-    "debate": "debate",
-    "risk": "risk",
-}
-
-# Modes that file under MEMO_DIR/<ticker>/<date>/ rather than flat under the
-# ticker. Everything the trading pipeline writes, which is what makes a
-# per-run folder worth having at all.
-_DATED_MODES = frozenset(
-    {
-        "technical", "fundamentals", "sentiment", "decision", "decision_failed",
-        "decision_aborted", "debate", "risk",
-    }
-)
-
-# The instant one pipeline run started, set by `vault_run`; None outside one.
-#
-# A context variable rather than a parameter threaded through six ports, because
-# the two halves of a run save at different times and through different call
-# stacks — technical and fundamentals from inside their nodes while the graph
-# is still executing, sentiment/decision/debate from the CLI after it
-# finishes. Anything computed per call (including datetime.now()) puts those
-# halves in different folders, which is the problem being fixed.
-#
-# The whole datetime, not the formatted name: the DATE folder has to come
-# from the same instant too. A run that starts at 23:58 and finishes at
-# 00:02 would otherwise file its fundamentals under one date and its debate
-# transcript under the next — the same scattering, harder to spot.
-#
-# A ContextVar and not a plain module global: the API server can run two
-# pipelines at once, and each request's task must see its own folder.
-_RUN_STAMP: ContextVar[datetime | None] = ContextVar("vault_run_stamp", default=None)
-
-
-@contextlib.contextmanager
-def vault_run(stamp: datetime | None = None):
-    """Give every artifact saved inside this block ONE run folder.
-
-    Yields the folder name. The directory is not created here — it is created
-    by the first `_save_output` that lands in it, so a run that dies before
-    writing anything leaves no empty folder behind.
-
-    Restores whatever was set before rather than clearing to None, so nesting
-    is safe even though nothing nests today.
-    """
-    token = _RUN_STAMP.set(stamp or datetime.now())
-    try:
-        yield _RUN_STAMP.get().strftime(_RUN_FOLDER_FORMAT)
-    finally:
-        _RUN_STAMP.reset(token)
-
-
-_RUN_FOLDER_FORMAT = "%Y-%m%d-%H%M%S"
-
-
-def _save_output(
-    content: str,
-    ticker: str,
-    mode: str,
-    cost_usd: float | None = None,
-    provenance: str | None = None,
-    model: str = AGENT_MODEL,
-) -> Path:
-    """Save output with timestamp. Returns the path.
-
-    `provenance`, when given, is written verbatim to the sidecar file instead
-    of the research agent's session log.
-
-    Inside a `vault_run` block the artifacts of one run share a folder and
-    drop the per-file timestamp:
-
-        <ticker>/20260822/2026-0822-070153/ACN-fundamental.md
-
-    Outside one — the standalone research CLI, which writes a single report —
-    the old flat layout is kept, timestamp in the filename.
-
-    The ticker becomes a directory name, so it is validated here as well as at
-    the entry points — this is the last place that can stop a traversal.
-    """
-    ticker = normalize_ticker(ticker)
-    if cost_usd is not None:
-        content = content.rstrip("\n") + f"\n\n---\n**LLM cost:** ${cost_usd:.4f} ({model})\n"
-    # Inside a run, every path is derived from the instant the RUN started,
-    # not the instant this file happens to be written.
-
-    run_stamp = _RUN_STAMP.get()
-    now = run_stamp or datetime.now()
-    stem = _MODE_STEMS.get(mode)
-    parent = MEMO_DIR / ticker
-    if mode in _DATED_MODES:
-        parent = parent / now.strftime("%Y%m%d")
-
-    if run_stamp is not None:
-        # One folder per run, so the timestamp is on the folder and not
-        # repeated on every file inside it.
-        parent = parent / now.strftime(_RUN_FOLDER_FORMAT)
-        filename = f"{ticker}-{stem}.md" if stem else f"{ticker}.md"
-    else:
-        timestamp = now.strftime("%Y%m%d-%H%M%S")
-        filename = (
-            f"{ticker}-{stem}-{timestamp}.md" if stem else f"{ticker}-{timestamp}.md"
-        )
-
-    out_path = parent / filename
-    if run_stamp is not None and out_path.exists():
-        # Two artifacts of the same kind in one run. Unreachable today —
-        # every mode is saved exactly once per run — so if it happens the
-        # honest answer is to say so rather than overwrite a report that
-        # cost real money to produce.
-        raise FileExistsError(
-            f"{out_path} already exists in this run's folder — a second "
-            f"'{mode}' artifact would overwrite the first. Nothing was written."
-        )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(content)
-
-    # Audit artifact: the run's full session log — every terminal trace
-    # line plus untruncated tool results — saved beside the report so any
-    # figure in it can be traced to (or shown absent from) the exact turn
-    # and tool output that produced it, instead of reconstructing the run
-    # by inference after the process exits. Saved as .md (not .txt) so
-    # Obsidian's file explorer, which hides unknown extensions by default,
-    # shows it beside its report. See _NO_SESSION_LOG_MODES for which modes
-    # must not inherit this log.
-    if provenance is None and mode not in _NO_SESSION_LOG_MODES:
-        provenance = get_session_log()
-    if provenance and provenance.strip():
-        out_path.with_name(f"{out_path.stem}-provenance.md").write_text(provenance)
-
-    return out_path
 
 def _print_usage_summary(
     total_input: int,
@@ -296,7 +135,7 @@ def _print_usage_summary(
     total_output: int,
 ) -> None:
     """Print token usage and estimated cost to stderr."""
-    pricing = _MODEL_PRICING.get(AGENT_MODEL)
+    pricing = MODEL_PRICING.get(AGENT_MODEL)
     _trace(f"\n{'='*55}")
     _trace("[usage summary]")
     _trace(f"  model: {AGENT_MODEL}")
@@ -324,78 +163,6 @@ def _print_usage_summary(
     _trace(f"{'='*55}")
 
 
-def _compute_cost(usage: UsageSummary, model: str = AGENT_MODEL) -> float | None:
-    """Estimate USD cost from token usage, or None if pricing isn't configured
-    for `model`.
-
-    `model` defaults to AGENT_MODEL, which was correct by coincidence until
-    Phase 5: every earlier caller used the researcher's own model. A node
-    that calls a different model and does not pass it here gets a cost priced
-    at the wrong rate — understated 3x for Sonnet against Haiku — which is
-    exactly the kind of wrong number a per-run budget assertion would then
-    wave through."""
-    pricing = _MODEL_PRICING.get(model)
-    if not pricing:
-        return None
-    return round(
-        usage.input_tokens * pricing["input"] / 1_000_000
-        + usage.cache_write_tokens * pricing["cache_write"] / 1_000_000
-        + usage.cache_read_tokens * pricing["cache_read"] / 1_000_000
-        + usage.output_tokens * pricing["output"] / 1_000_000,
-        6,
-    )
-
-
-def log_cost(
-    ticker: str,
-    mode: str,
-    usage: UsageSummary,
-    model: str = AGENT_MODEL,
-    *,
-    run_id: str | None = None,
-    event_id: str | None = None,
-) -> float | None:
-    """Append one JSON line to this month's cost log. Returns the estimated
-    cost (or None if pricing isn't configured), so callers can also surface
-    it elsewhere (e.g. in the memo itself).
-
-    Pass `model` whenever the call being logged did not use AGENT_MODEL. Both
-    the logged label and the price come from it — a hardcoded label on a
-    differently-priced call produces a log that is wrong twice and looks
-    right.
-
-    `run_id`/`event_id` (Phase 8) are None for calls outside the trading
-    graph — the standalone researcher CLI has no run to group lines under.
-    Trading-pipeline callers pass both (see
-    trading/infrastructure/cost_log.py) so a run's lines can be grouped and
-    a resumed run's duplicate write can be deduped, both by `jq` over this
-    file alone. `kind` distinguishes these lines from the pre-Phase-8 lines
-    already in this file, which have neither field and are read as legacy."""
-    cost = _compute_cost(usage, model)
-    entry = {
-        "kind": "cost_event",
-        "timestamp": datetime.now().isoformat(),
-        "run_id": run_id,
-        "event_id": event_id,
-        "ticker": ticker,
-        "mode": mode,
-        "model": model,
-        "input_tokens": usage.input_tokens,
-        "cache_write_tokens": usage.cache_write_tokens,
-        "cache_read_tokens": usage.cache_read_tokens,
-        "output_tokens": usage.output_tokens,
-        "estimated_cost_usd": cost,
-    }
-    # Resolved from the repo, not the working directory: this was
-    # Path("docs/cost-log.jsonl"), so a run started elsewhere wrote a log
-    # that log_run_summary's disk reconciliation never read.
-    log_path = cost_log_path()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a") as f:
-        f.write(json.dumps(entry) + "\n")
-    return cost
-
-
 def _roll_cache_breakpoint(messages: list) -> None:
     """Place a single cache_control breakpoint on the last block of the last
     turn, and strip any stale ones. The cached prefix is tools + system + all
@@ -416,16 +183,6 @@ def _roll_cache_breakpoint(messages: list) -> None:
     if isinstance(last[-1], dict):
         last[-1]["cache_control"] = {"type": "ephemeral"}
 
-
-
-class UsageSummary:
-    __slots__ = ("input_tokens", "cache_write_tokens", "cache_read_tokens", "output_tokens")
-
-    def __init__(self) -> None:
-        self.input_tokens = 0
-        self.cache_write_tokens = 0
-        self.cache_read_tokens = 0
-        self.output_tokens = 0
 
 
 def _strip_preamble(text: str) -> str:
@@ -739,7 +496,7 @@ async def run_agent(
 def main() -> None:
     parser = argparse.ArgumentParser(description="EDGAR research agent")
     parser.add_argument(
-        "ticker", nargs="?", type=_ticker_arg, help="Ticker to research (omit with --test)"
+        "ticker", nargs="?", type=ticker_arg, help="Ticker to research (omit with --test)"
     )
     parser.add_argument(
         "--test",
@@ -778,11 +535,11 @@ def main() -> None:
     result, usage = asyncio.run(run_agent(task, prompt))
     print(result)
 
-    cost = log_cost(args.ticker.upper(), mode, usage) if args.ticker else None
+    cost = log_cost(args.ticker.upper(), mode, usage, AGENT_MODEL) if args.ticker else None
 
     # Save to file (skip for test mode)
     if mode != "test" and args.ticker:
-        path = _save_output(result, args.ticker.upper(), mode, cost_usd=cost)
+        path = save_memo(result, args.ticker.upper(), mode, cost_usd=cost)
         _trace(f"\nSaved to {path}")
 
     _print_usage_summary(

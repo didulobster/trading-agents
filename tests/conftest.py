@@ -18,10 +18,10 @@ import os
 
 import pytest
 
-from app.config import load_env
+from app.shared.config import load_env
 
 # The suite imports app modules that read settings at import time, and those
-# modules no longer load .env themselves (app/config.py) — so it is loaded
+# modules no longer load .env themselves (app/shared/config.py) — so it is loaded
 # here, the same way an entry point would, without overriding anything the
 # environment already set. CI has no .env and sets what it needs in the
 # workflow; locally this keeps the database URLs and required settings a

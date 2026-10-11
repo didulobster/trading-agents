@@ -101,7 +101,7 @@ uv run alembic upgrade head
 >
 > **Precedence:** a variable already set in the environment wins over `.env`, which only
 > fills in what is unset. Entry points (the API server, both CLIs, the researcher script)
-> load `.env` before anything else; see `app/config.py`. The `scripts/` battery tools
+> load `.env` before anything else; see `app/shared/config.py`. The `scripts/` battery tools
 > still load it with `override=True`, so inside them `.env` wins.
 
 ## Configuration
@@ -142,7 +142,7 @@ global switch. Ten roles each read their own variable, all falling back to
 Print what a run will actually use — role, model, provider, and whether it is priced:
 
 ```bash
-uv run python -m app.infrastructure.llm.models
+uv run python -m app.shared.llm.models
 ```
 
 Optional overrides: `LLM_PROVIDER` + `LLM_BASE_URL` + `LLM_API_KEY` bypass prefix inference
@@ -309,7 +309,9 @@ app/
       domain/                pure types and rules
       application/           nodes, routers, guards
       infrastructure/        LLM ports, graph, checkpointer, cost log
-  infrastructure/llm/        provider routing, model table, pricing
+  edgar_research/            EDGAR Research glossary and docs (code moving here)
+  shared/                    shared kernel: llm/ (provider routing, model table, pricing),
+                             config, cost log path, token usage
 .github/workflows/tests.yml   CI: pytest against a real pgvector service
 .env.example                 every variable, commented
 eval/                        retrieval evaluation harness

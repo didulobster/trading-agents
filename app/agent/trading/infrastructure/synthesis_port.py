@@ -48,13 +48,10 @@ from app.agent.trading.infrastructure.structured_call import (
     force_crash,
     inline_refs,
 )
-from app.infrastructure.llm import LLMClient, get_client
-from app.infrastructure.llm.models import model_for, warn_if_unpriced
+from app.shared.llm import LLMClient, get_client
+from app.shared.llm.models import model_for, warn_if_unpriced
 
-from app.agent.researcher import (
-    UsageSummary,
-    log_cost,
-)
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.debate import DebateClaim, DebateTurn, canonical_claims
 from app.agent.trading.domain.decision_memo import (

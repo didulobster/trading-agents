@@ -11,15 +11,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.infrastructure.llm import client as client_mod
-from app.infrastructure.llm.client import (
+from app.shared.llm import client as client_mod
+from app.shared.llm.client import (
     ProviderNotConfigured,
     RoutingClient,
     create_with_temperature_fallback,
     get_client,
     resolve_provider,
 )
-from app.infrastructure.llm.openai_compat import (
+from app.shared.llm.openai_compat import (
     LLMBadRequestError,
     OpenAICompatClient,
     _translate_messages,
@@ -183,7 +183,7 @@ def test_tool_results_precede_free_text_in_the_same_user_turn():
 def test_response_blocks_replayed_into_the_next_request_translate_too():
     """The synthesis and debate schema-retries append `response.content`
     verbatim, so the translator sees objects, not dicts."""
-    from app.infrastructure.llm.openai_compat import TextBlock, ToolUseBlock
+    from app.shared.llm.openai_compat import TextBlock, ToolUseBlock
 
     out = _translate_messages(
         None,
@@ -343,7 +343,7 @@ def test_usage_with_no_cache_reporting_at_all():
 def test_shim_usage_is_readable_by_the_shared_TokenUsage_type():
     """The accounting sites read Anthropic's field names off `.usage`
     directly; the shim has to answer to those names."""
-    from app.domain.token_usage import TokenUsage
+    from app.shared.token_usage import TokenUsage
 
     shim_usage = _translate_usage(SimpleNamespace(
         prompt_tokens=100, prompt_cache_hit_tokens=40,
@@ -362,7 +362,7 @@ def test_shim_usage_is_readable_by_the_shared_TokenUsage_type():
 def test_deepseek_is_priced_so_the_budget_guards_can_fire():
     """An unpriced model makes every turn cost None, which sums to 0.00 and
     can never trip the per-run budget assertion."""
-    from app.infrastructure.llm.pricing import MODEL_PRICING
+    from app.shared.llm.pricing import MODEL_PRICING
 
     for model in ("deepseek-v4-flash", "deepseek-v4-pro"):
         assert set(MODEL_PRICING[model]) == {"input", "output", "cache_write", "cache_read"}
@@ -372,7 +372,7 @@ def test_retired_deepseek_ids_are_gone_rather_than_priced():
     """deepseek-chat and deepseek-reasoner no longer exist. Leaving them in
     the table would let a stale .env price cleanly all the way to a 404 —
     warn_if_unpriced is the only thing that would have flagged it."""
-    from app.infrastructure.llm.pricing import MODEL_PRICING
+    from app.shared.llm.pricing import MODEL_PRICING
 
     assert "deepseek-chat" not in MODEL_PRICING
     assert "deepseek-reasoner" not in MODEL_PRICING
@@ -381,7 +381,7 @@ def test_retired_deepseek_ids_are_gone_rather_than_priced():
 def test_pricing_overrides_are_merged_from_the_environment(monkeypatch):
     import importlib
 
-    from app.infrastructure.llm import pricing
+    from app.shared.llm import pricing
 
     monkeypatch.setenv(
         "LLM_PRICING_OVERRIDES",
@@ -400,7 +400,7 @@ def test_pricing_overrides_are_merged_from_the_environment(monkeypatch):
 def test_incomplete_pricing_override_raises_rather_than_silently_keeping_the_old_rate(monkeypatch):
     import importlib
 
-    from app.infrastructure.llm import pricing
+    from app.shared.llm import pricing
 
     monkeypatch.setenv("LLM_PRICING_OVERRIDES", json.dumps({"x": {"input": 1.0}}))
     try:

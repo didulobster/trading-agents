@@ -9,7 +9,7 @@ import importlib
 
 import pytest
 
-from app.infrastructure.llm.models import (
+from app.shared.llm.models import (
     DEFAULT_MODEL_ENV,
     ROLES,
     configured_models,
@@ -98,7 +98,7 @@ def test_a_priced_model_says_nothing(capsys):
 
 
 def test_describe_reports_provider_and_pricing_per_role(monkeypatch, only_the_default):
-    from app.infrastructure.llm.models import describe
+    from app.shared.llm.models import describe
 
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-v4-flash")

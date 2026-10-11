@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-import app.agent.researcher as researcher
+from app.shared import vault
 import app.agent.trading.application.debate_nodes as debate_nodes
 import app.agent.trading.application.nodes as nodes
 import app.agent.trading.application.risk_nodes as risk_nodes
@@ -127,7 +127,7 @@ def test_the_breach_is_still_an_assertion_error_for_existing_callers():
 
 @pytest.mark.anyio
 async def test_a_debate_turn_over_its_cap_aborts_the_run_with_an_artifact(monkeypatch, tmp_path):
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
     _stub_fundamentals(monkeypatch)
     _stub_risk_panel(monkeypatch)
     _stub_synthesis(monkeypatch)
@@ -159,7 +159,7 @@ async def test_the_synthesizer_over_its_cap_aborts_instead_of_ending_without_a_m
     """The synthesizer is the last node; its exit edge used to be a plain
     edge to END, so a breach there would have ended the run with no memo
     and no abort record."""
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
     _stub_fundamentals(monkeypatch)
     _stub_risk_panel(monkeypatch)
     _stub_debate(monkeypatch)

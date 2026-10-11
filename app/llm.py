@@ -1,11 +1,11 @@
 import logging
 
-from app.domain.token_usage import TokenUsage, response_text
+from app.shared.token_usage import TokenUsage, response_text
 from dataclasses import dataclass, field
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 from app.application.citations import format_citation_tag, format_context_block
-from app.infrastructure.llm import get_client
-from app.infrastructure.llm.models import model_for
+from app.shared.llm import get_client
+from app.shared.llm.models import model_for
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class AnswerWithCitations:
     chunks: list[RetrievedChunk]   # All chunks supplied to the LLM
     # What this call cost. Reported rather than logged here: llm.py has no
     # run_id and no state, and the caller that owns the run is the only
-    # place the number can be attributed correctly. See domain/token_usage.
+    # place the number can be attributed correctly. See shared/token_usage.
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 async def answer_question(

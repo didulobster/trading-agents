@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.agent.researcher as researcher
+from app.shared.cost import UsageSummary
 
 
 def _block(i: int, name: str = "ask_edgar"):
@@ -41,7 +42,7 @@ def running(monkeypatch):
 @pytest.mark.anyio
 async def test_a_turns_calls_overlap_up_to_the_concurrency_limit(running, monkeypatch):
     monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 4)
-    results = await researcher._run_tool_calls([_block(i) for i in range(6)], None, researcher.UsageSummary())
+    results = await researcher._run_tool_calls([_block(i) for i in range(6)], None, UsageSummary())
 
     assert results == [f"ask_edgar:{i}" for i in range(6)]   # call order, always
     assert running["peak"] == 4
@@ -53,11 +54,11 @@ async def test_waves_are_faster_than_one_at_a_time(running, monkeypatch):
     loop = asyncio.get_running_loop()
 
     monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 1)
-    t0 = loop.time(); await researcher._run_tool_calls(blocks, None, researcher.UsageSummary())
+    t0 = loop.time(); await researcher._run_tool_calls(blocks, None, UsageSummary())
     serial = loop.time() - t0
 
     monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 4)
-    t0 = loop.time(); await researcher._run_tool_calls(blocks, None, researcher.UsageSummary())
+    t0 = loop.time(); await researcher._run_tool_calls(blocks, None, UsageSummary())
     waved = loop.time() - t0
 
     assert waved < serial / 2
@@ -68,7 +69,7 @@ async def test_ingest_runs_alone_so_later_calls_read_what_it_wrote(running, monk
     monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 4)
     blocks = [_block(0), _block(1, "ingest_ticker"), _block(2), _block(3)]
 
-    await researcher._run_tool_calls(blocks, None, researcher.UsageSummary())
+    await researcher._run_tool_calls(blocks, None, UsageSummary())
 
     order = running["order"]
     assert order.index(("ingest_ticker", 1)) > order.index(("ask_edgar", 0))
@@ -82,7 +83,7 @@ async def test_the_budget_is_rechecked_between_waves(running, monkeypatch):
     monkeypatch.setattr(researcher, "TOOL_CONCURRENCY", 2)
     stop = lambda usage: "budget_exceeded" if running["order"] else None
 
-    results = await researcher._run_tool_calls([_block(i) for i in range(5)], stop, researcher.UsageSummary())
+    results = await researcher._run_tool_calls([_block(i) for i in range(5)], stop, UsageSummary())
 
     assert results[:2] == ["ask_edgar:0", "ask_edgar:1"]
     assert all(r.startswith("RUN BUDGET REACHED: budget_exceeded") for r in results[2:])

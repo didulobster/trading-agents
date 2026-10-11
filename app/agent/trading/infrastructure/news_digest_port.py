@@ -6,15 +6,16 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.trading.infrastructure.structured_call import assert_within_budget
-from app.infrastructure.llm import LLMClient, get_client
-from app.infrastructure.llm.models import model_for, warn_if_unpriced
+from app.shared.llm import LLMClient, get_client
+from app.shared.llm.models import model_for, warn_if_unpriced
 
 # Its own knob (TRADING_NEWS_DIGEST_MODEL), defaulting to the
 # project-wide model — which is all this role had before.
 NEWS_DIGEST_MODEL = model_for("news_digest")
 warn_if_unpriced(NEWS_DIGEST_MODEL, "news")
 
-from app.agent.researcher import UsageSummary, _save_output, log_cost
+from app.shared.vault import save_output
+from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.errors import VendorError
 from app.agent.trading.domain.news_digest import (
@@ -366,7 +367,9 @@ async def build_digest(
         )
 
     event_id = new_event_id("news")
-    cost = log_cost(ticker, "trading-news", usage, run_id=run_id, event_id=event_id)
+    cost = log_cost(
+        ticker, "trading-news", usage, model=NEWS_DIGEST_MODEL, run_id=run_id, event_id=event_id,
+    )
     _assert_within_budget(cost)
     cost_event = record_cost_event(event_id, "news", usage, NEWS_DIGEST_MODEL, cost)
     return items, issues, cost, cost_event, sanitizer_flags
@@ -497,10 +500,11 @@ def save_sentiment_report(
     provenance: str | None = None,
 ) -> Path:
     content = _format_sentiment_markdown(digest, summary, issues)
-    return _save_output(
+    return save_output(
         content,
         digest.ticker.upper(),
         "sentiment",
         cost_usd=cost_usd,
         provenance=provenance,
+        model=NEWS_DIGEST_MODEL,
     )

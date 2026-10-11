@@ -9,12 +9,10 @@ from pathlib import Path
 from app.agent.researcher import (
     AGENT_MODEL,
     StopCheck,
-    UsageSummary,
-    _compute_cost,
-    _save_output,
-    log_cost,
+    save_memo,
     run_agent,
 )
+from app.shared.cost import UsageSummary, compute_cost, log_cost
 from app.agent.tools import get_delegated_usage
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.agent.trading.application.guards import check_run_guards
@@ -41,9 +39,9 @@ def _spend_so_far(usage: UsageSummary) -> float:
     """The agent loop's own spend plus what its tools spent server-side so
     far, each priced at the model that spent it (a server that did not name
     its model is priced at the agent's, as the final accounting does)."""
-    total = _compute_cost(usage, AGENT_MODEL) or 0.0
+    total = compute_cost(usage, AGENT_MODEL) or 0.0
     for model, tool_usage in get_delegated_usage().items():
-        total += _compute_cost(tool_usage, model or AGENT_MODEL) or 0.0
+        total += compute_cost(tool_usage, model or AGENT_MODEL) or 0.0
     return total
 
 
@@ -133,8 +131,10 @@ async def get_fundamentals_report(
     )
 
     event_id = new_event_id("fundamentals")
-    cost = log_cost(ticker, "trading-fundamentals", usage, run_id=run_id, event_id=event_id)
-    vault_path = _save_output(result, ticker.upper(), "fundamentals", cost_usd=cost)
+    cost = log_cost(
+        ticker, "trading-fundamentals", usage, AGENT_MODEL, run_id=run_id, event_id=event_id,
+    )
+    vault_path = save_memo(result, ticker.upper(), "fundamentals", cost_usd=cost)
     print(f"[fundamentals] saved memo to {vault_path}")
 
     # What the agent's TOOLS spent server-side, which until 2026-08-27

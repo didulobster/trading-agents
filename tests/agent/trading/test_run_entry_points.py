@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-import app.agent.researcher as researcher
+from app.shared import vault
 import app.agent.trading.interface.runner as runner
 import app.main as main
 from app.agent.trading.domain.budget import RunBudget, RunTermination
@@ -172,7 +172,7 @@ def test_a_subset_run_gets_its_own_default_thread():
 def client(monkeypatch, tmp_path, summaries):
     """TestClient WITHOUT the lifespan (no `with`), so no Postgres pool or
     checkpointer is opened; each test puts its own fake graph on app.state."""
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
     return TestClient(main.app)
 
 

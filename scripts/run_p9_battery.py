@@ -28,7 +28,7 @@ load_dotenv(override=True)
 
 import os  # noqa: E402
 
-from app.infrastructure.llm.models import model_env_vars
+from app.shared.llm.models import model_env_vars
 from app.agent.trading.domain.validation import (  # noqa: E402
     BatteryManifest,
     RunRecord,
