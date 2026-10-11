@@ -24,18 +24,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os  # noqa: E402
 import sys
 from datetime import date
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
-
-import os  # noqa: E402
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from app.shared.config import load_env
+
+load_env()
 
 from run_p9_battery import (  # noqa: E402
     MODEL_ENV_VARS,
