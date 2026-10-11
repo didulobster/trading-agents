@@ -20,7 +20,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from app.agent.trading.domain.validation import BatteryManifest, RunRecord
+from app.trading.domain.validation import BatteryManifest, RunRecord
 
 # One definition of the legacy-`confidence` fallback, in the script that
 # writes manifests in the first place.

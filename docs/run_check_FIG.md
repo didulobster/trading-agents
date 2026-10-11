@@ -3,7 +3,7 @@
 First full-pipeline run after the code-review fixes (PRs #102–#108). Purpose was to
 verify the eleven High/Medium fixes against a real run rather than against the suite.
 
-**Command:** `python -m app.agent.trading.interface.cli FIG --thread-id trading-FIG-postreview-20260913`
+**Command:** `python -m app.trading.interface.cli FIG --thread-id trading-FIG-postreview-20260913`
 **Code:** `main` at `6d7c29f` (all six fix PRs merged) · **Corpus:** warm — FIG 6 filings, 789 chunks, all embedded
 **Models:** answer + extraction on `deepseek-v4-flash`, everything else on `gpt-5.6-luna`
 
@@ -172,7 +172,7 @@ record of what either vendor said. Two causes:
 - `#11` logged the **exception** path at WARNING but the **empty-result** path at INFO.
   yfinance returned an empty frame (transient; it returns 146 bars for that date when
   called directly), and that went to INFO.
-- `app/agent/trading/interface/cli.py` **configured no logging at all** — so INFO went
+- `app/trading/interface/cli.py` **configured no logging at all** — so INFO went
   nowhere, and WARNING arrived only through Python's handler-of-last-resort, unformatted
   and unattributed. `app/edgar_research/cli.py` has always called `basicConfig`; the entry point that
   spends the most per invocation never did.

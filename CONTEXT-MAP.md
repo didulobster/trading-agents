@@ -3,7 +3,7 @@
 ## Contexts
 
 - [EDGAR Research](./app/edgar_research/CONTEXT.md): ingests SEC filings into a corpus and answers questions over it, up to a full fundamentals memo
-- [Trading](./CONTEXT.md): analysts, debaters, a risk panel and synthesis turn a ticker into a decision memo
+- [Trading](./app/trading/CONTEXT.md): analysts, debaters, a risk panel and synthesis turn a ticker into a decision memo
 
 ## Relationships
 

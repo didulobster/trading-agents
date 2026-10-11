@@ -9,7 +9,7 @@ import ast
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
-TRADING = APP / "agent" / "trading"
+TRADING = APP / "trading"
 EDGAR_RESEARCH = APP / "edgar_research"
 SHARED = APP / "shared"
 PUBLISHED = "app.edgar_research.fundamentals_memo"
@@ -18,7 +18,11 @@ PUBLISHED = "app.edgar_research.fundamentals_memo"
 def _imported_names(root: Path) -> list[tuple[str, str]]:
     """(file, dotted name) for every absolute import under `root`; a
     `from a import b` counts as `a.b`, so importing the module by its parent
-    package is caught too."""
+    package is caught too.
+
+    A missing `root` fails rather than scanning nothing: after a move, a
+    stale path would otherwise pass every rule vacuously."""
+    assert root.is_dir(), root
     found = []
     for path in root.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
@@ -44,7 +48,7 @@ def test_trading_reaches_edgar_research_only_through_the_published_module():
 def test_edgar_research_never_imports_trading():
     offenders = [
         (path, name) for path, name in _imported_names(EDGAR_RESEARCH)
-        if _under(name, "app.agent.trading")
+        if _under(name, "app.trading")
     ]
     assert offenders == []
 
@@ -52,6 +56,6 @@ def test_edgar_research_never_imports_trading():
 def test_the_shared_kernel_imports_neither_context():
     offenders = [
         (path, name) for path, name in _imported_names(SHARED)
-        if _under(name, "app.agent.trading") or _under(name, "app.edgar_research")
+        if _under(name, "app.trading") or _under(name, "app.edgar_research")
     ]
     assert offenders == []

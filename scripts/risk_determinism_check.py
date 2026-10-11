@@ -68,18 +68,18 @@ from datetime import date
 
 from anthropic import AsyncAnthropic
 
-from app.agent.trading.application import nodes
-from app.agent.trading.application.debate_router import MAX_TURNS as DEBATE_MAX_TURNS
-from app.agent.trading.application.risk_ledger import build_risk_ledger
-from app.agent.trading.application.risk_router import RISK_MAX_TURNS
-from app.agent.trading.application.technical_indicators import compute_indicators
-from app.agent.trading.domain.risk import PERSONAS
-from app.agent.trading.domain.technical_report import TechnicalReport
-from app.agent.trading.infrastructure.debate_port import run_debate_turn
-from app.agent.trading.infrastructure.price_data_port import get_price_history
-from app.agent.trading.infrastructure.risk_port import run_risk_turn
-from app.agent.trading.infrastructure.synthesis_port import extract_refs, run_synthesis
-from app.agent.trading.infrastructure.technical_interpreter_port import interpret_indicators
+from app.trading.application import nodes
+from app.trading.application.debate_router import MAX_TURNS as DEBATE_MAX_TURNS
+from app.trading.application.risk_ledger import build_risk_ledger
+from app.trading.application.risk_router import RISK_MAX_TURNS
+from app.trading.application.technical_indicators import compute_indicators
+from app.trading.domain.risk import PERSONAS
+from app.trading.domain.technical_report import TechnicalReport
+from app.trading.infrastructure.debate_port import run_debate_turn
+from app.trading.infrastructure.price_data_port import get_price_history
+from app.trading.infrastructure.risk_port import run_risk_turn
+from app.trading.infrastructure.synthesis_port import extract_refs, run_synthesis
+from app.trading.infrastructure.technical_interpreter_port import interpret_indicators
 
 
 async def build_fixed_debate_state(ticker: str, as_of: date, client: AsyncAnthropic) -> dict:

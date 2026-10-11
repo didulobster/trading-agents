@@ -43,8 +43,8 @@ import re
 import sys
 from pathlib import Path
 
-from app.agent.trading.domain.decision_memo import DecisionMemo
-from app.agent.trading.domain.validation import BatteryManifest, verdict_direction
+from app.trading.domain.decision_memo import DecisionMemo
+from app.trading.domain.validation import BatteryManifest, verdict_direction
 
 COST_LOG = Path("docs/cost-log.jsonl")
 _RAW_MEMO_RE = re.compile(r"## Raw memo\s*\n+```json\n(.*?)\n```", re.S)

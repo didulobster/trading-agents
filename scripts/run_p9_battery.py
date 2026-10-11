@@ -29,7 +29,7 @@ load_dotenv(override=True)
 import os  # noqa: E402
 
 from app.shared.llm.models import model_env_vars
-from app.agent.trading.domain.validation import (  # noqa: E402
+from app.trading.domain.validation import (  # noqa: E402
     BatteryManifest,
     RunRecord,
 )
@@ -167,7 +167,7 @@ def run_one(ticker: str, thread_id: str, as_of: date, out_dir: Path,
         started_at=datetime.now(timezone.utc).isoformat(),
     )
     cmd = [
-        "uv", "run", "python", "-m", "app.agent.trading.interface.cli", ticker,
+        "uv", "run", "python", "-m", "app.trading.interface.cli", ticker,
         "--as-of", as_of.isoformat(),
         "--thread-id", thread_id,
         "--max-usd", str(max_usd),

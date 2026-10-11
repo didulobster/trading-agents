@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import app.edgar_research.agent.tools as tools
-import app.agent.trading.interface.api as trading_api
+import app.trading.interface.api as trading_api
 import app.edgar_research.api as api
 import app.main as main
 

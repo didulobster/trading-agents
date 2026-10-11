@@ -15,9 +15,9 @@ import os  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from app.agent.trading.infrastructure.checkpointer import build_checkpointer  # noqa: E402
-from app.agent.trading.infrastructure.graph import build_trading_graph  # noqa: E402
-from app.agent.trading.interface.api import router as trading_router  # noqa: E402
+from app.trading.infrastructure.checkpointer import build_checkpointer  # noqa: E402
+from app.trading.infrastructure.graph import build_trading_graph  # noqa: E402
+from app.trading.interface.api import router as trading_router  # noqa: E402
 from app.edgar_research.api import router as edgar_research_router  # noqa: E402
 from app.edgar_research.application.embedding_service import EmbeddingService  # noqa: E402
 from app.edgar_research.application.query_decomposer import QueryDecomposer  # noqa: E402

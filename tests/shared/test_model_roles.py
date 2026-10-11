@@ -117,9 +117,9 @@ def test_ports_bind_the_role_the_registry_says_they_do(monkeypatch):
     that, every later test in the session would see a port pinned to this
     test's models.
     """
-    import app.agent.trading.infrastructure.debate_port as debate
-    import app.agent.trading.infrastructure.news_digest_port as news
-    import app.agent.trading.infrastructure.risk_port as risk
+    import app.trading.infrastructure.debate_port as debate
+    import app.trading.infrastructure.news_digest_port as news
+    import app.trading.infrastructure.risk_port as risk
 
     monkeypatch.setenv(DEFAULT_MODEL_ENV, "claude-haiku-4-5-20251001")
     monkeypatch.setenv("TRADING_DEBATE_MODEL", "deepseek-v4-pro")

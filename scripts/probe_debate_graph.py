@@ -42,8 +42,8 @@ import asyncio
 import sys
 from collections import Counter
 
-from app.agent.trading.domain.debate import DebateTurn
-from app.agent.trading.infrastructure.checkpointer import build_checkpointer
+from app.trading.domain.debate import DebateTurn
+from app.trading.infrastructure.checkpointer import build_checkpointer
 
 
 def probe(debate_turns: list[DebateTurn]) -> dict:

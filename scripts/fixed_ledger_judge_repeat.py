@@ -37,12 +37,12 @@ from datetime import date
 
 from anthropic import AsyncAnthropic
 
-from app.agent.trading.application.risk_ledger import build_risk_ledger
-from app.agent.trading.application.risk_router import RISK_MAX_TURNS
-from app.agent.trading.domain.debate import canonical_claims
-from app.agent.trading.domain.risk import PERSONAS
-from app.agent.trading.infrastructure.risk_port import run_risk_turn
-from app.agent.trading.infrastructure.synthesis_port import run_research_manager, run_risk_judge
+from app.trading.application.risk_ledger import build_risk_ledger
+from app.trading.application.risk_router import RISK_MAX_TURNS
+from app.trading.domain.debate import canonical_claims
+from app.trading.domain.risk import PERSONAS
+from app.trading.infrastructure.risk_port import run_risk_turn
+from app.trading.infrastructure.synthesis_port import run_research_manager, run_risk_judge
 from scripts.risk_determinism_check import _ledger_scores, build_fixed_debate_state
 
 

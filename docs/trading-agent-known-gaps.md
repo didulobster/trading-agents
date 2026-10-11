@@ -509,7 +509,7 @@ consistent rather than a surprise.
    pattern as the claim-count bound Phase 5 already handles this way.
    Caught by the test suite hitting a real API call before this was fixed
    (~$0.06 of avoidable spend, now fixed with every port's LLM calls mocked
-   in tests going forward — see `tests/agent/trading/test_debate_graph.py`,
+   in tests going forward — see `tests/trading/test_debate_graph.py`,
    `test_checkpoint_roundtrip.py`, `test_news_nodes.py`).
 
 2. **[Closed 2026-08-25, found on the one live run] The risk panel's own
@@ -1202,9 +1202,9 @@ than an artifact of one ticker's numbers.
 **What's new here, beyond confirming AVGO**: ASML's diagnosis is mechanism
 C, not "none" — and tracing where `contested` is actually read shows the
 "DISPLAY ONLY" comment added alongside the `normalized_spread` fix
-(`app/agent/trading/domain/risk.py`) is not accurate. `compute_confidence`
+(`app/trading/domain/risk.py`) is not accurate. `compute_confidence`
 was moved onto the continuous `normalized_spread`, as intended — but
-`contested_ids()` (`app/agent/trading/application/risk_ledger.py:108`)
+`contested_ids()` (`app/trading/application/risk_ledger.py:108`)
 still reads the boolean `contested` field, and its output is `expected_ids`
 for the adjudicate/respond turns (`risk_port.py:567`) — i.e. it still
 decides which factors round 2 and round 3 are allowed to re-litigate. A
@@ -1316,7 +1316,7 @@ preliminary_verdict" — a live dangling reference into a deleted field, left
 over from the identity-fix pass earlier in this file. Corrected to describe
 weighing the ledger against the Research Manager's thesis instead.
 
-**Tests**: 8 new (`tests/agent/trading/test_risk_verdict_sampling.py` — 5,
+**Tests**: 8 new (`tests/trading/test_risk_verdict_sampling.py` — 5,
 covering no-panel/majority/no-majority/unanimous/exactly-N-samples;
 `test_synthesis_port.py` — 1, the tool-schema assertion above;
 `test_vault_reports.py` — 2, the renderer's two branches). Full suite: 455
@@ -1633,7 +1633,7 @@ a full read.
 
 **Criterion 4 (injection canary): mechanical half only.** The sanitizer
 fires on the canary fixture and not the control through the real
-`build_digest` path, at zero LLM cost (`tests/agent/trading/
+`build_digest` path, at zero LLM cost (`tests/trading/
 test_injection_canary.py`). The live 3×3 canary/control battery (verdict
 parity across 6 real runs) has not been run.
 
@@ -1658,7 +1658,7 @@ per-run sum and reports whichever is larger, with a new
 `cost_ledger_gap_usd` field making the reconciliation visible rather than
 silently correcting it (same flag-not-assert posture as `data_gaps`/
 `guard_flags`). 3 new tests lock this in
-(`tests/agent/trading/test_cost_log.py`). Deliberately did NOT make the
+(`tests/trading/test_cost_log.py`). Deliberately did NOT make the
 live `check_run_guards` router read the disk log — it stays a pure
 function of state on purpose (testable at zero cost, no I/O on the hot
 path before every LLM call), so it keeps the same blind spot mid-flight;
@@ -1831,7 +1831,7 @@ breach would come from.
 Following the cost basis above one step further turns it from a planning
 note into a blocker. **The five Phase 8 runs that set the $0.5712 mean never
 ran fundamentals.** They used `MOCK_FUNDAMENTALS=1`, which loads
-`app/agent/trading/.fundamentals_cache/<TICKER>.json` and returns before
+`app/trading/.fundamentals_cache/<TICKER>.json` and returns before
 any LLM call. Verified directly: not one `"mode": "trading-fundamentals"`
 line appears in the cost log under any of the five run ids
 (`phase8-battery-{msft,v,asml}-1`, `phase8-exit-criteria-run-{1,acn-1}`).

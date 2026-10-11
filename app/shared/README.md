@@ -1,6 +1,6 @@
 # Shared kernel
 
-Plumbing that both [EDGAR Research](../edgar_research/CONTEXT.md) and Trading use and neither owns: LLM providers, pricing, cost logging, config and the vault. See [CONTEXT-MAP.md](../../CONTEXT-MAP.md).
+Plumbing that both [EDGAR Research](../edgar_research/CONTEXT.md) and [Trading](../trading/CONTEXT.md) use and neither owns: LLM providers, pricing, cost logging, config and the vault. See [CONTEXT-MAP.md](../../CONTEXT-MAP.md).
 
 ## Provider abstraction (`app/shared/llm/`)
 
