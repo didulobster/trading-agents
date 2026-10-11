@@ -154,7 +154,7 @@ SEC EDGAR access is rate-limited client-side (~8 req/sec) and requires a configu
 
 ## Query Pipeline (`POST /ask`)
 
-Handled in `main.py` via `RetrievalService.retrieve_full()` and `llm.answer_question()`:
+Handled in `api.py` via `RetrievalService.retrieve_full()` and `llm.answer_question()`:
 
 1. Validate AskRequest (question, k, optional filters: tickers, filing_types, filed_after/before, section_path_contains).
 2. Decomposition check — regex detection for compound-query signals (compar(e|ed|ing), vs, relative to, trajectory, ratio of). Simple queries skip the LLM decomposition call entirely.
@@ -186,7 +186,7 @@ tests that exercise the same wrong path.
 
 ## HTTP API
 
-FastAPI server (`main.py`). All endpoints are JSON; the agent's tool layer (`tools.py`) calls these over HTTP.
+FastAPI router (`api.py`, mounted by `app/main.py`). All endpoints are JSON; the agent's tool layer (`tools.py`) calls these over HTTP.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
@@ -403,7 +403,7 @@ verified against retrieved chunks."
 ```
 answer_question (llm.py)
   └─ grounding prompt: cite everything, arithmetic on in-context figures only
-/ask (main.py)
+/ask (api.py)
   └─ citation_verifier: literals + quotes vs retrieved chunks,
      calculate results exempt; unverified → AskResponse.unverified
 agent tools (tools.py)

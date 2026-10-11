@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.edgar_research.agent.tools as tools
+import app.edgar_research.api as api
 import app.main as main
 from app.edgar_research.application.extraction_service import FinancialMetrics
 
@@ -82,7 +83,7 @@ def extract_client(monkeypatch):
 
     class _Extractor:
         llm_model = "deepseek-v4-flash"
-        last_usage = main.TokenUsage()
+        last_usage = api.TokenUsage()
 
         async def extract(self, chunks, ticker, period, filing_type, filed_date):
             return FinancialMetrics(
@@ -106,7 +107,7 @@ def extract_client(monkeypatch):
         "MetricsExtractor": _Extractor,
         "MetricsRepository": _Repo,
     }.items():
-        monkeypatch.setattr(main, name, value)
+        monkeypatch.setattr(api, name, value)
     return TestClient(main.app), windows
 
 

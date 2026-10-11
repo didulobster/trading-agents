@@ -300,16 +300,18 @@ are exhaustively testable in milliseconds at zero API cost.
 
 ```
 app/
-  main.py                    FastAPI server
+  main.py                    FastAPI server: mounts each context's router
   edgar_research/            EDGAR Research context (CONTEXT.md, docs/)
     domain/ application/ infrastructure/  ingestion, retrieval, /ask, verifiers
     agent/                   Research agent: researcher.py prompts.py tools.py
+    api.py                   /ask /extract /ingest /corpus-status /latest-filings /news-assess
     llm.py                   grounded answer generation behind /ask
     cli.py                   ingest / corpus-status / eval / extract-metrics
   agent/trading/             Trading pipeline
     domain/                  pure types and rules
     application/             nodes, routers, guards
     infrastructure/          LLM ports, graph, checkpointer, cost log
+    interface/               CLI, run lifecycle, /trading/analyze (api.py)
   shared/                    shared kernel: llm/ (provider routing, model table, pricing),
                              config, cost log path, token usage
 .github/workflows/tests.yml   CI: pytest against a real pgvector service

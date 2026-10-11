@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.edgar_research.agent.tools as tools
+import app.edgar_research.api as api
 import app.main as main
 
 
@@ -146,17 +147,17 @@ def _stub_ask(monkeypatch, repo, seen_filters: list):
         def summary(self):
             return ""
 
-    monkeypatch.setattr(main, "ChunkRepository", lambda: repo)
-    monkeypatch.setattr(main, "RetrievalService", _Retrieval)
-    monkeypatch.setattr(main, "_embedder", lambda: None)
-    monkeypatch.setattr(main, "_decomposer", lambda: type("D", (), {"model": "m"})())
-    monkeypatch.setattr(main, "_report_usage", lambda *a, **k: None)
-    monkeypatch.setattr(main, "verify_answer", lambda *a, **k: _Report())
+    monkeypatch.setattr(api, "ChunkRepository", lambda: repo)
+    monkeypatch.setattr(api, "RetrievalService", _Retrieval)
+    monkeypatch.setattr(api, "_embedder", lambda state: None)
+    monkeypatch.setattr(api, "_decomposer", lambda state: type("D", (), {"model": "m"})())
+    monkeypatch.setattr(api, "_report_usage", lambda *a, **k: None)
+    monkeypatch.setattr(api, "verify_answer", lambda *a, **k: _Report())
 
     async def _answer(**kw):
         return _Answer()
 
-    monkeypatch.setattr(main, "answer_question", _answer)
+    monkeypatch.setattr(api, "answer_question", _answer)
 
 
 def test_an_unmatched_section_is_reported_and_the_filter_dropped(monkeypatch):

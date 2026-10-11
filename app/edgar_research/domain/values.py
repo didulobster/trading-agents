@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, Field
 
-from app.shared.ticker import normalize_ticker
+from app.shared.ticker import Ticker  # noqa: F401  (re-exported for the domain)
 
 # -------------------- Enums --------------------
 
@@ -36,7 +36,6 @@ def _validate_accession(v: str) -> str:
     return s
 
 CIK = Annotated[str, BeforeValidator(_validate_cik)]
-Ticker = Annotated[str, BeforeValidator(normalize_ticker)]
 AccessionNumber = Annotated[str, BeforeValidator(_validate_accession)]
 
 # SectionPath is just a list of strings, but we name it for clarity

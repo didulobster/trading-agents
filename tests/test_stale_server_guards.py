@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import app.edgar_research.agent.tools as tools
+import app.agent.trading.interface.api as trading_api
+import app.edgar_research.api as api
 import app.main as main
 
 
@@ -27,17 +29,17 @@ import app.main as main
 # A field the server does not understand is a 422, not a shrug
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("model,good", [
-    ("AskRequest", {"question": "q"}),
-    ("ExtractRequest", {"ticker": "FIG", "fiscal_period": "FY2025",
-                        "filing_type": "10-K", "filed_date": "2026-02-18"}),
-    ("NewsAssessRequest", {"ticker": "FIG", "headline": "h"}),
-    ("IngestRequest", {"ticker": "FIG"}),
-    ("LatestFilingsRequest", {"ticker": "FIG"}),
-    ("TradingAnalysisRequest", {"ticker": "FIG"}),
+@pytest.mark.parametrize("module,model,good", [
+    (api, "AskRequest", {"question": "q"}),
+    (api, "ExtractRequest", {"ticker": "FIG", "fiscal_period": "FY2025",
+                             "filing_type": "10-K", "filed_date": "2026-02-18"}),
+    (api, "NewsAssessRequest", {"ticker": "FIG", "headline": "h"}),
+    (api, "IngestRequest", {"ticker": "FIG"}),
+    (api, "LatestFilingsRequest", {"ticker": "FIG"}),
+    (trading_api, "TradingAnalysisRequest", {"ticker": "FIG"}),
 ])
-def test_every_request_model_rejects_an_unknown_field(model, good):
-    cls = getattr(main, model)
+def test_every_request_model_rejects_an_unknown_field(module, model, good):
+    cls = getattr(module, model)
     cls(**good)                                  # the happy path still works
     with pytest.raises(ValidationError):
         cls(**good, no_such_field="x")
@@ -46,10 +48,10 @@ def test_every_request_model_rejects_an_unknown_field(model, good):
 def test_the_exact_field_that_was_silently_dropped():
     """A stale server had no `filed_before` on this model, took the request
     anyway, and threw the bound away."""
-    ok = main.LatestFilingsRequest(ticker="FIG", filed_before="2026-03-01")
+    ok = api.LatestFilingsRequest(ticker="FIG", filed_before="2026-03-01")
     assert ok.filed_before.isoformat() == "2026-03-01"
     with pytest.raises(ValidationError) as exc:
-        main.LatestFilingsRequest(ticker="FIG", filed_befor="2026-03-01")
+        api.LatestFilingsRequest(ticker="FIG", filed_befor="2026-03-01")
     assert "filed_befor" in str(exc.value)
 
 
