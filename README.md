@@ -183,15 +183,8 @@ The agent tool layer calls this over HTTP at a hardcoded `http://localhost:8000`
 (`app/edgar_research/agent/tools.py`), so **the server must be running on port 8000 before any agent or
 trading run** — the fundamentals leg goes through it.
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /ask` | Grounded Q&A — decompose, hybrid-retrieve, answer with citations, verify |
-| `POST /extract` | Extract structured financial metrics for one ticker/period |
-| `POST /ingest` | Run the ingestion pipeline for one ticker |
-| `POST /latest-filings` | Compare EDGAR's recent filings against what is in the corpus |
-| `GET /corpus-status` | Same cross-check as the CLI command |
-| `POST /news-assess` | Assess a headline against the watchlist thesis and the corpus |
-| `POST /trading/analyze` | Run the trading graph for one ticker over HTTP |
+Every endpoint, command and script, with how to call it, is listed per context in
+[app/edgar_research/README.md](app/edgar_research/README.md) and [app/trading/README.md](app/trading/README.md).
 
 ### 3. Run the EDGAR research agent
 
@@ -359,7 +352,7 @@ explanations warrant a spot-check.
 ## Further reading
 
 The repo holds two bounded contexts, EDGAR Research and Trading, plus a shared kernel; start at
-`CONTEXT-MAP.md`. EDGAR Research's architecture lives in `app/edgar_research/docs/architecture.md`,
+`CONTEXT-MAP.md`. Each context's README lists its commands and endpoints. EDGAR Research's architecture lives in `app/edgar_research/docs/architecture.md`,
 the shared kernel's in `app/shared/README.md`, and decisions in `docs/adr/`.
 
 `docs/` holds Trading's engineering journals — `tutorial.md` (a full code
