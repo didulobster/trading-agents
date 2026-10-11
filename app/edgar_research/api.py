@@ -358,7 +358,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
 
     async with EdgarClient(user_agent, cache_root / "filings") as edgar:
         resolver = TickerResolver(user_agent, cache_root / "company_tickers.json")
-        cik = await resolver.resolve(req.ticker.upper())
+        cik = await resolver.resolve(req.ticker)
         if not cik:
             raise HTTPException(404, f"Could not resolve ticker {req.ticker}")
 
@@ -387,7 +387,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
                 JOIN listed_securities s ON s.id = f.security_id
                 WHERE s.ticker = %s AND f.accession_number = ANY(%s)
                 """,
-                (req.ticker.upper(), accession_numbers),
+                (req.ticker, accession_numbers),
             )
             rows = await cur.fetchall()
             ingested = {r["accession_number"]: r["status"] for r in rows}
@@ -406,7 +406,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
 
     new_filings = [f for f in filings_list if not f["in_corpus"]]
     return {
-        "ticker": req.ticker.upper(),
+        "ticker": req.ticker,
         "form_types_searched": form_types,
         # Echoed so a reader of the agent's trace can see the run was bounded.
         "filed_before": req.filed_before.isoformat() if req.filed_before else None,

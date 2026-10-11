@@ -36,8 +36,10 @@ uv run python -m app.trading.interface.cli AVGO --only technical --only news   #
 
 **Re-running a thread resumes it.**
 - **Interrupted thread:** it continues from its checkpoint, with the budget and deadline it
-  started with. The flags on the new command line don't change them, and a resume whose
-  deadline has already passed is refused.
+  started with. The flags on the new command line don't change them. The deadline is an
+  absolute instant fixed at the first start, and a resume whose deadline has already passed
+  is refused: the run-level guards only fire between nodes, so it would otherwise pay for the
+  whole fundamentals stage and then abort with no memo.
 - **Finished thread:** it returns the stored result without spending.
 - **To start over** or change the budget, use a new `--thread-id`.
 

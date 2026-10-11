@@ -656,7 +656,7 @@ async def _dispatch(name: str, inputs: dict) -> str:
             )
         run.ask_edgar_calls += 1
 
-    # The server's optional shared secret (see main.require_api_key). Sent
+    # The server's optional shared secret (see app/shared/api_key.py). Sent
     # only when configured, so an unauthenticated local server is unchanged.
     api_key = os.getenv("APP_API_KEY")
     headers = {"X-API-Key": api_key} if api_key else {}

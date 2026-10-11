@@ -502,7 +502,7 @@ def main() -> None:
     args = parser.parse_args()
     today = datetime.today().isoformat()
     task = f"Today's date is {today}. "
-    ticker = args.ticker.upper()
+    ticker = args.ticker
     if args.news:
         prompt = _build_news_prompt(ticker, args.news)
         task += f"Assess this news for {ticker}:\n\n{args.news}"

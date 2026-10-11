@@ -54,10 +54,7 @@ async def trading_analyze(req: TradingAnalysisRequest, request: Request) -> Trad
     artifacts — is `interface.runner`'s, shared with the CLI, so the two
     entry points cannot drift apart again.
     """
-    if not req.ticker.strip():
-        raise HTTPException(400, "ticker must not be empty")
-
-    ticker = req.ticker.strip().upper()
+    ticker = req.ticker
     thread_id = req.thread_id or default_thread_id(ticker)
     as_of = req.as_of_date or date.today()
     graph = request.app.state.trading_graph
