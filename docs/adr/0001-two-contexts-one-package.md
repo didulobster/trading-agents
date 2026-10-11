@@ -10,4 +10,4 @@ EDGAR Research (ingestion, retrieval, `/ask`, the Research agent) and Trading (t
 ## Consequences
 
 - The Research agent belongs to EDGAR Research, not Trading. Trading's fundamentals analyst translates a fundamentals memo into its own fundamentals report at the seam.
-- `/news-assess` belongs to EDGAR Research. It runs the Research agent and has nothing to do with Trading's news digest.
+- `/news-assess` belongs to EDGAR Research. It runs the Research agent and has nothing to do with Trading's news digest. (2026-10-11: the endpoint was later removed for having no caller; news assessment is now CLI-only, via `researcher --news`.)

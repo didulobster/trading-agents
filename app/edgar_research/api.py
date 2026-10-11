@@ -1,5 +1,5 @@
-"""EDGAR Research's HTTP endpoints: retrieval, extraction, ingestion, corpus
-status and news assessment. Mounted by app/main.py."""
+"""EDGAR Research's HTTP endpoints: retrieval, extraction, ingestion and corpus
+status. Mounted by app/main.py."""
 
 import asyncio
 from dataclasses import asdict
@@ -113,18 +113,6 @@ class ExtractRequest(BaseModel):
     filed_date: date
     filed_after: date | None = None
     filed_before: date | None = None
-
-class NewsAssessRequest(BaseModel):
-    # See AskRequest: unknown fields are rejected, not dropped.
-    model_config = ConfigDict(extra="forbid")
-
-    ticker: Ticker
-    headline: str
-
-class NewsAssessResponse(BaseModel):
-    ticker: str
-    headline: str
-    assessment: str
 
 class IngestRequest(BaseModel):
     # See AskRequest: unknown fields are rejected, not dropped.
@@ -443,23 +431,3 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
         "filings": filings_list,
     }
 
-
-@router.post("/news-assess", response_model=NewsAssessResponse, dependencies=SPENDS_MONEY)
-async def news_assess(req: NewsAssessRequest) -> NewsAssessResponse:
-    if not req.headline.strip():
-        raise HTTPException(400, "headline must not be empty")
-    if not req.ticker.strip():
-        raise HTTPException(400, "ticker must not be empty")
-
-    from app.edgar_research.agent.researcher import run_agent, _build_news_prompt
-
-    ticker = req.ticker.strip().upper()
-    prompt = _build_news_prompt(ticker, req.headline)
-    task = f"Assess this news for {ticker}:\n\n{req.headline}"
-    result, _usage = await run_agent(task, prompt)
-
-    return NewsAssessResponse(
-        ticker=ticker,
-        headline=req.headline,
-        assessment=result,
-    )

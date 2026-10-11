@@ -33,7 +33,6 @@ import app.main as main
     (api, "AskRequest", {"question": "q"}),
     (api, "ExtractRequest", {"ticker": "FIG", "fiscal_period": "FY2025",
                              "filing_type": "10-K", "filed_date": "2026-02-18"}),
-    (api, "NewsAssessRequest", {"ticker": "FIG", "headline": "h"}),
     (api, "IngestRequest", {"ticker": "FIG"}),
     (api, "LatestFilingsRequest", {"ticker": "FIG"}),
     (trading_api, "TradingAnalysisRequest", {"ticker": "FIG"}),

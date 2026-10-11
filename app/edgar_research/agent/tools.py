@@ -945,8 +945,8 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
 #
 # Held in a ContextVar, not module globals. As globals it assumed one agent
 # run per process — true for the CLI, false for the API server, where
-# /news-assess and /trading/analyze run the agent inside request handlers and
-# two overlapping requests shared (and reset) each other's provenance record
+# /trading/analyze runs the agent inside a request handler and two
+# overlapping requests shared (and reset) each other's provenance record
 # and ask_edgar budget. A wrong provenance record defeats the calculate guard
 # and the memo verifier without raising anything. Each asyncio task has its
 # own context, so each run now sees only its own state; `reset_run_provenance`

@@ -4,8 +4,8 @@ docs/code_review.md, Medium #11: the research tools kept their provenance
 record, calc results, session log, delegated usage, ask_edgar counter and
 calc cache in module globals, and researcher kept the vault run stamp in
 one — safe for the CLI's one run per process, not for the API server, where
-/news-assess and /trading/analyze run the agent inside request handlers and
-two overlapping requests reset and read each other's state. A wrong
+/trading/analyze runs the agent inside a request handler and two
+overlapping requests reset and read each other's state. A wrong
 provenance record defeats the calculate guard and the memo verifier with no
 error. The state now lives in ContextVars, so each task sees its own.
 """
