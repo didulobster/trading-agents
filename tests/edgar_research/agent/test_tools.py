@@ -317,3 +317,19 @@ def test_session_log_records_full_untruncated_tool_results(monkeypatch):
     log = get_session_log()
     assert "[tool call] ask_edgar" in log
     assert long_tail in log  # beyond the 300-char console preview
+
+
+def test_tool_traces_stay_off_stdout(monkeypatch, capsys):
+    """stdout is the memo: `researcher TICKER 2>/dev/null > memo.md` is
+    documented to give a clean one. The call line went to stdout while
+    every result line went to stderr, so a 2026-10-11 ACN memo opened
+    with 43 lines of `[tool call] ...`."""
+    async def fake_dispatch(name, inputs):
+        return "ok"
+
+    monkeypatch.setattr(tools_module, "_dispatch", fake_dispatch)
+    asyncio.run(execute_tool("ask_edgar", {"question": "revenue?"}))
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "[tool call] ask_edgar" in err

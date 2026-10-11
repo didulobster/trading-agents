@@ -486,7 +486,7 @@ def _validate_tool_inputs(name: str, inputs: dict) -> str | None:
 
 
 async def execute_tool(name: str, inputs: dict) -> str:
-    print(f"  [tool call] {name}({inputs})")
+    print(f"  [tool call] {name}({inputs})", file=sys.stderr)
     record_log_line(f"  [tool call] {name}({inputs})")
 
     # Before dispatch, and returned WITHOUT recording into the provenance
@@ -1010,6 +1010,34 @@ def get_delegated_usage() -> dict[str | None, TokenUsage]:
     model that spent it. The key is None for usage from a server that did
     not name its model."""
     return dict(_state().delegated_usage)
+
+
+def tool_usage_by_model(
+    delegated: dict[str | None, TokenUsage], default_model: str
+) -> list[tuple[str, TokenUsage]]:
+    """Server-side spend as one entry per model, each to be priced at its
+    own rate; empty entries dropped.
+
+    The server's models need not be the agent's: pricing a deepseek-served
+    /ask at a gpt-5.6-luna agent's rate under-counted it by ~44% on
+    2026-09-11, and the budget guard waved through the difference. Usage
+    from a server that named no model is attributed to `default_model`, as
+    its own entry rather than merged into one that did name it.
+    """
+    entries = []
+    for model, usage in delegated.items():
+        if usage.is_empty:
+            continue
+        if model is None:
+            print(
+                f"[tool usage] server reported usage without a model — pricing "
+                f"it at {default_model}, which is wrong if the server's "
+                f"answer/extraction models differ. Restart the API server.",
+                file=sys.stderr,
+            )
+            model = default_model
+        entries.append((model, usage))
+    return entries
 
 def record_log_line(text: str) -> None:
     """Append a line to the run's session log — the full terminal trace

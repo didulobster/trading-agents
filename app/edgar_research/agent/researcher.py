@@ -34,7 +34,7 @@ import yaml
 
 from datetime import date, datetime
 from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
+from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_delegated_usage, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance, tool_usage_by_model
 from app.edgar_research.application.memo_verifier import verify_memo
 from app.shared.llm import MODEL_PRICING, get_client
 from app.shared.llm.models import model_for
@@ -512,7 +512,18 @@ def main() -> None:
         prompt = ANALYST_SYSTEM_PROMPT
         mode = "research"
 
-    result, usage = asyncio.run(run_agent(task, prompt))
+    asyncio.run(_run_and_save(task, prompt, ticker, mode))
+
+
+async def _run_and_save(task: str, prompt: str, ticker: str, mode: str) -> None:
+    """Run the agent, then log and save what it produced, in one task.
+
+    The run's state — session log, tool spend — lives in the task
+    `run_agent` creates it in. Read back after `asyncio.run` returned, it
+    was a different, empty state: standalone memos were saved without
+    their provenance and the tools' spend was never logged.
+    """
+    result, usage = await run_agent(task, prompt)
     print(result)
 
     cost = log_cost(ticker, mode, usage, AGENT_MODEL)
@@ -523,6 +534,12 @@ def main() -> None:
         usage.input_tokens, usage.cache_write_tokens,
         usage.cache_read_tokens, usage.output_tokens,
     )
+
+    # What the tools spent server-side (/ask, /extract), each at its own
+    # model's rate — logged under its own mode, as Trading's port does.
+    for model, tool_usage in tool_usage_by_model(get_delegated_usage(), AGENT_MODEL):
+        tool_cost = log_cost(ticker, f"{mode}-tools", tool_usage, model)
+        _trace(f"  tools, {model}: ${tool_cost:.4f}" if tool_cost is not None else f"  tools, {model}: unpriced")
 
 
 if __name__ == "__main__":
