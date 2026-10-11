@@ -18,7 +18,7 @@ import secrets
 from fastapi import Depends, Header
 
 from app.shared.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
-from app.domain.values import Ticker, normalize_ticker
+from app.edgar_research.domain.values import Ticker, normalize_ticker
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware

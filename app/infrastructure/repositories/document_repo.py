@@ -1,4 +1,4 @@
-from app.domain.document import Document
+from app.edgar_research.domain.document import Document
 from .db import get_connection
 
 class DocumentRepository:

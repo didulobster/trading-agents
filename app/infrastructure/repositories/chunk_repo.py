@@ -1,4 +1,4 @@
-from app.domain.chunk import Chunk
+from app.edgar_research.domain.chunk import Chunk
 from .db import get_connection
 
 from dataclasses import dataclass

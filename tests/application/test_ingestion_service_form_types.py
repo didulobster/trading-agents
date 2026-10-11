@@ -17,7 +17,7 @@ in an ordinary sync test function instead of pytest.mark.asyncio.
 import asyncio
 
 from app.application.ingestion_service import IngestionService
-from app.domain.listed_security import ListedSecurity
+from app.edgar_research.domain.listed_security import ListedSecurity
 
 
 class _FakeEdgar:

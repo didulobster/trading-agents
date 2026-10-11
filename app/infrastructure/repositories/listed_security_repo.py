@@ -1,4 +1,4 @@
-from app.domain.listed_security import ListedSecurity
+from app.edgar_research.domain.listed_security import ListedSecurity
 from .db import get_connection
 
 class ListedSecurityRepository:

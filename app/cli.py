@@ -18,7 +18,7 @@ from app.application.extraction_service import MetricsExtractor
 from app.application.ingestion_service import IngestionService
 from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService
-from app.domain.values import FilingStatus
+from app.edgar_research.domain.values import FilingStatus
 from app.infrastructure.edgar.client import EdgarClient
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.chunking.section_chunker import chunk_filing
@@ -227,9 +227,9 @@ async def _run_eval(test_set_path: Path, k, mode: str) -> None:
 
 async def _smoke_persist(ticker: str) -> None:
     from datetime import date
-    from app.domain.listed_security import ListedSecurity
-    from app.domain.filing import Filing
-    from app.domain.values import FilingStatus
+    from app.edgar_research.domain.listed_security import ListedSecurity
+    from app.edgar_research.domain.filing import Filing
+    from app.edgar_research.domain.values import FilingStatus
     from app.infrastructure.repositories.db import init_pool, close_pool
     from app.infrastructure.repositories.listed_security_repo import (
         ListedSecurityRepository,

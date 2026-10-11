@@ -1,5 +1,5 @@
-from app.domain.filing import Filing
-from app.domain.values import FilingStatus
+from app.edgar_research.domain.filing import Filing
+from app.edgar_research.domain.values import FilingStatus
 from .db import get_connection
 
 class FilingRepository:

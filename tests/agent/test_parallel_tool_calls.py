@@ -104,7 +104,7 @@ async def test_decomposed_sub_queries_are_retrieved_concurrently_and_fused_by_ag
     from app.application.query_decomposer import DecompositionResult
     from app.application.retrieval_service import RetrievalService
     from datetime import date
-    from app.domain.chunk import Chunk
+    from app.edgar_research.domain.chunk import Chunk
     from app.infrastructure.repositories.chunk_repo import RetrievedChunk
 
     state = {"in_flight": 0, "peak": 0}
