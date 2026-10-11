@@ -182,24 +182,26 @@ def test_the_cache_is_keyed_on_the_date_as_well_as_the_ticker():
 
 @pytest.mark.anyio
 async def test_the_report_is_dated_by_the_analysis_date_not_the_wall_clock(monkeypatch):
+    from app.edgar_research.fundamentals_memo import FundamentalsMemo
+    from app.shared.cost import UsageSummary
+
     captured = {}
 
-    async def fake_run_agent(task, system_prompt, **kw):
-        from app.shared.cost import UsageSummary
-        captured["task"], captured["as_of"] = task, kw.get("as_of")
-        return "# memo", UsageSummary()
+    async def fake_memo(ticker, as_of, **_):
+        captured["as_of"] = as_of
+        return FundamentalsMemo(
+            text="# memo", model="m", usage=UsageSummary(), tool_usage=[], provenance="",
+        )
 
     monkeypatch.setattr(port, "_USE_MOCK", False)
-    monkeypatch.setattr(port, "run_agent", fake_run_agent)
+    monkeypatch.setattr(port, "write_fundamentals_memo", fake_memo)
     monkeypatch.setattr(port, "log_cost", lambda *a, **k: 0.01)
-    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
-    monkeypatch.setattr(port, "get_delegated_usage", lambda: {})
+    monkeypatch.setattr(port, "save_output", lambda *a, **k: "vault/path")
     monkeypatch.setattr(port, "_CACHE_DIR", __import__("pathlib").Path("/tmp/_fundamentals_test"))
 
     report = await port.get_fundamentals_report("ACN", AS_OF, run_id="r1")
 
     assert report.generated_at == AS_OF != date.today()
-    assert "2026-03-01" in captured["task"]
     assert captured["as_of"] == AS_OF
 
 

@@ -22,7 +22,7 @@ import app.agent.trading.application.nodes as nodes
 import app.agent.trading.infrastructure.fundamentals_port as port
 from app.agent.trading.domain.budget import CostEvent, RunBudget
 from app.agent.trading.domain.decision_memo import Verdict
-from app.shared.token_usage import TokenUsage
+from app.edgar_research.fundamentals_memo import Spend
 
 from tests.agent.trading.test_risk_verdict_sampling import (
     _memo,
@@ -175,41 +175,34 @@ async def test_without_a_check_the_loop_is_unchanged(agent, monkeypatch):
 # fundamentals_port.budget_stop_check
 # ---------------------------------------------------------------------------
 
-def _agent_usage(input_tokens: int = 0):
-    u = UsageSummary()
-    u.input_tokens = input_tokens
-    return u
+def _spend(usd: float) -> Spend:
+    return Spend(model="m", usage=UsageSummary(), usd=usd)
 
 
 def test_no_budget_means_no_check():
     assert port.budget_stop_check(None) is None
 
 
-def test_under_budget_the_check_passes(monkeypatch):
-    monkeypatch.setattr(port, "get_delegated_usage", lambda: {})
+def test_under_budget_the_check_passes():
     check = port.budget_stop_check(_budget(1.0), [_event(0.10)])
-    assert check(_agent_usage(1_000)) is None
+    assert check(_spend(0.01)) is None
 
 
-def test_delegated_spend_is_priced_at_its_own_model_and_counts(monkeypatch):
-    """1M DeepSeek input tokens are $0.44 at the table's rate — priced as
-    DeepSeek regardless of the agent's model, like the final accounting."""
-    monkeypatch.setattr(port, "get_delegated_usage", lambda: {
-        "deepseek-v4-flash": TokenUsage(input_tokens=1_000_000),
-    })
+def test_in_flight_spend_counts_against_the_run_s_earlier_events():
+    """The memo run's spend so far (its tools' server-side calls included,
+    priced inside EDGAR Research) is added to what the run already spent."""
     under = port.budget_stop_check(_budget(1.0), [_event(0.50)])
     over = port.budget_stop_check(_budget(1.0), [_event(0.60)])
 
-    assert under(_agent_usage()) is None                 # 0.50 + 0.44 < 1.00
-    reason = over(_agent_usage())                        # 0.60 + 0.44 >= 1.00
+    assert under(_spend(0.44)) is None                   # 0.50 + 0.44 < 1.00
+    reason = over(_spend(0.44))                          # 0.60 + 0.44 >= 1.00
     assert reason.startswith("budget_exceeded")
     assert "$1.00 run budget" in reason
 
 
-def test_a_passed_deadline_stops_the_loop(monkeypatch):
-    monkeypatch.setattr(port, "get_delegated_usage", lambda: {})
+def test_a_passed_deadline_stops_the_loop():
     check = port.budget_stop_check(_budget(10.0, minutes=-1))
-    assert check(_agent_usage()).startswith("deadline_exceeded")
+    assert check(_spend(0.0)).startswith("deadline_exceeded")
 
 
 @pytest.mark.anyio
