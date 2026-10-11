@@ -79,10 +79,9 @@ class MetricsExtractor:
         figures = ExtractedFigures.model_validate(tool_call.input)
 
         # Stashed on the instance rather than added to the return type:
-        # FinancialMetrics is a domain model that gets persisted and
-        # compared, and token counts are neither a financial metric nor
-        # something that should end up in the metrics table. The caller
-        # reads `last_usage` immediately after awaiting `extract`.
+        # FinancialMetrics is what /extract returns to the agent, and token
+        # counts are not a financial metric. The caller reads `last_usage`
+        # immediately after awaiting `extract`.
         self.last_usage = TokenUsage.from_response(response.usage)
 
         return FinancialMetrics(

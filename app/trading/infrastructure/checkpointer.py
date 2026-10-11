@@ -31,8 +31,8 @@ def _db_uri() -> str:
 
 connection_kwargs = {"autocommit": True, "prepare_threshold": 0}
 
-# Every custom domain type that lands in TradingState needs an entry here —
-# add to this list as Phase 2+ introduces FundamentalsReport, TechnicalReport, etc.
+# Every custom domain type that lands in TradingState needs an entry here;
+# add one whenever a new type joins the state.
 ALLOWED_MSGPACK_MODULES = [
     ("app.trading.domain.decision_memo", "Verdict"),
     ("app.trading.domain.decision_memo", "DecisionMemo"),

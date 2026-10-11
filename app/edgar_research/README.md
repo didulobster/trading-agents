@@ -18,7 +18,7 @@ uv run uvicorn app.main:app --reload
 | Endpoint | Spends | What it is for | Called by |
 |---|---|---|---|
 | `POST /ask` | LLM | Grounded Q&A: decompose, hybrid-retrieve, answer with citations, verify them | agent tool `ask_edgar` |
-| `POST /extract` | LLM | Extract structured financial metrics for one filing and store them | agent tool `extract_metrics` |
+| `POST /extract` | LLM | Extract structured financial metrics for one filing | agent tool `extract_metrics` |
 | `POST /ingest` | embeddings | Run the ingestion pipeline for one ticker | agent tool `ingest_ticker` |
 | `POST /latest-filings` | — | List a ticker's filings on EDGAR and mark which are already in the corpus | agent tool `check_latest_filings` |
 | `GET /corpus-status` | — | What is in the corpus, with integrity issues and searchable sections | agent tool `check_corpus` |

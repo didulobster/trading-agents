@@ -210,20 +210,8 @@ claims to be checking against.
 uv run python -m app.trading.interface.cli AVGO --as-of 2026-08-29 --max-usd 0.75
 ```
 
-| Flag | Meaning |
-|---|---|
-| `--as-of DATE` | Analysis date. All news and price data are bounded at or before it. Defaults to today — the one `date.today()` in the trading CLI, at the argument parser. |
-| `--only ANALYST` | Run only this analyst (`fundamentals`, `technical`, `news`); repeat to select several. The synthesizer still runs and records the others as data gaps. |
-| `--max-usd FLOAT` | Hard per-run cost cap. Default `0.75`. |
-| `--wall-clock-timeout-s FLOAT` | Hard per-run deadline in seconds. Default `1800`. |
-| `--thread-id ID` | Checkpoint thread. Defaults to `trading-<TICKER>`; a `--only` subset gets its own suffix so a narrower graph never resumes a full run's checkpoint. |
-
-**Resumes inherit the checkpoint's budget and deadline, never the flags on the current
-command line.** The deadline is an absolute instant fixed when the run first started, not a
-fresh window per attempt. The CLI refuses a resume whose inherited deadline has already
-passed, and says so — because the run-level guards can only fire between nodes, so a doomed
-resume would otherwise pay for the whole fundamentals stage and then abort with no memo.
-To change a budget, start a fresh thread.
+Flags, how resuming works and the `/trading/analyze` endpoint are in
+[app/trading/README.md](app/trading/README.md).
 
 ## What a run produces
 

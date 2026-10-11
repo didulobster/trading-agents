@@ -144,7 +144,7 @@ The fundamentals memo says so in its own words:
 
 All 24 `ask_edgar` calls went through the restarted server, so `retrieve_full`'s
 sum-merge was exercised. Whether it retrieves *better* is not measurable from a
-pipeline run — that needs `app/edgar_research/eval/` with the `full` mode, and the corpus it needs is
+pipeline run — that needs the eval harness with the `full` mode (since removed, 2026-10-11), and the corpus it needs is
 gitignored.
 
 ## Two defects run 2 exposed
