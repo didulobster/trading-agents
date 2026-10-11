@@ -154,7 +154,7 @@ SEC EDGAR access is rate-limited client-side (~8 req/sec) and requires a configu
 
 ## Query Pipeline (`POST /ask`)
 
-Handled in `api.py` via `RetrievalService.retrieve_full()` and `llm.answer_question()`:
+Handled in `api.py` via `RetrievalService.retrieve_full()` and `answer_service.answer_question()`:
 
 1. Validate AskRequest (question, k, optional filters: tickers, filing_types, filed_after/before, section_path_contains).
 2. Decomposition check — regex detection for compound-query signals (compar(e|ed|ing), vs, relative to, trajectory, ratio of). Simple queries skip the LLM decomposition call entirely.
@@ -162,7 +162,7 @@ Handled in `api.py` via `RetrievalService.retrieve_full()` and `llm.answer_quest
 4. Hybrid retrieval per sub-query — vector search (HNSW over pgvector) and BM25 (ts_rank over the generated tsvector column) run in parallel, merged by reciprocal rank fusion (k=60).
 5. Results across sub-queries merged and deduplicated by chunk id, keeping the highest similarity per chunk, truncated to top-k.
 6. `citations.format_context_block()` tags each chunk [TICKER FORM YEAR §Item].
-7. `llm.answer_question()` calls Claude with a grounding prompt that requires citing every fact, forbids answering from general knowledge, and permits simple arithmetic on figures present in the context.
+7. `answer_service.answer_question()` calls Claude with a grounding prompt that requires citing every fact, forbids answering from general knowledge, and permits simple arithmetic on figures present in the context.
 8. Citation tags present in the answer are extracted by substring match.
 9. `AskResponse` bundles answer, cited tags, and source chunks with previews and similarity scores.
 
@@ -401,7 +401,7 @@ verified against retrieved chunks."
 #### Layers, as implemented
  
 ```
-answer_question (llm.py)
+answer_question (answer_service.py)
   └─ grounding prompt: cite everything, arithmetic on in-context figures only
 /ask (api.py)
   └─ citation_verifier: literals + quotes vs retrieved chunks,
