@@ -42,6 +42,10 @@ import asyncio
 import sys
 from collections import Counter
 
+from app.shared.config import load_env
+
+load_env()
+
 from app.trading.domain.debate import DebateTurn
 from app.trading.infrastructure.checkpointer import build_checkpointer
 

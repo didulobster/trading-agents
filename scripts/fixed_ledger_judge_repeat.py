@@ -37,6 +37,10 @@ from datetime import date
 
 from anthropic import AsyncAnthropic
 
+from app.shared.config import load_env
+
+load_env()
+
 from app.trading.application.risk_ledger import build_risk_ledger
 from app.trading.application.risk_router import RISK_MAX_TURNS
 from app.trading.domain.debate import canonical_claims

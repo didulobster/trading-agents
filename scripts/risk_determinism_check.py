@@ -68,6 +68,10 @@ from datetime import date
 
 from anthropic import AsyncAnthropic
 
+from app.shared.config import load_env
+
+load_env()
+
 from app.trading.application import nodes
 from app.trading.application.debate_router import MAX_TURNS as DEBATE_MAX_TURNS
 from app.trading.application.risk_ledger import build_risk_ledger
