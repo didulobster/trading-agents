@@ -632,6 +632,10 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
         result = safe_calculate(expression, inputs.get("inputs", []))
         record_calc_result(result)
+        # Said, because a bare 10874360000.0 from thousands-scale inputs read
+        # to the agent as an error. No digits: the note must not add a number.
+        if any(_UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0 for i in inputs.get("inputs", [])):
+            result += " (in ones: inputs were converted from their declared units)"
         cache[key] = result
         return result
 
@@ -810,6 +814,13 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
          was retrieved *for the period being claimed*. This is the exact
          gap citation_verifier.py's docstring names as out of its scope:
          "wrong fiscal-year attribution of a real figure."
+
+    An input equal to an earlier PASSING calculate result this run skips
+    checks 4-5: it was built only from figures that passed them, so reusing
+    it adds nothing a single expression could not do. It must be declared
+    at a scale of one, because calculate returns results already
+    normalized. A rejected call's value is never recorded as a result, so
+    it cannot be reused.
     """
     literals = {
         float(m) for m in re.findall(r"\d+\.?\d*(?:[eE][+-]?\d+)?", expression)
@@ -858,6 +869,18 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"same footing before combining them; do not convert by hand."
         )
 
+    prior = set(_state().calc_results)
+    chained = [i for i in inputs if i.get("value") is not None and float(i["value"]) in prior]
+    rescaled = [i for i in chained if _UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0]
+    if rescaled:
+        detail = "; ".join(f"{i['value']} unit={i['unit']!r}" for i in rescaled)
+        return (
+            f"Rejected: {detail} is an earlier calculate result, and those are "
+            f"already in ones (or a ratio/percent). Declare it with unit 'ones', "
+            f"'ratio' or 'percent' so it is not scaled a second time."
+        )
+    chained_values = {float(i["value"]) for i in chained}
+
     # 4 — declared but never returned by any tool
     corpus = _provenance_corpus()
     if corpus:
@@ -865,6 +888,7 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             i for i in inputs
             if i.get("value") is not None
             and float(i["value"]) not in _OPERATION_SCALARS
+            and float(i["value"]) not in chained_values
             and not _appears_in_output(float(i["value"]), corpus)
         ]
         if unsourced:
@@ -878,7 +902,8 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
                 f"appeared in any ask_edgar or extract_metrics result. Either "
                 f"retrieve the figure first, or — if you derived it yourself — "
                 f"show the derivation as a separate calculate call using only "
-                f"retrieved figures."
+                f"retrieved figures. An earlier calculate result can be reused "
+                f"at its exact returned value."
             )
 
         # 5 — real value, wrong period label
@@ -888,7 +913,7 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             if i.get("value") is None:
                 continue
             value = float(i["value"])
-            if value in _OPERATION_SCALARS:
+            if value in _OPERATION_SCALARS or value in chained_values:
                 continue
             year = _fiscal_year(i.get("fiscal_period", ""))
             if year is None:
