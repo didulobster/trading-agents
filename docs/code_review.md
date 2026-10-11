@@ -63,7 +63,7 @@ While there, fold in the line that is duplicated *because* of the awkward placem
 
 ## 2. `researcher.py` is the trading pipeline's vault library — `agent/researcher.py` [verified]
 
-`app/agent/researcher.py` is the standalone research-agent CLI. It is also where seven trading modules get their infrastructure:
+`app/edgar_research/agent/researcher.py` is the standalone research-agent CLI. It is also where seven trading modules get their infrastructure:
 
 | Imported from `researcher` | By |
 |---|---|
@@ -235,7 +235,7 @@ Rejecting these is part of the review — each looks like duplication and is not
 - **`_assert_within_budget` in the three ports.** Each is a four-line call into `structured_call.assert_within_budget` supplying its own ceiling and message. The shared part is already shared; what is left is configuration.
 - **`save_*_transcript` / `_format_*_markdown` across five ports.** They all route through one `_save_output`; the formatters render genuinely different documents.
 - **`cli.py`'s thin `@app.command` wrappers around `asyncio.run(_impl(...))`.** That is the Typer idiom, not duplication.
-- **`app/llm.py`.** A 92-line module at the top level while its peers sit under `application/` — but it has one importer and one job, and moving it is churn with no reader benefit. Mentioned only so the next reviewer can skip it.
+- **`app/edgar_research/llm.py`.** A 92-line module at the top level while its peers sit under `application/` — but it has one importer and one job, and moving it is churn with no reader benefit. Mentioned only so the next reviewer can skip it.
 
 ## Suggested order
 

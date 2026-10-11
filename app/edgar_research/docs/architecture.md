@@ -299,7 +299,7 @@ the decomposition regex missing "Compare X and Y".
  
 **Approach: raw Claude tool-use, no framework.** The agent is an HTTP
 client of the existing FastAPI server — orchestration only, no new
-retrieval logic. `app/agent/{researcher,prompts,tools}.py`.
+retrieval logic. `app/edgar_research/agent/{researcher,prompts,tools}.py`.
  
 **Loop.** `MAX_TURNS`-bounded conversation; the model plans, calls tools,
 reads results, continues until it produces a memo. On budget exhaustion the

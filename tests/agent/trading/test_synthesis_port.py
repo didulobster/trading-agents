@@ -722,7 +722,7 @@ def test_research_manager_and_risk_judge_follow_the_project_wide_model_by_defaul
     deprecated `temperature` outright, which undercuts the determinism
     guarantee these two roles exist to support. See synthesis_port's module
     docstring and create_with_temperature_fallback."""
-    from app.agent.researcher import AGENT_MODEL
+    from app.edgar_research.agent.researcher import AGENT_MODEL
 
     assert port.RESEARCH_MANAGER_MODEL == AGENT_MODEL
     assert port.RISK_JUDGE_MODEL == AGENT_MODEL

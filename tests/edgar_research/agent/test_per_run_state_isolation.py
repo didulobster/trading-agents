@@ -20,7 +20,7 @@ import pytest
 from langgraph.graph import END, START, StateGraph
 
 from app.shared import vault
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 from app.shared.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 
 # Every wait is bounded: a regression here would otherwise deadlock the suite

@@ -61,7 +61,7 @@ def preflight() -> list[str]:
     The one that actually bit (2026-08-27, first battery attempt): the
     research agent behind `fundamentals_node` does not talk to the database
     directly — it calls tools over HTTP against the FastAPI app at
-    `app.agent.tools.API_BASE`. With the server down, all six runs died in
+    `app.edgar_research.agent.tools.API_BASE`. With the server down, all six runs died in
     `check_corpus` with `httpx.ConnectError` before spending a cent. Every
     prior battery in this repo used `MOCK_FUNDAMENTALS=1`, which returns
     from a cache file before any tool call, so no earlier phase ever
@@ -72,7 +72,7 @@ def preflight() -> list[str]:
     """
     problems = []
 
-    from app.agent.tools import API_BASE
+    from app.edgar_research.agent.tools import API_BASE
 
     try:
         import httpx

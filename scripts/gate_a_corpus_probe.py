@@ -92,7 +92,7 @@ async def main() -> int:
             print(f"THIN (documented condition for a short filing history): {', '.join(thin)}")
         if failed:
             print(f"GATE A FAILS — no retrievable corpus for: {', '.join(failed)}")
-            print("Ingest before running the battery: uv run python -m app.cli ingest <TICKER>")
+            print("Ingest before running the battery: uv run python -m app.edgar_research.cli ingest <TICKER>")
             return 1
         print("GATE A PASSES — every ticker returns filing text.")
         return 0

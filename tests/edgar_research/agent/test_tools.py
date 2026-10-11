@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-import app.agent.tools as tools_module
-from app.agent.tools import (
+import app.edgar_research.agent.tools as tools_module
+from app.edgar_research.agent.tools import (
     execute_tool,
     get_provenance_corpus,
     get_session_log,

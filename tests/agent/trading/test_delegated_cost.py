@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 from app.agent.trading.domain.budget import CostEvent, RunBudget, total_spend
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.shared.token_usage import (

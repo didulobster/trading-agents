@@ -20,7 +20,7 @@ from datetime import date, timedelta
 
 import pytest
 
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 import app.agent.trading.application.nodes as nodes
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
 from app.agent.trading.infrastructure import fundamentals_port as port

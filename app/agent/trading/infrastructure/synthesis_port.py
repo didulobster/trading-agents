@@ -168,7 +168,7 @@ class MemoVerificationError(Exception):
 # So this is written as a fallback rule rather than a repetition of rule 1:
 # given that figures do get restated, the units have to survive the
 # restatement. Ported from the research agent's own prompt
-# (app/agent/prompts.py), where the identical rule demonstrably works —
+# (app/edgar_research/agent/prompts.py), where the identical rule demonstrably works —
 # NFLX's fundamentals report says "a 0.41-turn improvement" and it is the
 # SYNTHESIS layer, which had no such rule, that turned it into "41 basis
 # points". A 27% reduction in gross leverage reported as 0.41 percentage

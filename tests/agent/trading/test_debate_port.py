@@ -1223,7 +1223,7 @@ def test_the_debate_model_follows_the_project_wide_setting():
     node."""
     import os
 
-    from app.agent.researcher import AGENT_MODEL
+    from app.edgar_research.agent.researcher import AGENT_MODEL
 
     if not os.getenv("TRADING_DEBATE_MODEL"):
         assert port.DEBATE_MODEL == AGENT_MODEL

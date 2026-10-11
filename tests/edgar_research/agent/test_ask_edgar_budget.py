@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 
 
 @pytest.fixture(autouse=True)

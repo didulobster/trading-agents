@@ -1,20 +1,20 @@
 """Wraps researcher.py's existing agent for the trading pipeline.
-Deliberately calls the same path as `python -m app.agent.researcher TICKER`
+Deliberately calls the same path as `python -m app.edgar_research.agent.researcher TICKER`
 (full checklist mode) — not /ask, which is a different agent behavior.
 """
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from app.agent.researcher import (
+from app.edgar_research.agent.researcher import (
     AGENT_MODEL,
     StopCheck,
     save_memo,
     run_agent,
 )
 from app.shared.cost import UsageSummary, compute_cost, log_cost
-from app.agent.tools import get_delegated_usage
-from app.agent.prompts import ANALYST_SYSTEM_PROMPT
+from app.edgar_research.agent.tools import get_delegated_usage
+from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.agent.trading.application.guards import check_run_guards
 from app.agent.trading.domain.budget import CostEvent, RunBudget
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport

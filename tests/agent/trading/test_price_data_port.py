@@ -274,7 +274,7 @@ def test_no_bars_is_logged_as_no_bars_not_as_a_failure(monkeypatch, caplog):
 def test_the_trading_cli_configures_logging():
     """Without this, every logger.info in the pipeline goes nowhere and
     WARNING arrives via Python's handler-of-last-resort — unformatted, with
-    no logger name. app/cli.py always did it; the entry point that spends
+    no logger name. app/edgar_research/cli.py always did it; the entry point that spends
     the most per invocation did not."""
     import inspect
 

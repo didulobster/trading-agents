@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.agent.researcher as researcher
+import app.edgar_research.agent.researcher as researcher
 from app.shared.cost import UsageSummary
 import app.agent.trading.application.nodes as nodes
 import app.agent.trading.infrastructure.fundamentals_port as port

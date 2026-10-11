@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.shared import vault
-import app.agent.tools as tools
+import app.edgar_research.agent.tools as tools
 import app.main as main
 from app.shared.ticker import normalize_ticker, ticker_arg
 

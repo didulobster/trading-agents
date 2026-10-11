@@ -102,7 +102,7 @@ The server-side answer calls are 56% of the run and essentially uncached — eac
 sends 8 fresh chunks (~5,700 tokens) behind a ~300-token cacheable system prompt, so
 prefix caching has almost nothing to bite on. #4 improved the other 11%. If run cost
 becomes a target again, this is where the money is — but note `ASK_EDGAR_K = 5` was
-already tried and reverted on retrieval-coverage grounds (`app/agent/tools.py`), so it
+already tried and reverted on retrieval-coverage grounds (`app/edgar_research/agent/tools.py`), so it
 is not a free win.
 
 ---
@@ -174,7 +174,7 @@ record of what either vendor said. Two causes:
   called directly), and that went to INFO.
 - `app/agent/trading/interface/cli.py` **configured no logging at all** — so INFO went
   nowhere, and WARNING arrived only through Python's handler-of-last-resort, unformatted
-  and unattributed. `app/cli.py` has always called `basicConfig`; the entry point that
+  and unattributed. `app/edgar_research/cli.py` has always called `basicConfig`; the entry point that
   spends the most per invocation never did.
 
 Fixed both. Returning `None` from a vendor helper is never routine — it either triggers
@@ -194,7 +194,7 @@ yfinance**, which is flaky. That is a standing constraint on `--as-of` runs, not
 
 - [x] `check_corpus` / `/corpus-status` bounded at the analysis date (4 query methods, the endpoint, the tool)
 - [x] Vendor no-data logged at WARNING, not INFO — it is never a routine outcome
-- [x] `logging.basicConfig` in the trading CLI, matching `app/cli.py`
+- [x] `logging.basicConfig` in the trading CLI, matching `app/edgar_research/cli.py`
 - [x] Tests for all three, including one quoting the leaked memo sentence as the reason
 
 ---
