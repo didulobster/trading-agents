@@ -16,7 +16,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.shared.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
-from app.application.number_matching import value_in_text, value_spans
+from app.edgar_research.application.number_matching import value_in_text, value_spans
 
 
 # Base URL of your running FastAPI server. Override when you wire step 2.
@@ -1107,7 +1107,7 @@ def _provenance_corpus() -> str:
 # ---------------------------------------------------------------------------
  
 def _appears_in_output(value: float, corpus: str) -> bool:
-    """Token-anchored (app/application/number_matching.py). This was a
+    """Token-anchored (app/edgar_research/application/number_matching.py). This was a
     substring search, so a declared input counted as "retrieved" whenever its
     digits sat inside any larger number — every two-digit integer inside a
     year ("12" in "2012"), "7.4" inside "17.45". The memo verifier had

@@ -42,7 +42,7 @@ import re
 from dataclasses import dataclass, field
 from itertools import combinations, product
 
-from app.application.number_matching import (
+from app.edgar_research.application.number_matching import (
     NUMBER_RE as _NUMBER_RE,
     half_step as _half_step,
     matches_token as _matches_corpus_token,

@@ -38,7 +38,7 @@ import yaml
 from datetime import date, datetime
 from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASSESSMENT_PROMPT
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
-from app.application.memo_verifier import verify_memo
+from app.edgar_research.application.memo_verifier import verify_memo
 from app.shared.llm import MODEL_PRICING, get_client
 from app.shared.llm.models import model_for
 from app.shared.config import require_env

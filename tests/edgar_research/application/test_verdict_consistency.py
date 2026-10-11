@@ -20,8 +20,8 @@ The oldest is 2026-08-24, so this long predates the retrieval work of
 
 from __future__ import annotations
 
-from app.application.memo_verifier import verify_memo
-from app.application.verdict_consistency import check_verdict
+from app.edgar_research.application.memo_verifier import verify_memo
+from app.edgar_research.application.verdict_consistency import check_verdict
 
 
 def _memo(summary: str, assessment: str | None, body: str = "") -> str:

@@ -5,9 +5,9 @@ import yaml
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.application.query_decomposer import QueryDecomposer
-from app.application.retrieval_service import RetrievalService
-from app.application.embedding_service import EmbeddingService
+from app.edgar_research.application.query_decomposer import QueryDecomposer
+from app.edgar_research.application.retrieval_service import RetrievalService
+from app.edgar_research.application.embedding_service import EmbeddingService
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
 from eval.question_embedding_cache import QuestionEmbeddingCache
 

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import yaml
 
-from app.application.embedding_service import EmbeddingService
-from app.application.extraction_service import MetricsExtractor
-from app.application.query_decomposer import QueryDecomposer
-from app.application.retrieval_service import RetrievalService
+from app.edgar_research.application.embedding_service import EmbeddingService
+from app.edgar_research.application.extraction_service import MetricsExtractor
+from app.edgar_research.application.query_decomposer import QueryDecomposer
+from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
 from eval.question_embedding_cache import QuestionEmbeddingCache
 

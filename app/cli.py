@@ -13,11 +13,11 @@ from pathlib import Path
 
 import typer
 
-from app.application.embedding_service import EmbeddingService
-from app.application.extraction_service import MetricsExtractor
-from app.application.ingestion_service import IngestionService
-from app.application.query_decomposer import QueryDecomposer
-from app.application.retrieval_service import RetrievalService
+from app.edgar_research.application.embedding_service import EmbeddingService
+from app.edgar_research.application.extraction_service import MetricsExtractor
+from app.edgar_research.application.ingestion_service import IngestionService
+from app.edgar_research.application.query_decomposer import QueryDecomposer
+from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.domain.values import FilingStatus
 from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
@@ -29,7 +29,7 @@ from app.edgar_research.infrastructure.repositories.db import close_pool, init_p
 from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
-from app.application.citations import format_citation_tag
+from app.edgar_research.application.citations import format_citation_tag
 from eval.runner import DEFAULT_MODE
 from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,

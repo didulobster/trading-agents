@@ -1459,7 +1459,7 @@ appended `data_gaps`/`verdict_samples` on top.
 
 **Not implemented as originally scoped.** A Phase 7 guide drafted before
 this session read the current code assumed routing the memo through
-`app/application/citation_verifier.py`/`memo_verifier.py` (built for the
+`app/edgar_research/application/citation_verifier.py`/`memo_verifier.py` (built for the
 EDGAR RAG agent). Reading `debate_port.py`'s own module docstring first
 (the guard's design rationale) found that would reintroduce a bug this
 project already fixed: `citation_verifier` matches numbers by tolerance

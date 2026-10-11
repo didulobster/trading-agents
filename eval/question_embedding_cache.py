@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.application.embedding_service import EmbeddingService
+from app.edgar_research.application.embedding_service import EmbeddingService
 
 
 class QuestionEmbeddingCache:

@@ -39,8 +39,8 @@ from app.shared.config import load_env
 
 load_env()
 
-from app.application.embedding_service import EmbeddingService          # noqa: E402
-from app.application.retrieval_service import RetrievalService, _fuse_across_queries  # noqa: E402
+from app.edgar_research.application.embedding_service import EmbeddingService          # noqa: E402
+from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries  # noqa: E402
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository  # noqa: E402
 from app.edgar_research.infrastructure.repositories.db import close_pool, get_connection, init_pool  # noqa: E402
 
