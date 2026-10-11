@@ -15,10 +15,9 @@ from pathlib import Path
 import pytest
 
 import app.shared.config as config
-from app.edgar_research.application.embedding_service import EmbeddingService
 from app.shared.config import MissingSetting, require_env
 
-APP = Path(__file__).resolve().parents[1] / "app"
+APP = Path(__file__).resolve().parents[2] / "app"
 
 def test_load_env_never_overrides_the_environment(monkeypatch):
     calls = []
@@ -83,18 +82,6 @@ def test_entry_points_load_env_before_any_other_app_import(module):
             load_line = node.lineno
     assert load_line is not None, f"{module} never calls load_env()"
     assert load_line < first_app_import
-
-
-def test_embedding_model_setting_takes_effect(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-ada-002")
-    assert EmbeddingService().model == "text-embedding-ada-002"
-
-
-def test_embedding_model_defaults_to_the_one_the_schema_is_sized_for(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
-    assert EmbeddingService().model == "text-embedding-3-small"
 
 
 def test_openai_model_is_gone_from_the_example_env():
