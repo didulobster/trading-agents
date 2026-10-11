@@ -194,7 +194,6 @@ async def test_the_agent_sees_cosine_similarity_not_the_rrf_score(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: _Client())
-    monkeypatch.setattr(tools, "USE_STUBS", False)
     tools.reset_run_provenance()
 
     out = await tools._dispatch("ask_edgar", {"question": "q", "tickers": ["ACN"]})

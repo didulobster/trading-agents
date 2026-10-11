@@ -8,17 +8,13 @@ import asyncio  # noqa: E402
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import typer
 
 from app.edgar_research.application.embedding_service import EmbeddingService
-from app.edgar_research.application.extraction_service import MetricsExtractor
 from app.edgar_research.application.ingestion_service import IngestionService
-from app.edgar_research.application.query_decomposer import QueryDecomposer
-from app.edgar_research.application.retrieval_service import RetrievalService
-from app.edgar_research.domain.values import FilingStatus
 from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
@@ -29,15 +25,7 @@ from app.edgar_research.infrastructure.repositories.db import close_pool, init_p
 from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
-from app.edgar_research.application.citations import format_citation_tag
-from app.edgar_research.eval.runner import DEFAULT_MODE
-from app.edgar_research.infrastructure.repositories.metrics_repo import (
-    FinancialMetricsRow,
-    MetricsRepository,
-)
 from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
-from app.edgar_research.eval.extraction_report import serialize_extraction_result
-from app.edgar_research.eval.runner import serialize_result
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -114,12 +102,6 @@ def inspect_chunks(
             preview += "…"
         typer.echo(preview)
 
-@app.command(name="smoke-persist")
-def smoke_persist(ticker: str = "AAPL"):
-    """Smoke test the vertical slice: Insert one ListedSecurity + Filing to verify the repository layer."""
-    import asyncio
-    asyncio.run(_smoke_persist(ticker))
-
 @app.command(name="ingest")
 def ingest_cmd(
     ticker: str,
@@ -141,40 +123,6 @@ def corpus_status_cmd(
     """Print a summary of what's actually in the corpus."""
     asyncio.run(_corpus_status(ticker, verbose))
 
-@app.command(name="eval")
-def eval_cmd(
-    test_set: Path = Path("app/edgar_research/eval/test_set.yaml"),
-    mode: str = typer.Option(
-        DEFAULT_MODE, "--mode",
-        help="full (what /ask does) | hybrid (what extraction does) | vector (baseline)",
-    ),
-):
-    """Run the evaluation harness against the current retrieval pipeline.
-
-    Defaults to `full`, the path POST /ask actually takes. The old
-    --decompose/--hybrid flags selected two paths nothing in production
-    used, and no flag combination could reach the real one.
-    """
-    asyncio.run(_run_eval(test_set, 10, mode))
-
-@app.command(name="eval-extraction")
-def eval_extraction_cmd(
-    test_set: Path = Path("app/edgar_research/eval/extraction_truth.yaml"),
-    k: int = typer.Option(5, "--k"),
-):
-    """Validate extraction output against hand-verified filing numbers."""
-    asyncio.run(_run_extraction_eval(test_set, k))
-
-@app.command(name="extract-metrics")
-def extract_metrics_cmd(
-    ticker: str = typer.Argument(..., help="Ticker to extract metrics for e.g. FIG"),
-    k: int = typer.Option(5, "--k", help="Chunks per metric query"),
-):
-    """Extract and store financial metrics for all ingested filings of a ticker."""
-    asyncio.run(_run_extract_metrics(ticker, k))
-
-
-# ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
     user_agent = require_env("EDGAR_USER_AGENT")   # "Wilson Ting wilson@example.com"
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -197,74 +145,6 @@ async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None
         for f in filings:
             path = await client.download_filing(cik, f)
             typer.echo(f"  cached at {path}  ({path.stat().st_size:,} bytes)")
-
-def _prune_old_results(prefix: str, keep: int = 10) -> None:
-    files = sorted(Path("eval").glob(f"{prefix}-*.json"), key=lambda p: p.name)
-    for stale in files[:-keep]:
-        stale.unlink()
-
-
-async def _run_eval(test_set_path: Path, k, mode: str) -> None:
-    from app.edgar_research.eval.runner import run_eval
-    from app.edgar_research.eval.report import report
-
-    await init_pool()
-    try:
-        results = await run_eval(test_set_path, k, mode)
-        print(report(results))
-
-        # Save raw results for diffing across runs
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"app/edgar_research/eval/results-{timestamp}.json")
-        results_path.write_text(json.dumps(
-            [serialize_result(r) for r in results], indent=2
-        ))
-        print(f"\nRaw results saved to {results_path}")
-        _prune_old_results("results")
-    finally:
-        await close_pool()
-
-
-async def _smoke_persist(ticker: str) -> None:
-    from datetime import date
-    from app.edgar_research.domain.listed_security import ListedSecurity
-    from app.edgar_research.domain.filing import Filing
-    from app.edgar_research.domain.values import FilingStatus
-    from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
-    from app.edgar_research.infrastructure.repositories.listed_security_repo import (
-        ListedSecurityRepository,
-    )
-    from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
-
-    await init_pool()
-    try:
-        sec_repo = ListedSecurityRepository()
-        fil_repo = FilingRepository()
-
-        security = ListedSecurity(
-            cik="320193", ticker=ticker, exchange="NASDAQ", name="Apple Inc."
-        )
-        security = await sec_repo.upsert(security)
-        typer.echo(f"Saved security: id={security.id} cik={security.cik}")
-
-        filing = Filing(
-            security_id=security.id,
-            filing_type="10-K",
-            filed_date=date(2022, 10, 28),
-            period_of_report=date(2022, 9, 24),
-            accession_number="0000320193-22-000108",
-            status=FilingStatus.DISCOVERED,
-        )
-        filing = await fil_repo.upsert(filing)
-        typer.echo(f"Saved filing: id={filing.id} status={filing.status}")
-
-        await fil_repo.mark_status(filing.id, FilingStatus.DOWNLOADED)
-        typer.echo("Transitioned to DOWNLOADED")
-
-        roundtrip = await fil_repo.get_by_accession(filing.accession_number)
-        typer.echo(f"Roundtrip: {roundtrip}")
-    finally:
-        await close_pool()
 
 async def _corpus_status(ticker: str | None, verbose: bool) -> None:
     from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
@@ -398,105 +278,6 @@ async def _ingest(
                 since=since,
                 retry_failed=retry_failed,
             )
-    finally:
-        await close_pool()
-
-async def _run_extract_metrics(ticker: str, k: int) -> None:
-    """Extract and store metrics for every embedded filing of one ticker.
-
-    This command had never run. It called `FilingStatus.INGESTED` (no such
-    member), `filing_repo.list_by_state` and `.set_state` (neither exists),
-    read `f.fiscal_period` off a Filing (which has `period_of_report`), and
-    passed the extractor's own model to `MetricsRepository.upsert`, which
-    needs the row type. Five failures, none of them caught, because no test
-    touched any CLI command.
-    """
-    await init_pool()
-    try:
-        embedder = EmbeddingService()
-        chunk_repo = ChunkRepository()
-        decomposer = QueryDecomposer()
-        retrieval = RetrievalService(
-            embedding_service=embedder,
-            chunk_repo=chunk_repo,
-            decomposer=decomposer,
-        )
-        extractor = MetricsExtractor()
-        metrics_repo = MetricsRepository()
-        filing_repo = FilingRepository()
-
-        # EMBEDDED is where ingestion leaves a filing that finished; a
-        # filing already at METRICS_EXTRACTED is re-done on request, since
-        # the upsert refreshes rather than duplicates.
-        filings = await filing_repo.list_by_ticker_and_status(
-            ticker, [FilingStatus.EMBEDDED, FilingStatus.METRICS_EXTRACTED]
-        )
-        if not filings:
-            typer.echo(
-                f"No embedded filings found for {ticker.upper()} — "
-                f"run `ingest` first, or check `corpus-status {ticker.upper()}`."
-            )
-            raise typer.Exit(1)
-
-        extracted_count = 0
-        for f in filings:
-            fiscal_period = f.fiscal_period_label()
-            typer.echo(
-                f"Extracting {fiscal_period} ({f.filing_type}, {f.filed_date})..."
-            )
-
-            chunks = await retrieval.retrieve_for_extraction(ticker, f.filed_date, k=k)
-            if not chunks:
-                typer.echo("  WARNING: no chunks retrieved — skipping")
-                continue
-
-            metrics = await extractor.extract(
-                chunks, ticker, fiscal_period, f.filing_type, f.filed_date
-            )
-            await metrics_repo.upsert(FinancialMetricsRow.from_extraction(
-                metrics,
-                ticker=ticker.upper(),
-                fiscal_period=fiscal_period,
-                filing_type=f.filing_type,
-                filed_date=f.filed_date,
-                source_citations=[format_citation_tag(c) for c in chunks],
-            ))
-            await filing_repo.mark_status(f.id, FilingStatus.METRICS_EXTRACTED)
-            extracted_count += 1
-
-            typer.echo(
-                f"  revenue={metrics.revenue}M  "
-                f"gross_margin={metrics.gross_margin_pct}%  "
-                f"fcf={metrics.free_cash_flow}M  "
-                f"ndr={metrics.net_dollar_retention}  "
-                f"conf={metrics.extraction_confidence}"
-            )
-
-        typer.echo(
-            f"\nDone. {extracted_count} of {len(filings)} filing(s) "
-            f"extracted for {ticker.upper()}."
-        )
-    finally:
-        await close_pool()
-
-
-# async wrapper — matches _run_eval structure
-async def _run_extraction_eval(test_set_path: Path, k: int) -> None:
-    from app.edgar_research.eval.extract_runner import run_extraction_eval
-    from app.edgar_research.eval.extraction_report import extraction_report
-
-    await init_pool()
-    try:
-        results = await run_extraction_eval(test_set_path, k)
-        print(extraction_report(results))
-
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"app/edgar_research/eval/extraction-results-{timestamp}.json")
-        results_path.write_text(json.dumps(
-            [serialize_extraction_result(r) for r in results], indent=2
-        ))
-        print(f"\nRaw results saved to {results_path}")
-        _prune_old_results("extraction-results")
     finally:
         await close_pool()
 

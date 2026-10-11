@@ -35,10 +35,6 @@ from app.edgar_research.infrastructure.repositories.document_repo import Documen
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
-from app.edgar_research.infrastructure.repositories.metrics_repo import (
-    FinancialMetricsRow,
-    MetricsRepository,
-)
 from app.edgar_research.application.answer_service import answer_question
 
 router = APIRouter()
@@ -257,7 +253,6 @@ async def extract(req: ExtractRequest, request: Request, response: Response) -> 
         chunk_repo=chunk_repo,
         decomposer=decomposer)
     extractor = MetricsExtractor()
-    metrics_repo = MetricsRepository()
 
     # The window defaults to filed_date ± 30 days; a caller that names its
     # own bounds gets them. The extract_metrics tool has always offered
@@ -274,16 +269,6 @@ async def extract(req: ExtractRequest, request: Request, response: Response) -> 
     # Only the extraction call spends here: gather_extraction_chunks runs
     # fixed queries through retrieve_hybrid, which never calls the decomposer.
     _report_usage(response, (extractor.llm_model, extractor.last_usage))
-    # Built through the one constructor both writers share, so the fields
-    # the extractor's model does not carry cannot be dropped here either.
-    await metrics_repo.upsert(FinancialMetricsRow.from_extraction(
-        extracted,
-        ticker=req.ticker,
-        fiscal_period=req.fiscal_period,
-        filing_type=req.filing_type,
-        filed_date=req.filed_date,
-        source_citations=[format_citation_tag(c) for c in chunks],
-    ))
     return extracted
 
 async def gather_extraction_chunks(retrieval: RetrievalService, ticker: str, filed_after, filed_before):

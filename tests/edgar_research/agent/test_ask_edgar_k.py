@@ -54,7 +54,6 @@ async def test_the_request_sends_k_explicitly(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: _Client())
-    monkeypatch.setattr(tools, "USE_STUBS", False)
 
     await tools._dispatch("ask_edgar", {"question": "q", "tickers": ["NFLX"]})
 

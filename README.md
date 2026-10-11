@@ -298,8 +298,7 @@ app/
     domain/ application/ infrastructure/  ingestion, retrieval, grounded answers, verifiers
     agent/                   Research agent: researcher.py prompts.py tools.py
     api.py                   /ask /extract /ingest /corpus-status /latest-filings
-    cli.py                   ingest / corpus-status / eval / extract-metrics
-    eval/                    retrieval and extraction evaluation harness
+    cli.py                   ingest / corpus-status / fetch / inspect-chunks
     scripts/                 retrieval probes (run with python -m)
     migrations/              Alembic (alembic.ini stays at the root)
   trading/                   Trading context (CONTEXT.md)

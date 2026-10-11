@@ -161,7 +161,6 @@ async def test_the_agents_tool_calls_send_the_key_when_one_is_configured(monkeyp
             return _Resp()
 
     monkeypatch.setattr(tools.httpx, "AsyncClient", _Client)
-    monkeypatch.setattr(tools, "USE_STUBS", False)
     monkeypatch.setenv("APP_API_KEY", "s3cret")
 
     await tools._dispatch("check_corpus", {"ticker": "ACN"})

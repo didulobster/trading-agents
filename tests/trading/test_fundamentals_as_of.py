@@ -91,7 +91,6 @@ def _capture(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: _Client())
-    monkeypatch.setattr(tools, "USE_STUBS", False)
     return sent
 
 

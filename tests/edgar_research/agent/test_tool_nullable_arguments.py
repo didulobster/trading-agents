@@ -46,7 +46,6 @@ def posted(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: _Client())
-    monkeypatch.setattr(tools, "USE_STUBS", False)
     return sent
 
 
@@ -105,7 +104,6 @@ def extract_client(monkeypatch):
         "ChunkRepository": lambda: None,
         "QueryDecomposer": lambda: None,
         "MetricsExtractor": _Extractor,
-        "MetricsRepository": _Repo,
     }.items():
         monkeypatch.setattr(api, name, value)
     return TestClient(main.app), windows
