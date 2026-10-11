@@ -702,7 +702,7 @@ async def test_openai_temperature_rejection_retries_without_it():
 async def test_decomposer_survives_a_model_that_rejects_temperature(monkeypatch):
     """The decomposer hard-codes temperature=0 and had no fallback, so on a
     model that rejects it every /ask that needed a rewrite raised."""
-    from app.application.query_decomposer import QueryDecomposer
+    from app.edgar_research.application.query_decomposer import QueryDecomposer
 
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "k")

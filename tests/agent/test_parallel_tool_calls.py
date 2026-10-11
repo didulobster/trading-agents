@@ -101,8 +101,8 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_decomposed_sub_queries_are_retrieved_concurrently_and_fused_by_agreement():
-    from app.application.query_decomposer import DecompositionResult
-    from app.application.retrieval_service import RetrievalService
+    from app.edgar_research.application.query_decomposer import DecompositionResult
+    from app.edgar_research.application.retrieval_service import RetrievalService
     from datetime import date
     from app.edgar_research.domain.chunk import Chunk
     from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk

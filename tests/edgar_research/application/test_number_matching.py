@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 import app.agent.tools as tools
-from app.application.number_matching import raw_form, value_in_text, value_spans
+from app.edgar_research.application.number_matching import raw_form, value_in_text, value_spans
 
 
 @pytest.mark.parametrize("value,text", [

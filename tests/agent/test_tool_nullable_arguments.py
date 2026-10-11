@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 import app.agent.tools as tools
 import app.main as main
-from app.application.extraction_service import FinancialMetrics
+from app.edgar_research.application.extraction_service import FinancialMetrics
 
 
 class _Resp:

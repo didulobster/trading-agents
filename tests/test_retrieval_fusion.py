@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 import eval.runner as runner
-from app.application.retrieval_service import RetrievalService, _fuse_across_queries
+from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.edgar_research.domain.chunk import Chunk
 from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 
@@ -121,7 +121,7 @@ def harness(monkeypatch, tmp_path):
 
         async def retrieve_full(self, q, k=10):
             called["method"] = "retrieve_full"
-            from app.application.query_decomposer import DecompositionResult
+            from app.edgar_research.application.query_decomposer import DecompositionResult
             return [_rc(1, 0.03)], DecompositionResult(
                 original_query=q, was_decomposed=True, sub_queries=[q, "b"]
             )

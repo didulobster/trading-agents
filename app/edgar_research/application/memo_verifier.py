@@ -1,7 +1,7 @@
 """Verify the final memo against everything the tools returned this run."""
 
-from app.application.citation_verifier import verify_answer
-from app.application.verdict_consistency import verdict_warning
+from app.edgar_research.application.citation_verifier import verify_answer
+from app.edgar_research.application.verdict_consistency import verdict_warning
 
 
 def verify_memo(memo: str, provenance_corpus: str,

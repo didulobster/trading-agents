@@ -1,5 +1,5 @@
-from app.application.citation_verifier import verify_answer
-from app.application.memo_verifier import verify_memo
+from app.edgar_research.application.citation_verifier import verify_answer
+from app.edgar_research.application.memo_verifier import verify_memo
 
 
 def test_number_matching_unretried_rejected_calc_is_flagged_not_unverified():

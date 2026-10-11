@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import app.shared.config as config
-from app.application.embedding_service import EmbeddingService
+from app.edgar_research.application.embedding_service import EmbeddingService
 from app.shared.config import MissingSetting, require_env
 
 APP = Path(__file__).resolve().parents[1] / "app"

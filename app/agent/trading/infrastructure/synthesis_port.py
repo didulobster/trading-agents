@@ -495,7 +495,7 @@ def _numeric_guard(block_text: str, other_text: str, corpus: str) -> tuple[list[
 # verdict_samples on top of it — nothing re-verified that result). This is
 # the same containment methodology as `_numeric_guard`, not a second
 # implementation, run once more over the assembled whole rather than one
-# call's fragment — deliberately not app/application/citation_verifier's
+# call's fragment — deliberately not app/edgar_research/application/citation_verifier's
 # tolerance-band matching (see evidence.unbacked_figures for why
 # that goes blind on a corpus this dense: bands overlap and a fabricated
 # figure lands inside somebody's band).

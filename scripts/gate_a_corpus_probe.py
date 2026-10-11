@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from app.application.embedding_service import EmbeddingService  # noqa: E402
-from app.application.retrieval_service import RetrievalService  # noqa: E402
+from app.edgar_research.application.embedding_service import EmbeddingService  # noqa: E402
+from app.edgar_research.application.retrieval_service import RetrievalService  # noqa: E402
 from app.edgar_research.infrastructure.queries.corpus_status import CorpusStatusQuery  # noqa: E402
 from app.edgar_research.infrastructure.repositories.chunk_repo import (  # noqa: E402
     ChunkRepository,

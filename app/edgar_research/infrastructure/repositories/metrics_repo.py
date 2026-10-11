@@ -1,7 +1,7 @@
 """Persistence for extracted financial metrics.
 
 Two types called `FinancialMetrics` used to exist: the Pydantic model the
-extractor RETURNS (`app.application.extraction_service`), which carries only
+extractor RETURNS (`app.edgar_research.application.extraction_service`), which carries only
 the figures a model can read off a filing, and the row this module WRITES,
 which also carries the identity of the filing those figures came from. This
 module imported the first and then shadowed it with the second on the next
@@ -20,7 +20,7 @@ from datetime import date, datetime
 import json
 from typing import Literal
 
-from app.application.extraction_service import FinancialMetrics
+from app.edgar_research.application.extraction_service import FinancialMetrics
 
 from app.edgar_research.infrastructure.repositories.db import get_connection
 

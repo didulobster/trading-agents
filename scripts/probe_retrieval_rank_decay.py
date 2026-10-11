@@ -20,8 +20,8 @@ import asyncio, ast, re, statistics
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(override=True)
-from app.application.embedding_service import EmbeddingService
-from app.application.retrieval_service import RetrievalService
+from app.edgar_research.application.embedding_service import EmbeddingService
+from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
 from app.edgar_research.infrastructure.repositories.db import init_pool, close_pool
 

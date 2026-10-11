@@ -34,13 +34,13 @@ from app.agent.trading.interface.runner import (
     start_or_resume,
 )
 from app.shared.vault import vault_run
-from app.application.citations import format_citation_tag
-from app.application.citation_verifier import verify_answer
-from app.application.embedding_service import EmbeddingService
-from app.application.extraction_service import FinancialMetrics, MetricsExtractor
-from app.application.ingestion_service import IngestionService
-from app.application.query_decomposer import QueryDecomposer
-from app.application.retrieval_service import RetrievalService, _fuse_across_queries
+from app.edgar_research.application.citations import format_citation_tag
+from app.edgar_research.application.citation_verifier import verify_answer
+from app.edgar_research.application.embedding_service import EmbeddingService
+from app.edgar_research.application.extraction_service import FinancialMetrics, MetricsExtractor
+from app.edgar_research.application.ingestion_service import IngestionService
+from app.edgar_research.application.query_decomposer import QueryDecomposer
+from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries
 
 from app.edgar_research.infrastructure.build_info import build_info
 from app.shared.llm.models import model_for

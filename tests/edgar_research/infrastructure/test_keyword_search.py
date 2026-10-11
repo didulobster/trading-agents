@@ -19,7 +19,7 @@ import pytest
 
 import app.agent.tools as tools
 import app.edgar_research.infrastructure.repositories.chunk_repo as chunk_repo
-from app.application.retrieval_service import RetrievalService
+from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.domain.chunk import Chunk
 from app.edgar_research.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
