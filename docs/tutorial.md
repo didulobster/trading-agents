@@ -20,7 +20,7 @@ claims about *structure* (file layout, counts, call graphs) I verified directly.
 
 Two systems living in one repository, joined at one seam.
 
-**System one — an EDGAR RAG pipeline** (`app/`, everything outside `app/agent/trading/`). It
+**System one — an EDGAR RAG pipeline** (`app/`, everything outside `app/trading/`). It
 downloads SEC filings (10-K, 10-Q, 8-K, 20-F), parses them into sections, splits them into chunks,
 embeds the chunks into a Postgres vector store, and answers questions about them with citations.
 "RAG" is *retrieval-augmented generation*: instead of asking a language model what it remembers
@@ -28,7 +28,7 @@ about Broadcom's cash flow, you first **retrieve** the actual paragraphs from th
 then ask the model to answer **only from those paragraphs**. The point is that every sentence in the
 answer can be traced to a source document.
 
-**System two — a multi-agent trading pipeline** (`app/agent/trading/`). It takes one ticker and one
+**System two — a multi-agent trading pipeline** (`app/trading/`). It takes one ticker and one
 analysis date and produces a *decision memo*: a bull case, a bear case, a risk ledger, a verdict
 (buy / sell / hold / unresolved), and — importantly — a list of what the run could **not** see. It
 does this by running several LLM "agents" in sequence: analysts gather evidence, a bull and a bear
@@ -38,7 +38,7 @@ argue over it, a three-person risk panel scores the risks, and a judge decides.
 that calls the EDGAR RAG research agent that already existed:
 
 ```python
-# app/agent/trading/infrastructure/fundamentals_port.py
+# app/trading/infrastructure/fundamentals_port.py
 """Wraps researcher.py's existing agent for the trading pipeline.
 Deliberately calls the same path as `python -m app.edgar_research.agent.researcher TICKER`
 (full checklist mode) — not /ask, which is a different agent behavior.
@@ -48,9 +48,9 @@ Deliberately calls the same path as `python -m app.edgar_research.agent.research
 That is the design the project set out to build, and it is the design that shipped.
 
 **Size.** About 16,300 lines of Python under `app/`, and 612 test functions under `tests/`, of which
-464 sit under `tests/agent/trading/`. The largest single file is
+464 sit under `tests/trading/`. The largest single file is
 `app/edgar_research/agent/tools.py` at 1,162 lines, but the one to notice is
-`app/agent/trading/infrastructure/evidence.py` at 799 — which tells you something true about the
+`app/trading/infrastructure/evidence.py` at 799 — which tells you something true about the
 project: most of the code is not "call the model", it is **checking what the model said**.
 
 ---
@@ -89,7 +89,7 @@ same `thread_id` picks up exactly where it stopped. This is why the debate is wr
 per turn* rather than a loop inside one node:
 
 ```python
-# app/agent/trading/application/debate_nodes.py
+# app/trading/application/debate_nodes.py
     for r in range(rounds) inside a single debate node -> 1 checkpoint, at
         node exit. A kill mid-round-2 resumes at turn 0 and the whole debate
         is lost.
@@ -107,7 +107,7 @@ The payoff is testability. A *pure* function — same inputs, same outputs, no I
 exhaustively in milliseconds for zero API cost. The project leans on this hard, and says so:
 
 ```python
-# app/agent/trading/application/debate_router.py
+# app/trading/application/debate_router.py
 A pure function of state — no I/O, no LLM, no clock. That is what makes it
 exhaustively testable: `next_debate_step` can be evaluated over every
 reachable input in milliseconds at zero API cost, which is a proof of
@@ -121,7 +121,7 @@ termination rather than a sample of it.
 You start a run like this:
 
 ```
-python -m app.agent.trading.interface.cli AVGO --as-of 2026-08-29 --max-usd 0.75
+python -m app.trading.interface.cli AVGO --as-of 2026-08-29 --max-usd 0.75
 ```
 
 Here is what happens.
@@ -197,7 +197,7 @@ one `run_summary` line appended to `docs/cost-log.jsonl`.
 is what lets `--only news` produce a valid smaller graph.
 
 ```python
-# app/agent/trading/infrastructure/graph.py
+# app/trading/infrastructure/graph.py
 ANALYST_CHAINS = {
     "fundamentals": (("fundamentals", fundamentals_node),),
     "technical": (("technical", technical_node),),
@@ -234,7 +234,7 @@ case upstream.
 `TradingState` is a `TypedDict`. Most fields overwrite. Three do not:
 
 ```python
-# app/agent/trading/domain/trading_state.py
+# app/trading/domain/trading_state.py
     debate_turns: Annotated[list[DebateTurn], operator.add]
 ```
 
@@ -271,7 +271,7 @@ The single largest risk in an agent loop is that it never stops. This code answe
 over, and says so:
 
 ```python
-# app/agent/trading/application/debate_router.py
+# app/trading/application/debate_router.py
   1. `n >= MAX_TURNS` here                       — normal operation
   2. `recursion_limit` in the CLI invoke config  — a router bug
   3. runtime asserts at node entry               — a wiring bug that
@@ -305,7 +305,7 @@ def next_debate_step(state) -> str:
 Layer 2 is a derived global budget — every term computed, no literals:
 
 ```python
-# app/agent/trading/interface/cli.py
+# app/trading/interface/cli.py
 _FIXED_NODES = sum(len(chain) for chain in ANALYST_CHAINS.values())
 _FIXED_NODES += 4   # debate_close, risk_close, synthesizer, graceful_abort
 RECURSION_LIMIT = (
@@ -322,7 +322,7 @@ follows automatically.
 Layer 3 sits at node entry, and the *contiguity* check is the subtle one:
 
 ```python
-# app/agent/trading/application/debate_nodes.py
+# app/trading/application/debate_nodes.py
     indices = [t.turn_index for t in turns]
     if indices != list(range(turn_index)):
         raise RuntimeError(
@@ -346,7 +346,7 @@ The recurring rule across `domain/risk.py`, `domain/debate.py` and the ports is 
 writes prose and Python owns every identifier, counter and label.
 
 ```python
-# app/agent/trading/domain/risk.py
+# app/trading/domain/risk.py
 class RiskFactor(BaseModel):
     """A candidate risk. Proposed by the LLM as text; `factor_id` is
     Python-assigned in `risk_port._assemble` — never trust one on the wire."""
@@ -355,7 +355,7 @@ class RiskFactor(BaseModel):
 Numbers are then checked by **containment**, not tolerance:
 
 ```python
-# app/agent/trading/infrastructure/evidence.py
+# app/trading/infrastructure/evidence.py
 def unbacked_figures(text: str, evidence_pack: str) -> list[str]:
     """Every figure in a debate turn must appear verbatim in the evidence pack.
 
@@ -376,7 +376,7 @@ figure's own precision, not by a tolerance band), percent transforms, and sign/m
 Quote checking normalises both sides before comparing:
 
 ```python
-# app/agent/trading/infrastructure/evidence.py
+# app/trading/infrastructure/evidence.py
 _QUOTE_NOISE = re.compile(r'[\s"\u201c\u201d\u2018\u2019\'*_`]+')
 
 
@@ -396,7 +396,7 @@ false quote match a real span, they can only stop formatting from deciding the a
 **The critical posture:** guards *flag*, they do not *block*.
 
 ```python
-# app/agent/trading/domain/sanitize.py
+# app/trading/domain/sanitize.py
 A hit never drops the article — a real article that happens to quote a
 prompt-injection news story would otherwise be silently censored, which is
 its own correctness bug (same posture as every other guard in this
@@ -415,7 +415,7 @@ reporting the panel's protocol-required silence as a defect in every run of a fi
 News articles are the only attacker-writable input, and the threat model is stated plainly:
 
 ```python
-# app/agent/trading/domain/sanitize.py
+# app/trading/domain/sanitize.py
 Threat model: an article's text is attacker-writable (anyone can publish a
 news story, and a vendor feed will carry it), and the debate/synthesis
 agents must treat it as EVIDENCE to reason about, never as INSTRUCTIONS to
@@ -443,7 +443,7 @@ def _strip_invisible(text: str) -> str:
 
 Unicode categories `Cf` and `Cc` cover zero-width spaces, joiners and bidirectional overrides — text
 a human reviewer cannot see but a model reads. There is a canary test for this
-(`tests/agent/trading/test_injection_canary.py`) with paired canary and control fixtures.
+(`tests/trading/test_injection_canary.py`) with paired canary and control fixtures.
 
 **Review.** Correctly scoped and correctly humble. Naming the primary defence (structural delimiting
 plus a framing instruction in the cached system prompt) and calling the regex the weaker second
@@ -455,7 +455,7 @@ For a system that analyses a *historical* date, the worst silent bug is using da
 exist yet. Three nodes refuse to run without an explicit bound:
 
 ```python
-# app/agent/trading/application/nodes.py
+# app/trading/application/nodes.py
 async def news_node(state: TradingState) -> dict:
     ticker = state["ticker"]
     as_of = state.get("as_of_date")
@@ -487,7 +487,7 @@ saying so. That is the discipline.
 date down:
 
 ```python
-# app/agent/trading/application/nodes.py
+# app/trading/application/nodes.py
 async def fundamentals_node(state: TradingState) -> dict:
     print(f"[fundamentals] running for {state['ticker']}")
     report = await get_fundamentals_report(state["ticker"], run_id=state.get("run_id"))
@@ -496,7 +496,7 @@ async def fundamentals_node(state: TradingState) -> dict:
 and the port reads the wall clock itself:
 
 ```python
-# app/agent/trading/infrastructure/fundamentals_port.py
+# app/trading/infrastructure/fundamentals_port.py
 async def get_fundamentals_report(
     ticker: str, run_id: str | None = None
 ) -> FundamentalsReport:
@@ -513,7 +513,7 @@ is whatever today actually is. See §5.1.
 Budget and deadline are set once, at the CLI boundary, and never recomputed:
 
 ```python
-# app/agent/trading/domain/budget.py
+# app/trading/domain/budget.py
 class RunBudget(BaseModel):
     """Set once per run, at the CLI boundary. Never mutated."""
 
@@ -525,7 +525,7 @@ The check itself is pure and clock-injected, so a boundary case can be construct
 in a test:
 
 ```python
-# app/agent/trading/application/guards.py
+# app/trading/application/guards.py
 def check_run_guards(
     events: list[CostEvent], budget: RunBudget, now: datetime
 ) -> RunTermination | None:
@@ -539,7 +539,7 @@ def check_run_guards(
 It is wired in by wrapping *every* router with a guard, so a breach is reachable from anywhere:
 
 ```python
-# app/agent/trading/infrastructure/graph.py
+# app/trading/infrastructure/graph.py
 def _guarded(inner):
     route = inner if callable(inner) else (lambda state: inner)
 
@@ -558,7 +558,7 @@ Deduplication lives in the *reader*, not the reducer, so a crash-resume that re-
 write still totals correctly and the duplicate is surfaced as a warning rather than silently fixed:
 
 ```python
-# app/agent/trading/domain/budget.py
+# app/trading/domain/budget.py
 def total_spend(events: list[CostEvent]) -> float:
     seen: set[str] = set()
     total = 0.0
@@ -577,7 +577,7 @@ def total_spend(events: list[CostEvent]) -> float:
 There is also a nicely-earned CLI refusal, added after a real incident:
 
 ```python
-# app/agent/trading/interface/cli.py
+# app/trading/interface/cli.py
             # Live cost of that hole (MSFT, 2026-08-28): a thread whose first
             # attempt died ~17 hours earlier was resumed with --max-usd 1.40.
             # The run silently used the checkpointed 1.10, executed the whole
@@ -594,7 +594,7 @@ genuinely split across independent samples of the *same* fixed debate — and th
 in the panel, not the judge:
 
 ```python
-# app/agent/trading/application/nodes.py
+# app/trading/application/nodes.py
 # A fixed-ledger repeat of the Risk Judge alone (3 calls against one frozen
 # ledger, AVGO) came back unanimous, which localizes the variance to the
 # PANEL, not the Judge — so sampling has to re-run the whole (panel,
@@ -630,7 +630,7 @@ Three details worth pointing at:
 And the naming fix that best captures the project's temperament:
 
 ```python
-# app/agent/trading/domain/decision_memo.py
+# app/trading/domain/decision_memo.py
 class EvidenceQuality(BaseModel):
     """What this run had to work with — NOT how likely the verdict is right.
 
@@ -652,9 +652,9 @@ Deserialising arbitrary Python from a database is a code-execution risk, so the 
 an explicit allowlist:
 
 ```python
-# app/agent/trading/infrastructure/checkpointer.py
+# app/trading/infrastructure/checkpointer.py
 ALLOWED_MSGPACK_MODULES = [
-    ("app.agent.trading.domain.decision_memo", "Verdict"),
+    ("app.trading.domain.decision_memo", "Verdict"),
     ...
     # Phase 5. Three entries for one channel because DebateTurn nests
     # DebateTurnPayload nests DebateClaim, and an unregistered type fails on
@@ -668,7 +668,7 @@ test that walks `TradingState`'s annotations:
 for stale checkpoints and give a real instruction rather than an `AttributeError` three frames on:
 
 ```python
-# app/agent/trading/application/debate_nodes.py
+# app/trading/application/debate_nodes.py
     stale = [t for t in turns if not isinstance(t, DebateTurn)]
     if stale:
         raise TypeError(
@@ -682,7 +682,7 @@ for stale checkpoints and give a real instruction rather than an `AttributeError
 Field order in a structured-output schema is load-bearing:
 
 ```python
-# app/agent/trading/domain/risk.py
+# app/trading/domain/risk.py
     Field order is deliberate, not alphabetical or "natural": `proposes`
     and `scores` come BEFORE `argument`. Strict structured output fills
     fields in schema-declaration order, autoregressively — with `argument`
@@ -824,13 +824,13 @@ a validated settings object that fails with a message naming the variable and it
 
 ## 6. Reading order, if you are starting tomorrow
 
-1. `app/agent/trading/domain/trading_state.py` — what a run *is*.
-2. `app/agent/trading/infrastructure/graph.py` — how the pieces connect.
-3. `app/agent/trading/application/debate_router.py` — the smallest complete example of the project's
+1. `app/trading/domain/trading_state.py` — what a run *is*.
+2. `app/trading/infrastructure/graph.py` — how the pieces connect.
+3. `app/trading/application/debate_router.py` — the smallest complete example of the project's
    philosophy: pure, exhaustively tested, one termination lever, dead branches deleted.
-4. `app/agent/trading/application/nodes.py` — the caveat functions, which are where the memo's
+4. `app/trading/application/nodes.py` — the caveat functions, which are where the memo's
    honesty actually comes from.
-5. `app/agent/trading/infrastructure/evidence.py` — the evidence pack and the grounding checks.
+5. `app/trading/infrastructure/evidence.py` — the evidence pack and the grounding checks.
    Long, but it is where the hard-won knowledge lives.
 6. `trading-agent-known-gaps.md` — read the dated section for whatever you are about to change.
    Most surprises in this codebase have already been surprising once and were written down.

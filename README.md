@@ -2,17 +2,17 @@
 
 Two systems in one repository, joined at a single seam.
 
-**An EDGAR RAG pipeline** (`app/`, everything outside `app/agent/trading/`) downloads SEC
+**An EDGAR RAG pipeline** (`app/`, everything outside `app/trading/`) downloads SEC
 filings (10-K, 10-Q, 8-K, 20-F), parses them into sections, chunks them, embeds the chunks
 into Postgres + pgvector, and answers questions about them with citations that are checked
 back against the source text.
 
-**A multi-agent trading pipeline** (`app/agent/trading/`) takes one ticker and one analysis
+**A multi-agent trading pipeline** (`app/trading/`) takes one ticker and one analysis
 date and produces a decision memo: a bull case, a bear case, a risk ledger, a verdict
 (buy / sell / hold / unresolved), and an explicit list of what the run could *not* see.
 
 The seam is the Fundamentals Analyst. It is not a new agent — it is a thin wrapper
-(`app/agent/trading/infrastructure/fundamentals_port.py`) around the EDGAR research agent
+(`app/trading/infrastructure/fundamentals_port.py`) around the EDGAR research agent
 that already existed, calling the same path as `python -m app.edgar_research.agent.researcher TICKER`.
 
 About 16,300 lines of Python under `app/`, 612 test functions under `tests/`. The largest
@@ -214,7 +214,7 @@ claims to be checking against.
 ### 4. Run the trading pipeline
 
 ```bash
-uv run python -m app.agent.trading.interface.cli AVGO --as-of 2026-08-29 --max-usd 0.75
+uv run python -m app.trading.interface.cli AVGO --as-of 2026-08-29 --max-usd 0.75
 ```
 
 | Flag | Meaning |
@@ -281,7 +281,7 @@ uv run pytest -q -rs
 ```
 
 612 test functions (702 cases after parametrization), 464 of them under
-`tests/agent/trading/`. The whole suite runs in **under 15 seconds**, reaches no provider
+`tests/trading/`. The whole suite runs in **under 15 seconds**, reaches no provider
 and spends nothing — `tests/conftest.py` injects a placeholder credential for every
 non-Anthropic provider, since the client layer validates keys at construction rather than
 at first call.
@@ -307,7 +307,7 @@ app/
     api.py                   /ask /extract /ingest /corpus-status /latest-filings /news-assess
     llm.py                   grounded answer generation behind /ask
     cli.py                   ingest / corpus-status / eval / extract-metrics
-  agent/trading/             Trading pipeline
+  trading/                   Trading context (CONTEXT.md)
     domain/                  pure types and rules
     application/             nodes, routers, guards
     infrastructure/          LLM ports, graph, checkpointer, cost log

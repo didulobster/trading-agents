@@ -48,9 +48,9 @@ from datetime import date
 
 from anthropic import AsyncAnthropic
 
-from app.agent.trading.application.risk_ledger import build_slate, contested_ids
-from app.agent.trading.domain.risk import PERSONAS
-from app.agent.trading.infrastructure.risk_port import (
+from app.trading.application.risk_ledger import build_slate, contested_ids
+from app.trading.domain.risk import PERSONAS
+from app.trading.infrastructure.risk_port import (
     build_risk_evidence_pack,
     render_risk_transcript,
     run_risk_turn,

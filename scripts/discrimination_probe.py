@@ -79,7 +79,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_p9_battery import run_one  # noqa: E402
 
-CACHE_DIR = Path("app/agent/trading/.fundamentals_cache")
+CACHE_DIR = Path("app/trading/.fundamentals_cache")
 PROBE_DIR = Path("docs/validation/disc-probe-20260829")
 VARIANT_DIR = PROBE_DIR / "variants"
 BACKUP_DIR = PROBE_DIR / "backup"

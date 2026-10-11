@@ -45,7 +45,7 @@ from run_p9_battery import (  # noqa: E402
     run_one,
 )
 
-from app.agent.trading.domain.validation import BatteryManifest  # noqa: E402
+from app.trading.domain.validation import BatteryManifest  # noqa: E402
 
 
 def main() -> int:
