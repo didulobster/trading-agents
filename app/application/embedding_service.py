@@ -2,7 +2,7 @@ import os
 import logging
 from openai import AsyncOpenAI
 
-from app.config import require_env
+from app.shared.config import require_env
 
 logger = logging.getLogger(__name__)
 

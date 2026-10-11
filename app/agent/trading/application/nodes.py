@@ -11,7 +11,7 @@ import logging
 from collections import Counter
 from datetime import date, datetime, timezone
 
-from app.infrastructure.llm import get_client
+from app.shared.llm import get_client
 
 from app.agent.trading.application import risk_nodes
 from app.agent.trading.application.guards import check_run_guards

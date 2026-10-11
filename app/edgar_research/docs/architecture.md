@@ -509,7 +509,7 @@ accumulating it in the same tracker. Embedding costs are not tracked at all.
 **Model configuration used to span three call sites** — the agent loop,
 answer generation, and metric extraction — which had disagreed in practice
 and made both cost and quality attribution unreliable. It is now one table
-(`llm/models.py`, see the shared kernel README); `uv run python -m app.infrastructure.llm.models`
+(`llm/models.py`, see the shared kernel README); `uv run python -m app.shared.llm.models`
 prints what a run will actually use.
 
 Provider routing, role configuration and pricing belong to the shared kernel: see [app/shared/README.md](../../shared/README.md).

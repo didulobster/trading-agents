@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.trading.infrastructure.structured_call import assert_within_budget
-from app.infrastructure.llm import LLMClient, get_client
-from app.infrastructure.llm.models import model_for, warn_if_unpriced
+from app.shared.llm import LLMClient, get_client
+from app.shared.llm.models import model_for, warn_if_unpriced
 
 # Its own knob (TRADING_NEWS_DIGEST_MODEL), defaulting to the
 # project-wide model — which is all this role had before.

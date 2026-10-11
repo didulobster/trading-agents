@@ -17,7 +17,7 @@ import pytest
 import app.agent.tools as tools
 from app.agent.trading.domain.budget import CostEvent, RunBudget, total_spend
 from app.agent.trading.domain.fundamentals_report import FundamentalsReport
-from app.domain.token_usage import (
+from app.shared.token_usage import (
     USAGE_HEADER,
     TokenUsage,
     decode_usage_header,

@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 import logging
 
-from app.domain.token_usage import TokenUsage, response_text
+from app.shared.token_usage import TokenUsage, response_text
 import re
-from app.infrastructure.llm import create_with_temperature_fallback, get_client
-from app.infrastructure.llm.models import model_for
+from app.shared.llm import create_with_temperature_fallback, get_client
+from app.shared.llm.models import model_for
 
 logger = logging.getLogger(__name__)
 

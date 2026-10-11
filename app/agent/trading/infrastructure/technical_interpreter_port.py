@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.infrastructure.llm import get_client
-from app.infrastructure.llm.models import model_for, warn_if_unpriced
+from app.shared.llm import get_client
+from app.shared.llm.models import model_for, warn_if_unpriced
 
 # Its own knob (TRADING_TECHNICAL_MODEL), defaulting to the
 # project-wide model — which is all this role had before.

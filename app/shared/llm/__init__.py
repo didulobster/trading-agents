@@ -6,7 +6,7 @@ the rest of the app keeps speaking one message shape. `MODEL_PRICING` is
 the cost config every budget guard reads.
 """
 
-from app.infrastructure.llm.client import (
+from app.shared.llm.client import (
     LLMBadRequestError,
     LLMClient,
     ProviderNotConfigured,
@@ -17,7 +17,7 @@ from app.infrastructure.llm.client import (
     is_anthropic,
     resolve_provider,
 )
-from app.infrastructure.llm.pricing import MODEL_PRICING
+from app.shared.llm.pricing import MODEL_PRICING
 
 __all__ = [
     "LLMBadRequestError",

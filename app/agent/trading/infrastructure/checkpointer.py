@@ -19,7 +19,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: E402
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
 
-from app.config import require_env  # noqa: E402
+from app.shared.config import require_env  # noqa: E402
 
 # Read at call time, not import time: this module is imported by the graph
 # builder, and an import-time read would make every test that never opens a

@@ -1,6 +1,6 @@
 
 # Entry point: .env first, before any app import reads its settings.
-from app.config import load_env, require_env
+from app.shared.config import load_env, require_env
 
 load_env()
 

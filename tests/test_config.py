@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-import app.config as config
+import app.shared.config as config
 from app.application.embedding_service import EmbeddingService
-from app.config import MissingSetting, require_env
+from app.shared.config import MissingSetting, require_env
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -53,7 +53,7 @@ def test_only_app_config_loads_dotenv():
     """
     offenders = []
     for path in APP.rglob("*.py"):
-        if path == APP / "config.py":
+        if path == APP / "shared" / "config.py":
             continue
         source = path.read_text()
         if re.search(r"\bload_dotenv\b", source) or "override=True" in source:
@@ -72,7 +72,7 @@ def test_entry_points_load_env_before_any_other_app_import(module):
     load_line = None
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("app"):
-            if node.module == "app.config":
+            if node.module == "app.shared.config":
                 continue
             first_app_import = min(first_app_import or node.lineno, node.lineno)
         if (
@@ -114,7 +114,7 @@ def test_every_required_setting_is_read_through_require_env():
     and failed several frames away naming nothing."""
     offenders = []
     for path in APP.rglob("*.py"):
-        if path == APP / "config.py":
+        if path == APP / "shared" / "config.py":
             continue
         for lineno, line in enumerate(path.read_text().splitlines(), start=1):
             if re.search(r"os\.environ\[", line):

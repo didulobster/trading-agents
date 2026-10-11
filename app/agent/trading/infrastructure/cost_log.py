@@ -22,7 +22,7 @@ from datetime import date, datetime
 
 from app.agent.researcher import UsageSummary
 from app.agent.trading.domain.budget import CostEvent, RunBudget, RunTermination, total_spend
-from app.infrastructure.cost_log_path import cost_log_path, readable_logs
+from app.shared.cost_log_path import cost_log_path, readable_logs
 
 logger = logging.getLogger(__name__)
 

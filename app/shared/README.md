@@ -2,7 +2,7 @@
 
 Plumbing that both [EDGAR Research](../edgar_research/CONTEXT.md) and Trading use and neither owns: LLM providers, pricing, cost logging, config and the vault. See [CONTEXT-MAP.md](../../CONTEXT-MAP.md).
 
-## Provider abstraction (`app/infrastructure/llm/`)
+## Provider abstraction (`app/shared/llm/`)
 
 Every LLM client in the app is built by `get_client(model)`. Which provider
 serves a call is decided by the model id's prefix — `claude-*` to Anthropic,

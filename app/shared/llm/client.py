@@ -30,7 +30,7 @@ from typing import Any
 
 from anthropic import AsyncAnthropic, BadRequestError
 
-from app.infrastructure.llm.openai_compat import LLMBadRequestError, OpenAICompatClient
+from app.shared.llm.openai_compat import LLMBadRequestError, OpenAICompatClient
 
 ANTHROPIC = "anthropic"
 

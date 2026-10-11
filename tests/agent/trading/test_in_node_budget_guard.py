@@ -21,7 +21,7 @@ import app.agent.trading.application.nodes as nodes
 import app.agent.trading.infrastructure.fundamentals_port as port
 from app.agent.trading.domain.budget import CostEvent, RunBudget
 from app.agent.trading.domain.decision_memo import Verdict
-from app.domain.token_usage import TokenUsage
+from app.shared.token_usage import TokenUsage
 
 from tests.agent.trading.test_risk_verdict_sampling import (
     _memo,

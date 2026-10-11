@@ -29,7 +29,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.agent.researcher as researcher
-from app.domain.token_usage import response_text
+from app.shared.token_usage import response_text
 
 
 def _usage():

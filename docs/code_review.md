@@ -78,7 +78,7 @@ While there, fold in the line that is duplicated *because* of the awkward placem
 **Suggested change.** Two small modules, no behaviour change:
 
 - `app/agent/vault.py` — `save_output` (public), which `researcher.py` re-exports or simply calls.
-- `UsageSummary` / `_compute_cost` / `log_cost` alongside the existing `app/domain/token_usage.py`, which is already the module for "what a call cost."
+- `UsageSummary` / `_compute_cost` / `log_cost` alongside the existing `app/shared/token_usage.py`, which is already the module for "what a call cost."
 
 `researcher.py` shrinks toward being what its name says, and `trading/infrastructure/*` stops importing the research CLI to write a file.
 

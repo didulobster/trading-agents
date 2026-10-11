@@ -21,8 +21,8 @@ from __future__ import annotations
 if __name__ == "__main__":
     # Run as a script, this module is its own entry point: load .env before
     # the imports below read their settings. Imported as a library it leaves
-    # that to whichever entry point imported it (see app/config.py).
-    from app.config import load_env
+    # that to whichever entry point imported it (see app/shared/config.py).
+    from app.shared.config import load_env
 
     load_env()
 
@@ -43,10 +43,10 @@ from app.agent.prompts import ANALYST_SYSTEM_PROMPT, STEP1_TEST_PROMPT, NEWS_ASS
 from app.agent.tools import TOOLS, execute_tool, get_calc_results, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance
 from app.application.memo_verifier import verify_memo
 from app.domain.values import normalize_ticker
-from app.infrastructure.llm import MODEL_PRICING, get_client
-from app.infrastructure.llm.models import model_for
-from app.config import require_env
-from app.infrastructure.cost_log_path import cost_log_path
+from app.shared.llm import MODEL_PRICING, get_client
+from app.shared.llm.models import model_for
+from app.shared.config import require_env
+from app.shared.cost_log_path import cost_log_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ WATCHLIST_PATH = Path("watchlist.yaml")
 MEMO_DIR = Path.home() / require_env("MEMO_DIR")
 
 # Cost config — per million tokens. The table moved to
-# app/infrastructure/llm/pricing.py when the provider layer landed, because
+# app/shared/llm/pricing.py when the provider layer landed, because
 # pricing is a property of the provider rather than of this agent. Re-exported
 # under the old name so the three ports and the budget assertions that import
 # `_MODEL_PRICING` from here keep working.

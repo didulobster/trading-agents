@@ -1,9 +1,9 @@
-from app.domain.token_usage import TokenUsage
+from app.shared.token_usage import TokenUsage
 from datetime import date
 from typing import Literal
 
-from app.infrastructure.llm import get_client
-from app.infrastructure.llm.models import model_for
+from app.shared.llm import get_client
+from app.shared.llm.models import model_for
 from pydantic import BaseModel, field_validator
 
 from app.infrastructure.repositories.chunk_repo import RetrievedChunk

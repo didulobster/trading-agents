@@ -1,6 +1,6 @@
 # Entry point (uvicorn app.main:app): .env first, before any app import reads
-# its settings. See app/config.py.
-from app.config import load_env, require_env
+# its settings. See app/shared/config.py.
+from app.shared.config import load_env, require_env
 
 load_env()
 
@@ -17,7 +17,7 @@ import secrets
 
 from fastapi import Depends, Header
 
-from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
+from app.shared.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 from app.domain.values import Ticker, normalize_ticker
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, timedelta
@@ -43,7 +43,7 @@ from app.application.query_decomposer import QueryDecomposer
 from app.application.retrieval_service import RetrievalService, _fuse_across_queries
 
 from app.infrastructure.build_info import build_info
-from app.infrastructure.llm.models import model_for
+from app.shared.llm.models import model_for
 from app.infrastructure.edgar.client import EdgarClient, periodic_forms
 from app.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.infrastructure.queries.corpus_status import CorpusStatusQuery
@@ -261,7 +261,7 @@ def _report_usage(response: Response, *usages: tuple[str, TokenUsage]) -> None:
 
     The caller does the logging, not this server: only it knows the run_id,
     and only its TradingState feeds `check_run_guards`. See
-    domain/token_usage.py.
+    shared/token_usage.py.
 
     Each usage is paired with the model that spent it, so the caller can
     price it at that model's rate rather than its own.

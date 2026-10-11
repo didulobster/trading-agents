@@ -1,7 +1,7 @@
 if __name__ == "__main__":
     # Entry point: .env first, before the imports below read their settings.
-    # Imported for its helpers (tests), it loads nothing. See app/config.py.
-    from app.config import load_env
+    # Imported for its helpers (tests), it loads nothing. See app/shared/config.py.
+    from app.shared.config import load_env
 
     load_env()
 

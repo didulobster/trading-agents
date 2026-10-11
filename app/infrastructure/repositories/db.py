@@ -6,7 +6,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from pgvector.psycopg import register_vector_async
 
-from app.config import require_env
+from app.shared.config import require_env
 
 _pool: AsyncConnectionPool | None = None
 

@@ -15,7 +15,7 @@ from datetime import date
 import httpx
 from pydantic import ValidationError
 
-from app.domain.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
+from app.shared.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
 from app.application.number_matching import value_in_text, value_spans
 
 

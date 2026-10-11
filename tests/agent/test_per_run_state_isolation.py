@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 
 import app.agent.researcher as researcher
 import app.agent.tools as tools
-from app.domain.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
+from app.shared.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 
 # Every wait is bounded: a regression here would otherwise deadlock the suite
 # (a run that errors before signalling leaves the other waiting forever).
