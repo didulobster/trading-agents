@@ -18,8 +18,8 @@ looking for.
 """
 import asyncio, ast, re, statistics
 from pathlib import Path
-from dotenv import load_dotenv
-load_dotenv(override=True)
+from app.shared.config import load_env
+load_env()
 from app.edgar_research.application.embedding_service import EmbeddingService
 from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters

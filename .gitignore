@@ -12,10 +12,10 @@ __pycache__/
 
 # local synced data
 /data
-/eval/results*
-/eval/*cache.json
-/eval/test_set.yaml
-/eval/extraction-results*
+/app/edgar_research/eval/results*
+/app/edgar_research/eval/*cache.json
+/app/edgar_research/eval/test_set.yaml
+/app/edgar_research/eval/extraction-results*
 extraction_truth.yaml
 
 # docs/ is tracked except what runs write. Every pipeline run appends to the

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-import eval.runner as runner
+import app.edgar_research.eval.runner as runner
 from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.edgar_research.domain.chunk import Chunk
 from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk

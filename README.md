@@ -307,6 +307,8 @@ app/
     api.py                   /ask /extract /ingest /corpus-status /latest-filings /news-assess
     llm.py                   grounded answer generation behind /ask
     cli.py                   ingest / corpus-status / eval / extract-metrics
+    eval/                    retrieval and extraction evaluation harness
+    scripts/                 retrieval probes (run with python -m)
   trading/                   Trading context (CONTEXT.md)
     domain/                  pure types and rules
     application/             nodes, routers, guards
@@ -316,9 +318,8 @@ app/
                              config, cost log path, token usage
 .github/workflows/tests.yml   CI: pytest against a real pgvector service
 .env.example                 every variable, commented
-eval/                        retrieval evaluation harness
 migrations/                  Alembic
-scripts/                     validation batteries and probes
+scripts/                     trading validation batteries and probes
 tests/
 ```
 

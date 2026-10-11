@@ -49,7 +49,7 @@ ASK_EDGAR_MAX_CALLS = int(os.getenv("ASK_EDGAR_MAX_CALLS", "30"))
 # ~$0.05 per fundamentals run at 30 calls.
 #
 # 5 WAS TRIED AND REVERTED (2026-08-27). Run
-# `scripts/probe_retrieval_rank_decay.py` before touching this -- it replays
+# `app/edgar_research/scripts/probe_retrieval_rank_decay.py` before touching this -- it replays
 # the real questions from a battery. Over 102 of them:
 #
 #     rank 1 mean similarity 0.6799 ... rank 8 mean similarity 0.6451

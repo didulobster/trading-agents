@@ -1,5 +1,5 @@
 
-from eval.extract_runner import ExtractionCaseResult
+from app.edgar_research.eval.extract_runner import ExtractionCaseResult
 
 
 def extraction_report(results: list[ExtractionCaseResult]) -> str:

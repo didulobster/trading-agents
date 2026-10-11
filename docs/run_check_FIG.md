@@ -144,7 +144,7 @@ The fundamentals memo says so in its own words:
 
 All 24 `ask_edgar` calls went through the restarted server, so `retrieve_full`'s
 sum-merge was exercised. Whether it retrieves *better* is not measurable from a
-pipeline run — that needs `eval/` with the `full` mode, and the corpus it needs is
+pipeline run — that needs `app/edgar_research/eval/` with the `full` mode, and the corpus it needs is
 gitignored.
 
 ## Two defects run 2 exposed
@@ -261,7 +261,7 @@ $0.001944 new — 2.2× cheaper**, and it is the call carrying the entire conver
 
 ## 1. Did retrieval actually improve? Yes — in rank, not in recall
 
-`scripts/probe_fusion_ab.py` settles it without an LLM and without a hand-labelled gold
+`app/edgar_research/scripts/probe_fusion_ab.py` settles it without an LLM and without a hand-labelled gold
 set, by **known-item retrieval**: a distinctive sentence lifted out of a real chunk has
 that chunk as its correct answer by construction. Two such sentences make a two-part
 question whose right answer set is known exactly — the shape decomposition produces, and

@@ -1737,7 +1737,7 @@ battery was explicitly held pending a spend decision. Everything below is
 pre-battery evidence.
 
 **Gate A failed on NFLX, as predicted, and is now fixed.**
-`scripts/gate_a_corpus_probe.py` probes `RetrievalService` directly rather
+`app/edgar_research/scripts/gate_a_corpus_probe.py` probes `RetrievalService` directly rather
 than the agent's `ask_edgar` tool, so a zero is unambiguously an empty
 corpus and not a downed FastAPI app or a model declining to answer.
 

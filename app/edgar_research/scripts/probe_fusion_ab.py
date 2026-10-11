@@ -21,7 +21,7 @@ worse coverage. A negative result is a real possible outcome.
 Cost: one embedding per sub-query (~$0.00005 for the default run). No
 completion calls.
 
-    uv run python scripts/probe_fusion_ab.py [--pairs 40] [--k 8]
+    uv run python -m app.edgar_research.scripts.probe_fusion_ab [--pairs 40] [--k 8]
 """
 
 from __future__ import annotations
@@ -30,10 +30,6 @@ import argparse
 import asyncio
 import random
 import re
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.shared.config import load_env
 
