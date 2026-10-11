@@ -79,7 +79,9 @@ async def interpret_indicators(
     usage.cache_read_tokens = u.cache_read_input_tokens
     usage.output_tokens = u.output_tokens
     event_id = new_event_id("technical")
-    cost = log_cost(ticker, "trading-technical", usage, run_id=run_id, event_id=event_id)
+    cost = log_cost(
+        ticker, "trading-technical", usage, model=TECHNICAL_MODEL, run_id=run_id, event_id=event_id,
+    )
     cost_event = record_cost_event(event_id, "technical", usage, TECHNICAL_MODEL, cost)
 
     flagged = _flag_unmatched_numbers(interpretation, indicators)
@@ -231,4 +233,6 @@ def _format_technical_markdown(report: TechnicalReport) -> str:
 
 def save_technical_report(report: TechnicalReport, cost_usd: float | None = None) -> Path:
     content = _format_technical_markdown(report)
-    return _save_output(content, report.ticker.upper(), "technical", cost_usd=cost_usd)
+    return _save_output(
+        content, report.ticker.upper(), "technical", cost_usd=cost_usd, model=TECHNICAL_MODEL,
+    )

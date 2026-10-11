@@ -255,6 +255,18 @@ def _mock_model_response(monkeypatch, text: str) -> None:
     monkeypatch.setattr(port, "log_cost", lambda *args, **kwargs: None)
 
 
+def test_cost_is_logged_at_the_technical_model(monkeypatch):
+    """Priced at TECHNICAL_MODEL, not the research agent's default model:
+    the two are separate knobs and can name differently-priced models."""
+    _mock_model_response(monkeypatch, "RSI at around 62.")
+    models = []
+    monkeypatch.setattr(port, "log_cost", lambda *a, **k: models.append(k.get("model")))
+
+    asyncio.run(interpret_indicators("AVGO", FULL_PRECISION_INDICATORS))
+
+    assert models == [port.TECHNICAL_MODEL]
+
+
 def test_normal_interpretation_produces_no_flags(monkeypatch):
     """A faithful interpretation — every number a rounded restatement of a
     supplied indicator value — must come back with an empty flagged list."""

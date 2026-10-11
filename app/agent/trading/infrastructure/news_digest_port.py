@@ -366,7 +366,9 @@ async def build_digest(
         )
 
     event_id = new_event_id("news")
-    cost = log_cost(ticker, "trading-news", usage, run_id=run_id, event_id=event_id)
+    cost = log_cost(
+        ticker, "trading-news", usage, model=NEWS_DIGEST_MODEL, run_id=run_id, event_id=event_id,
+    )
     _assert_within_budget(cost)
     cost_event = record_cost_event(event_id, "news", usage, NEWS_DIGEST_MODEL, cost)
     return items, issues, cost, cost_event, sanitizer_flags
@@ -503,4 +505,5 @@ def save_sentiment_report(
         "sentiment",
         cost_usd=cost_usd,
         provenance=provenance,
+        model=NEWS_DIGEST_MODEL,
     )
