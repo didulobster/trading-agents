@@ -65,7 +65,7 @@ project: most of the code is not "call the model", it is **checking what the mod
 | State persistence | `langgraph-checkpoint-postgres` | Saves the run's state to Postgres after every step, so a crashed run resumes instead of restarting. |
 | Database | PostgreSQL + **pgvector** | One store for both ordinary tables and the embedding vectors. |
 | DB driver | `psycopg` 3 + pool | Async SQL, no ORM. |
-| Migrations | Alembic | Versioned schema changes under `migrations/`. |
+| Migrations | Alembic | Versioned schema changes under `app/edgar_research/migrations/`. |
 | API | FastAPI + Uvicorn | The RAG side is an HTTP service (`app/main.py`); the agent's tools call it over HTTP. |
 | LLM access | `anthropic`, `openai` SDKs behind `app/shared/llm/` | Provider is chosen by model-id prefix, so a role can be swapped by editing one env var. |
 | Embeddings | OpenAI `text-embedding-3-small` | Turns a chunk of text into a 1536-number vector. |

@@ -7,16 +7,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-import os 
-from dotenv import load_dotenv
-load_dotenv()
+from app.shared.config import load_env, require_env
+load_env()
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
 # Pull the DB URL from .env, override what's in alembic.ini
-db_url = os.environ["POSTGRES_DATABASE_URL"]
+db_url = require_env("POSTGRES_DATABASE_URL")
 # Alembic uses sync drivers by default for offline mode; async for online.
 # Normalize to the asyncpg driver here.
 if db_url.startswith("postgresql://"):
