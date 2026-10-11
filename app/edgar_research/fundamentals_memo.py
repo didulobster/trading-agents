@@ -11,7 +11,7 @@ from typing import Callable
 
 from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT
 from app.edgar_research.agent.researcher import AGENT_MODEL, run_agent
-from app.edgar_research.agent.tools import get_delegated_usage, get_session_log
+from app.edgar_research.agent.tools import get_delegated_usage, get_session_log, tool_usage_by_model
 from app.shared.cost import UsageSummary, compute_cost
 from app.shared.token_usage import TokenUsage
 
@@ -74,7 +74,7 @@ async def write_fundamentals_memo(
         text=text,
         model=AGENT_MODEL,
         usage=usage,
-        tool_usage=_tool_usage(),
+        tool_usage=tool_usage_by_model(get_delegated_usage(), AGENT_MODEL),
         provenance=get_session_log(),
     )
 
@@ -88,24 +88,3 @@ def _spend_so_far(usage: UsageSummary) -> float:
         total += compute_cost(tool_usage, model or AGENT_MODEL) or 0.0
     return total
 
-
-def _tool_usage() -> list[tuple[str, TokenUsage]]:
-    """What the agent's tools spent server-side, per model.
-
-    The server's models need not be the agent's: pricing a deepseek-served
-    /ask at a gpt-5.6-luna agent's rate under-counted it by ~44% on
-    2026-09-11, and the budget guard waved through the difference.
-    """
-    entries = []
-    for model, usage in get_delegated_usage().items():
-        if usage.is_empty:
-            continue
-        if model is None:
-            print(
-                f"[fundamentals] server reported tool usage without a model — "
-                f"pricing it at {AGENT_MODEL}, which is wrong if the server's "
-                f"answer/extraction models differ. Restart the API server."
-            )
-            model = AGENT_MODEL
-        entries.append((model, usage))
-    return entries
