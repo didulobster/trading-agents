@@ -112,7 +112,7 @@ This makes ingestion resumable — each phase only processes filings sitting at 
 
 ## Database Schema
 
-PostgreSQL 16 + pgvector. Five tables mirror the domain entities 1:1, with `chunks` denormalizing parent metadata for retrieval performance. A sixth table (`financial_metrics`) stores LLM-extracted figures per ticker/period for trend queries:
+PostgreSQL 16 + pgvector. Five tables mirror the domain entities 1:1, with `chunks` denormalizing parent metadata for retrieval performance. (A sixth, `financial_metrics`, stored `/extract` results for trend queries that were never built; nothing read it, and migration 204c09436418 dropped it.)
 
 ```
 listed_securities (cik UNIQUE, ticker UNIQUE, exchange, name)
@@ -125,12 +125,6 @@ sections (document_id FK, section_path TEXT[], order, content)
         │ 1:N
 chunks (section_id FK, content, chunk_index, token_count, embedding vector(1536),
         ticker, filed_date, filing_type, section_path TEXT[])  -- denormalized for pre-filtering
-
-financial_metrics (ticker, fiscal_period, filing_type, filed_date,
-                   revenue, gross_margin_pct, gaap_net_income, free_cash_flow,
-                   sbc_pct_of_revenue, net_dollar_retention, extraction_confidence,
-                   source_citations JSONB, extracted_at,
-                   UNIQUE(ticker, filing_type, fiscal_period))
 ```
 
 Indexes:
@@ -191,7 +185,7 @@ FastAPI router (`api.py`, mounted by `app/main.py`). All endpoints are JSON; the
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/ask` | POST | Grounded Q&A — decompose, hybrid-retrieve, answer with citations, verify. Detailed flow in [Query Pipeline](#query-pipeline-post-ask) |
-| `/extract` | POST | Extract structured financial metrics (revenue, gross margin, FCF, SBC%, NDR) for one ticker/period. Persists to `financial_metrics` table |
+| `/extract` | POST | Extract structured financial metrics (revenue, gross margin, FCF, SBC%, NDR) for one ticker/period |
 | `/ingest` | POST | Run the full ingestion pipeline for one ticker (discover → download → parse → chunk → embed) |
 | `/latest-filings` | POST | Check SEC EDGAR for a ticker's recent filings and compare against what is already in the corpus |
 | `/corpus-status` | GET | Cross-check filing status against chunk/embedding counts. Same logic as the CLI command |

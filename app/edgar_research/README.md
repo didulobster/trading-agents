@@ -62,8 +62,7 @@ curl -s localhost:8000/extract -H 'Content-Type: application/json' -d '{
 
 Retrieves within `filed_date` ± 30 days (override with `filed_after` / `filed_before`) and
 returns `revenue`, `gross_margin_pct`, `gaap_net_income`, `free_cash_flow`,
-`sbc_pct_of_revenue`, `net_dollar_retention`, `extraction_confidence` and `reasoning`. The
-row is also saved to `financial_metrics`.
+`sbc_pct_of_revenue`, `net_dollar_retention`, `extraction_confidence` and `reasoning`.
 
 ### `POST /ingest`
 
@@ -112,7 +111,6 @@ uv run python -m app.edgar_research.cli --help
 |---|---|---|
 | `ingest TICKER [--type 10-K] [--limit 4] [--since YEAR] [--retry-failed]` | embeddings | Discover → download → parse → chunk → embed. Resumable: a rerun picks up at the last completed phase. |
 | `corpus-status [--ticker T] [--verbose]` | — | Summary of the corpus and its integrity issues. Run it after every ingest: a filing can be `EMBEDDED` with far too few chunks. |
-| `extract-metrics TICKER [--k 5]` | LLM | Extract and store financial metrics for every ingested filing of a ticker. |
 | `fetch TICKER [--type 10-K] [--limit 4] [--since-year YEAR]` | — | Download filings into the local cache without ingesting them. |
 | `inspect-chunks HTML_PATH [--type 10-K] [--json-out] …` | — | Parse and chunk one cached filing and print the result, for tuning the chunker. |
 

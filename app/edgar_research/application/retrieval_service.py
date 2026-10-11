@@ -1,5 +1,4 @@
 import asyncio
-from datetime import date
 import logging
 
 from app.edgar_research.application.query_decomposer import DecompositionResult, QueryDecomposer
@@ -203,40 +202,6 @@ class RetrievalService:
             )
             for cid, score in ranked
         ]
-    
-    async def retrieve_for_extraction(
-        self,
-        ticker: str,
-        filed_date: date,
-        k: int = 5,
-    ) -> list[RetrievedChunk]:
-        """
-        Fixed-query retrieval for metric extraction.
-        Scoped to a single filing via filed_date to prevent period bleeding.
-        """
-        filters = ChunkSearchFilters(
-            tickers=[ticker],
-            filing_types=None,
-            filed_after=filed_date,
-            filed_before=filed_date,
-            section_path_contains=None,
-        )
-        # Four fixed queries, independent of each other. They ran one at a
-        # time — the same serial pattern retrieve_full stopped using.
-        per_query = await asyncio.gather(
-            *(self.retrieve(query, k=k, filters=filters)
-              for query in self.METRIC_QUERIES.values())
-        )
-        return self._dedupe_by_chunk_id([c for results in per_query for c in results])
-
-    @staticmethod
-    def _dedupe_by_chunk_id(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        best: dict[int, RetrievedChunk] = {}
-        for c in chunks:
-            key = c.chunk.id
-            if key not in best or c.similarity > best[key].similarity:
-                best[key] = c
-        return list(best.values())
 
     async def retrieve_full(
         self,

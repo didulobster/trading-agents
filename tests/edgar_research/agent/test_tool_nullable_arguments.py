@@ -104,7 +104,6 @@ def extract_client(monkeypatch):
         "ChunkRepository": lambda: None,
         "QueryDecomposer": lambda: None,
         "MetricsExtractor": _Extractor,
-        "MetricsRepository": _Repo,
     }.items():
         monkeypatch.setattr(api, name, value)
     return TestClient(main.app), windows

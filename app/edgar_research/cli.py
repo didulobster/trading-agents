@@ -14,11 +14,7 @@ from pathlib import Path
 import typer
 
 from app.edgar_research.application.embedding_service import EmbeddingService
-from app.edgar_research.application.extraction_service import MetricsExtractor
 from app.edgar_research.application.ingestion_service import IngestionService
-from app.edgar_research.application.query_decomposer import QueryDecomposer
-from app.edgar_research.application.retrieval_service import RetrievalService
-from app.edgar_research.domain.values import FilingStatus
 from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
@@ -29,11 +25,6 @@ from app.edgar_research.infrastructure.repositories.db import close_pool, init_p
 from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
-from app.edgar_research.application.citations import format_citation_tag
-from app.edgar_research.infrastructure.repositories.metrics_repo import (
-    FinancialMetricsRow,
-    MetricsRepository,
-)
 from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -132,16 +123,6 @@ def corpus_status_cmd(
     """Print a summary of what's actually in the corpus."""
     asyncio.run(_corpus_status(ticker, verbose))
 
-@app.command(name="extract-metrics")
-def extract_metrics_cmd(
-    ticker: str = typer.Argument(..., help="Ticker to extract metrics for e.g. FIG"),
-    k: int = typer.Option(5, "--k", help="Chunks per metric query"),
-):
-    """Extract and store financial metrics for all ingested filings of a ticker."""
-    asyncio.run(_run_extract_metrics(ticker, k))
-
-
-# ----------------------- Definitions -----------------------
 async def _fetch(ticker: str, form_type: str, limit: int, since_year: int | None) -> None:
     user_agent = require_env("EDGAR_USER_AGENT")   # "Wilson Ting wilson@example.com"
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
@@ -299,85 +280,6 @@ async def _ingest(
             )
     finally:
         await close_pool()
-
-async def _run_extract_metrics(ticker: str, k: int) -> None:
-    """Extract and store metrics for every embedded filing of one ticker.
-
-    This command had never run. It called `FilingStatus.INGESTED` (no such
-    member), `filing_repo.list_by_state` and `.set_state` (neither exists),
-    read `f.fiscal_period` off a Filing (which has `period_of_report`), and
-    passed the extractor's own model to `MetricsRepository.upsert`, which
-    needs the row type. Five failures, none of them caught, because no test
-    touched any CLI command.
-    """
-    await init_pool()
-    try:
-        embedder = EmbeddingService()
-        chunk_repo = ChunkRepository()
-        decomposer = QueryDecomposer()
-        retrieval = RetrievalService(
-            embedding_service=embedder,
-            chunk_repo=chunk_repo,
-            decomposer=decomposer,
-        )
-        extractor = MetricsExtractor()
-        metrics_repo = MetricsRepository()
-        filing_repo = FilingRepository()
-
-        # EMBEDDED is where ingestion leaves a filing that finished; a
-        # filing already at METRICS_EXTRACTED is re-done on request, since
-        # the upsert refreshes rather than duplicates.
-        filings = await filing_repo.list_by_ticker_and_status(
-            ticker, [FilingStatus.EMBEDDED, FilingStatus.METRICS_EXTRACTED]
-        )
-        if not filings:
-            typer.echo(
-                f"No embedded filings found for {ticker.upper()} — "
-                f"run `ingest` first, or check `corpus-status {ticker.upper()}`."
-            )
-            raise typer.Exit(1)
-
-        extracted_count = 0
-        for f in filings:
-            fiscal_period = f.fiscal_period_label()
-            typer.echo(
-                f"Extracting {fiscal_period} ({f.filing_type}, {f.filed_date})..."
-            )
-
-            chunks = await retrieval.retrieve_for_extraction(ticker, f.filed_date, k=k)
-            if not chunks:
-                typer.echo("  WARNING: no chunks retrieved — skipping")
-                continue
-
-            metrics = await extractor.extract(
-                chunks, ticker, fiscal_period, f.filing_type, f.filed_date
-            )
-            await metrics_repo.upsert(FinancialMetricsRow.from_extraction(
-                metrics,
-                ticker=ticker.upper(),
-                fiscal_period=fiscal_period,
-                filing_type=f.filing_type,
-                filed_date=f.filed_date,
-                source_citations=[format_citation_tag(c) for c in chunks],
-            ))
-            await filing_repo.mark_status(f.id, FilingStatus.METRICS_EXTRACTED)
-            extracted_count += 1
-
-            typer.echo(
-                f"  revenue={metrics.revenue}M  "
-                f"gross_margin={metrics.gross_margin_pct}%  "
-                f"fcf={metrics.free_cash_flow}M  "
-                f"ndr={metrics.net_dollar_retention}  "
-                f"conf={metrics.extraction_confidence}"
-            )
-
-        typer.echo(
-            f"\nDone. {extracted_count} of {len(filings)} filing(s) "
-            f"extracted for {ticker.upper()}."
-        )
-    finally:
-        await close_pool()
-
 
 if __name__ == "__main__":
     app()
