@@ -881,61 +881,62 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
         )
     chained_values = {float(i["value"]) for i in chained}
 
-    # 4 — declared but never returned by any tool
+    # 4 — declared but never returned by any tool. Runs on an empty corpus
+    # too: skipped there, every input passed before the run's first
+    # retrieval, and its result could then be reused as a passing one.
     corpus = _provenance_corpus()
-    if corpus:
-        unsourced = [
-            i for i in inputs
-            if i.get("value") is not None
-            and float(i["value"]) not in _OPERATION_SCALARS
-            and float(i["value"]) not in chained_values
-            and not _appears_in_output(float(i["value"]), corpus)
-        ]
-        if unsourced:
-            detail = "; ".join(
-                f"{i['value']} ({i.get('label', 'unlabelled')})"
-                for i in unsourced
-            )
-            return (
-                f"Rejected: no tool returned these figures during this run: "
-                f"{detail}. You cited a source for them, but the value never "
-                f"appeared in any ask_edgar or extract_metrics result. Either "
-                f"retrieve the figure first, or — if you derived it yourself — "
-                f"show the derivation as a separate calculate call using only "
-                f"retrieved figures. An earlier calculate result can be reused "
-                f"at its exact returned value."
-            )
+    unsourced = [
+        i for i in inputs
+        if i.get("value") is not None
+        and float(i["value"]) not in _OPERATION_SCALARS
+        and float(i["value"]) not in chained_values
+        and not _appears_in_output(float(i["value"]), corpus)
+    ]
+    if unsourced:
+        detail = "; ".join(
+            f"{i['value']} ({i.get('label', 'unlabelled')})"
+            for i in unsourced
+        )
+        return (
+            f"Rejected: no tool returned these figures during this run: "
+            f"{detail}. You cited a source for them, but the value never "
+            f"appeared in any ask_edgar or extract_metrics result. Either "
+            f"retrieve the figure first, or — if you derived it yourself — "
+            f"show the derivation as a separate calculate call using only "
+            f"retrieved figures. An earlier calculate result can be reused "
+            f"at its exact returned value."
+        )
 
-        # 5 — real value, wrong period label
-        outputs = _state().retrieved_text
-        mismatched = []
-        for i in inputs:
-            if i.get("value") is None:
-                continue
-            value = float(i["value"])
-            if value in _OPERATION_SCALARS or value in chained_values:
-                continue
-            year = _fiscal_year(i.get("fiscal_period", ""))
-            if year is None:
-                continue  # can't check a period we can't parse a year from
-            if not _year_near_any_occurrence(value, year, outputs):
-                mismatched.append((i, year))
+    # 5 — real value, wrong period label
+    outputs = _state().retrieved_text
+    mismatched = []
+    for i in inputs:
+        if i.get("value") is None:
+            continue
+        value = float(i["value"])
+        if value in _OPERATION_SCALARS or value in chained_values:
+            continue
+        year = _fiscal_year(i.get("fiscal_period", ""))
+        if year is None:
+            continue  # can't check a period we can't parse a year from
+        if not _year_near_any_occurrence(value, year, outputs):
+            mismatched.append((i, year))
 
-        if mismatched:
-            detail = "; ".join(
-                f"{i['value']} ({i.get('label', 'unlabelled')}) declared as "
-                f"{i.get('fiscal_period')}, but '{year}' never appears near "
-                f"any occurrence of {i['value']} in retrieved text"
-                for i, year in mismatched
-            )
-            return (
-                f"Rejected: fiscal-period mismatch — {detail}. This value "
-                f"was retrieved, but not in a context mentioning the period "
-                f"you're claiming it for — check whether you've paired a "
-                f"figure from the wrong fiscal year (e.g. a later year's "
-                f"balance used for an earlier year's ratio). Re-retrieve "
-                f"the correct period's value before calling calculate again."
-            )
+    if mismatched:
+        detail = "; ".join(
+            f"{i['value']} ({i.get('label', 'unlabelled')}) declared as "
+            f"{i.get('fiscal_period')}, but '{year}' never appears near "
+            f"any occurrence of {i['value']} in retrieved text"
+            for i, year in mismatched
+        )
+        return (
+            f"Rejected: fiscal-period mismatch — {detail}. This value "
+            f"was retrieved, but not in a context mentioning the period "
+            f"you're claiming it for — check whether you've paired a "
+            f"figure from the wrong fiscal year (e.g. a later year's "
+            f"balance used for an earlier year's ratio). Re-retrieve "
+            f"the correct period's value before calling calculate again."
+        )
 
     return None
 
