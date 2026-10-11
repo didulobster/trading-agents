@@ -144,12 +144,13 @@ async def test_decomposed_sub_queries_are_retrieved_concurrently_and_fused_by_ag
 
 
 def test_endpoints_use_the_shared_clients_when_the_server_built_them(monkeypatch):
+    import app.edgar_research.api as api
     import app.main as main
 
     shared = object()
     monkeypatch.setattr(main.app.state, "embedder", shared, raising=False)
-    assert main._embedder() is shared
+    assert api._embedder(main.app.state) is shared
 
     monkeypatch.setattr(main.app.state, "embedder", None, raising=False)
-    monkeypatch.setattr(main, "EmbeddingService", lambda: "fresh")
-    assert main._embedder() == "fresh"   # no lifespan (tests, or a failed build): per request
+    monkeypatch.setattr(api, "EmbeddingService", lambda: "fresh")
+    assert api._embedder(main.app.state) == "fresh"   # no lifespan (tests, or a failed build): per request

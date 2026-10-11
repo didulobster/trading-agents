@@ -120,7 +120,7 @@ def test_a_legacy_flat_header_is_kept_under_no_model():
 def test_the_server_endpoint_helper_emits_per_model_usage():
     from fastapi import Response
 
-    from app.main import _report_usage
+    from app.edgar_research.api import _report_usage
 
     response = Response()
     _report_usage(
