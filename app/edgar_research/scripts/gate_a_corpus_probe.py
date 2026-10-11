@@ -16,9 +16,9 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from dotenv import load_dotenv
+from app.shared.config import load_env
 
-load_dotenv(override=True)
+load_env()
 
 from app.edgar_research.application.embedding_service import EmbeddingService  # noqa: E402
 from app.edgar_research.application.retrieval_service import RetrievalService  # noqa: E402

@@ -1,7 +1,7 @@
 """`ask_edgar` retrieves ASK_EDGAR_K chunks per call, and that number is
 ~77% of the call's input cost. It is also the knob most likely to be turned
 for a saving without measuring what it costs, so the measurement lives next
-to it — see scripts/probe_retrieval_rank_decay.py and the constant's comment.
+to it — see app/edgar_research/scripts/probe_retrieval_rank_decay.py and the constant's comment.
 """
 
 from __future__ import annotations

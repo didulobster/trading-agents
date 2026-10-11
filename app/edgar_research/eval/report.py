@@ -1,7 +1,7 @@
-# eval/report.py
+# app/edgar_research/eval/report.py
 from collections import defaultdict
 
-from eval.runner import QuestionResult
+from app.edgar_research.eval.runner import QuestionResult
 
 
 def report(results: list[QuestionResult]) -> str:

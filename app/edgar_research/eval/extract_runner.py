@@ -9,10 +9,10 @@ from app.edgar_research.application.extraction_service import MetricsExtractor
 from app.edgar_research.application.query_decomposer import QueryDecomposer
 from app.edgar_research.application.retrieval_service import RetrievalService
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository, ChunkSearchFilters
-from eval.question_embedding_cache import QuestionEmbeddingCache
+from app.edgar_research.eval.question_embedding_cache import QuestionEmbeddingCache
 
 
-CACHE_PATH = Path("eval/.extraction_embeddings_cache.json")
+CACHE_PATH = Path("app/edgar_research/eval/.extraction_embeddings_cache.json")
 
 TOLERANCES = {
     "revenue": 1.0,

@@ -30,14 +30,14 @@ from app.edgar_research.infrastructure.repositories.document_repo import Documen
 from app.edgar_research.infrastructure.repositories.filing_repo import FilingRepository
 from app.edgar_research.infrastructure.repositories.listed_security_repo import ListedSecurityRepository
 from app.edgar_research.application.citations import format_citation_tag
-from eval.runner import DEFAULT_MODE
+from app.edgar_research.eval.runner import DEFAULT_MODE
 from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
 from app.edgar_research.infrastructure.repositories.section_repo import SectionRepository
-from eval.extraction_report import serialize_extraction_result
-from eval.runner import serialize_result
+from app.edgar_research.eval.extraction_report import serialize_extraction_result
+from app.edgar_research.eval.runner import serialize_result
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -143,7 +143,7 @@ def corpus_status_cmd(
 
 @app.command(name="eval")
 def eval_cmd(
-    test_set: Path = Path("eval/test_set.yaml"),
+    test_set: Path = Path("app/edgar_research/eval/test_set.yaml"),
     mode: str = typer.Option(
         DEFAULT_MODE, "--mode",
         help="full (what /ask does) | hybrid (what extraction does) | vector (baseline)",
@@ -159,7 +159,7 @@ def eval_cmd(
 
 @app.command(name="eval-extraction")
 def eval_extraction_cmd(
-    test_set: Path = Path("eval/extraction_truth.yaml"),
+    test_set: Path = Path("app/edgar_research/eval/extraction_truth.yaml"),
     k: int = typer.Option(5, "--k"),
 ):
     """Validate extraction output against hand-verified filing numbers."""
@@ -205,8 +205,8 @@ def _prune_old_results(prefix: str, keep: int = 10) -> None:
 
 
 async def _run_eval(test_set_path: Path, k, mode: str) -> None:
-    from eval.runner import run_eval
-    from eval.report import report
+    from app.edgar_research.eval.runner import run_eval
+    from app.edgar_research.eval.report import report
 
     await init_pool()
     try:
@@ -215,7 +215,7 @@ async def _run_eval(test_set_path: Path, k, mode: str) -> None:
 
         # Save raw results for diffing across runs
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"eval/results-{timestamp}.json")
+        results_path = Path(f"app/edgar_research/eval/results-{timestamp}.json")
         results_path.write_text(json.dumps(
             [serialize_result(r) for r in results], indent=2
         ))
@@ -482,8 +482,8 @@ async def _run_extract_metrics(ticker: str, k: int) -> None:
 
 # async wrapper — matches _run_eval structure
 async def _run_extraction_eval(test_set_path: Path, k: int) -> None:
-    from eval.extract_runner import run_extraction_eval
-    from eval.extraction_report import extraction_report
+    from app.edgar_research.eval.extract_runner import run_extraction_eval
+    from app.edgar_research.eval.extraction_report import extraction_report
 
     await init_pool()
     try:
@@ -491,7 +491,7 @@ async def _run_extraction_eval(test_set_path: Path, k: int) -> None:
         print(extraction_report(results))
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        results_path = Path(f"eval/extraction-results-{timestamp}.json")
+        results_path = Path(f"app/edgar_research/eval/extraction-results-{timestamp}.json")
         results_path.write_text(json.dumps(
             [serialize_extraction_result(r) for r in results], indent=2
         ))
