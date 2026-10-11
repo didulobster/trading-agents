@@ -119,3 +119,14 @@ def test_only_results_gain_a_percent_form_not_memo_figures():
     applies to what calculate returned, not to every number in the memo."""
     report = verify_answer("The ratio was 0.5.", {0: "unrelated 7,777"}, computed_values=[50.0])
     assert [f.value for f in report.verified if f.kind == "computed"] == []
+
+
+@pytest.mark.anyio
+async def test_a_run_that_has_retrieved_nothing_cannot_calculate_with_made_up_figures():
+    """Check 4 ran only `if corpus:`, so before the first retrieval of a run
+    every declared input passed as "retrieved" — a remembered figure could
+    be computed with, and its result then reused as a passing result."""
+    result = await _calc("34000000000 / 30000000000", _chained(34000000000), _chained(30000000000))
+
+    assert result.startswith("Rejected")
+    assert tools.get_calc_results() == []
