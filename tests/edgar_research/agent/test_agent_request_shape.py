@@ -179,7 +179,7 @@ def test_response_text_joins_every_text_block_not_just_the_first():
 async def test_ask_returns_an_explicit_empty_answer_rather_than_a_500(monkeypatch):
     from app.edgar_research.domain.chunk import Chunk
     from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
-    import app.edgar_research.llm as llm
+    import app.edgar_research.application.answer_service as answer_service
 
     chunk = Chunk(
         id=1, section_id=1, content="Revenue was $64.9 billion.", chunk_index=0,
@@ -201,9 +201,9 @@ async def test_ask_returns_an_explicit_empty_answer_rather_than_a_500(monkeypatc
                 ),
             )
 
-    monkeypatch.setattr(llm, "get_client", lambda model: _Empty())
+    monkeypatch.setattr(answer_service, "get_client", lambda model: _Empty())
 
-    result = await llm.answer_question(
+    result = await answer_service.answer_question(
         "q", [RetrievedChunk(chunk=chunk, similarity=0.5)], model="m"
     )
     assert "returned no answer" in result.answer

@@ -39,7 +39,7 @@ from app.edgar_research.infrastructure.repositories.metrics_repo import (
     FinancialMetricsRow,
     MetricsRepository,
 )
-from app.edgar_research.llm import answer_question
+from app.edgar_research.application.answer_service import answer_question
 
 router = APIRouter()
 claude_model = model_for("answer")

@@ -31,7 +31,7 @@ class AnswerWithCitations:
     answer: str
     citations: list[str]   # The tags that appeared in the answer
     chunks: list[RetrievedChunk]   # All chunks supplied to the LLM
-    # What this call cost. Reported rather than logged here: llm.py has no
+    # What this call cost. Reported rather than logged here: this module has no
     # run_id and no state, and the caller that owns the run is the only
     # place the number can be attributed correctly. See shared/token_usage.
     usage: TokenUsage = field(default_factory=TokenUsage)
