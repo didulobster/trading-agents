@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.agent.researcher import _save_output
+from app.shared.vault import save_output
 from app.agent.trading.domain.budget import RunTermination, total_spend
 from app.agent.trading.domain.decision_memo import DecisionMemo, Verdict
 
@@ -149,7 +149,7 @@ def _format_memo_markdown(memo: DecisionMemo) -> str:
 def save_decision_memo(
     memo: DecisionMemo, provenance: str | None = None
 ) -> Path:
-    return _save_output(
+    return save_output(
         _format_memo_markdown(memo),
         memo.ticker.upper(),
         "decision",
@@ -196,7 +196,7 @@ def save_failed_decision_memo(
     already use to save their own output while the graph is still
     executing. The memo that failed verification is the debugging
     artifact; discarding it re-runs the pipeline blind."""
-    return _save_output(
+    return save_output(
         _format_failed_memo_markdown(memo, verification),
         memo.ticker.upper(),
         "decision_failed",
@@ -257,7 +257,7 @@ def save_aborted_run_memo(state, terminated_by: RunTermination) -> Path:
     save_failed_decision_memo above. Same reason: a run that stopped without
     a verdict is a debugging/audit artifact, not nothing."""
     ticker = state.get("ticker") or "UNKNOWN"
-    return _save_output(
+    return save_output(
         _format_aborted_run_markdown(state, terminated_by),
         ticker.upper(),
         "decision_aborted",

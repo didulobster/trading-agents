@@ -41,7 +41,7 @@ class RunRecord(BaseModel):
     error_repr: str | None = None
 
     # Vault paths. The pipeline writes one folder per run (see
-    # researcher._save_output), so these are recorded rather than derived —
+    # shared.vault.save_output), so these are recorded rather than derived —
     # a folder name carries the run's start instant, which the manifest
     # writer cannot recompute afterwards without guessing.
     run_folder: str | None = None

@@ -32,7 +32,7 @@ from app.agent.trading.infrastructure.structured_call import (
 from app.shared.llm import LLMClient, get_client
 from app.shared.llm.models import model_for, warn_if_unpriced
 
-from app.agent.researcher import _save_output
+from app.shared.vault import save_output
 from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.application.risk_ledger import build_risk_ledger, build_slate, contested_ids
 from app.agent.trading.domain.debate import DebateTurn, canonical_claims
@@ -703,7 +703,7 @@ def save_risk_transcript(
 ) -> Path:
     content = _format_risk_markdown(ticker.upper(), turns, terminated_by)
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
-    return _save_output(
+    return save_output(
         content, ticker.upper(), "risk", cost_usd=total if turns else None,
         provenance=provenance, model=RISK_MODEL,
     )

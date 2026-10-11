@@ -12,7 +12,7 @@ import logging
 import sys
 from datetime import date
 
-from app.agent.researcher import vault_run
+from app.shared.vault import vault_run
 from app.shared.ticker import ticker_arg
 from app.agent.trading.infrastructure.checkpointer import build_checkpointer
 from app.agent.trading.infrastructure.graph import ALL_ANALYSTS, build_trading_graph

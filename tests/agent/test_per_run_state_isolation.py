@@ -19,7 +19,7 @@ from typing import TypedDict
 import pytest
 from langgraph.graph import END, START, StateGraph
 
-import app.agent.researcher as researcher
+from app.shared import vault
 import app.agent.tools as tools
 from app.shared.token_usage import USAGE_HEADER, TokenUsage, encode_usage_header
 
@@ -72,15 +72,15 @@ async def test_two_overlapping_runs_keep_separate_tool_state():
 
 @pytest.mark.anyio
 async def test_two_overlapping_vault_runs_file_into_their_own_folders(tmp_path, monkeypatch):
-    monkeypatch.setattr(researcher, "MEMO_DIR", tmp_path)
+    monkeypatch.setattr(vault, "MEMO_DIR", tmp_path)
     entered = asyncio.Event()
 
     async def run(stamp: datetime, wait_for: asyncio.Event | None):
-        with researcher.vault_run(stamp):
+        with vault.vault_run(stamp):
             entered.set()
             if wait_for is not None:
                 await asyncio.wait_for(wait_for.wait(), _TIMEOUT)
-            return researcher._save_output("# memo", "ACN", "decision")
+            return vault.save_output("# memo", "ACN", "decision")
 
     release = asyncio.Event()
     a = asyncio.create_task(run(datetime(2026, 9, 11, 10, 0, 0), release))
@@ -91,7 +91,7 @@ async def test_two_overlapping_vault_runs_file_into_their_own_folders(tmp_path, 
 
     assert a_path.parent.name == "2026-0911-100000"
     assert b_path.parent.name == "2026-0911-110000"
-    assert researcher._RUN_STAMP.get() is None
+    assert vault._RUN_STAMP.get() is None
 
 
 @pytest.mark.anyio
@@ -104,7 +104,7 @@ async def test_graph_nodes_see_the_run_folder_set_around_the_invocation():
         seen: str
 
     async def node(state: S) -> dict:
-        stamp = researcher._RUN_STAMP.get()
+        stamp = vault._RUN_STAMP.get()
         return {"seen": stamp.isoformat() if stamp else "none"}
 
     builder = StateGraph(S)
@@ -113,7 +113,7 @@ async def test_graph_nodes_see_the_run_folder_set_around_the_invocation():
     builder.add_edge("n", END)
     graph = builder.compile()
 
-    with researcher.vault_run(datetime(2026, 9, 11, 12, 30, 0)):
+    with vault.vault_run(datetime(2026, 9, 11, 12, 30, 0)):
         result = await graph.ainvoke({})
 
     assert result["seen"] == "2026-09-11T12:30:00"

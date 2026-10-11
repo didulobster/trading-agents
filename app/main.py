@@ -33,7 +33,7 @@ from app.agent.trading.interface.runner import (
     save_vault_artifacts,
     start_or_resume,
 )
-from app.agent.researcher import vault_run
+from app.shared.vault import vault_run
 from app.application.citations import format_citation_tag
 from app.application.citation_verifier import verify_answer
 from app.application.embedding_service import EmbeddingService

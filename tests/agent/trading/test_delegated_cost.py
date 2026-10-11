@@ -151,7 +151,7 @@ async def test_fundamentals_logs_one_tool_event_per_model_at_its_own_rate(monkey
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
     monkeypatch.setattr(port, "log_cost", fake_log_cost)
-    monkeypatch.setattr(port, "_save_output", lambda *a, **k: "vault/path")
+    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
     monkeypatch.setattr(port, "AGENT_MODEL", "gpt-5.6-luna")
 
     tools._record_delegated_usage(_header(
@@ -179,7 +179,7 @@ async def test_legacy_usage_is_priced_at_the_agent_model(monkeypatch):
     monkeypatch.setattr(port, "_USE_MOCK", False)
     monkeypatch.setattr(port, "run_agent", fake_run_agent)
     monkeypatch.setattr(port, "log_cost", lambda *a, **k: 0.01)
-    monkeypatch.setattr(port, "_save_output", lambda *a, **k: "vault/path")
+    monkeypatch.setattr(port, "save_memo", lambda *a, **k: "vault/path")
 
     tools._record_delegated_usage(
         _Resp({USAGE_HEADER: TokenUsage(input_tokens=10).model_dump_json()})

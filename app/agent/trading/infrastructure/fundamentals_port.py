@@ -9,7 +9,7 @@ from pathlib import Path
 from app.agent.researcher import (
     AGENT_MODEL,
     StopCheck,
-    _save_output,
+    save_memo,
     run_agent,
 )
 from app.shared.cost import UsageSummary, compute_cost, log_cost
@@ -134,7 +134,7 @@ async def get_fundamentals_report(
     cost = log_cost(
         ticker, "trading-fundamentals", usage, AGENT_MODEL, run_id=run_id, event_id=event_id,
     )
-    vault_path = _save_output(result, ticker.upper(), "fundamentals", cost_usd=cost)
+    vault_path = save_memo(result, ticker.upper(), "fundamentals", cost_usd=cost)
     print(f"[fundamentals] saved memo to {vault_path}")
 
     # What the agent's TOOLS spent server-side, which until 2026-08-27

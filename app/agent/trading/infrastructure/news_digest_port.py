@@ -14,7 +14,7 @@ from app.shared.llm.models import model_for, warn_if_unpriced
 NEWS_DIGEST_MODEL = model_for("news_digest")
 warn_if_unpriced(NEWS_DIGEST_MODEL, "news")
 
-from app.agent.researcher import _save_output
+from app.shared.vault import save_output
 from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.budget import CostEvent
 from app.agent.trading.domain.errors import VendorError
@@ -500,7 +500,7 @@ def save_sentiment_report(
     provenance: str | None = None,
 ) -> Path:
     content = _format_sentiment_markdown(digest, summary, issues)
-    return _save_output(
+    return save_output(
         content,
         digest.ticker.upper(),
         "sentiment",

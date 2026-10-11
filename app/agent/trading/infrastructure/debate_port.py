@@ -58,7 +58,7 @@ from app.shared.llm import (  # noqa: F401
 )
 from app.shared.llm.models import model_for, warn_if_unpriced
 
-from app.agent.researcher import _save_output
+from app.shared.vault import save_output
 from app.shared.cost import UsageSummary, log_cost
 from app.agent.trading.domain.debate import (
     DebateTurn,
@@ -810,7 +810,7 @@ def save_debate_transcript(
 ) -> Path:
     content = _format_debate_markdown(ticker.upper(), turns, terminated_by)
     total = sum(t.estimated_cost_usd or 0.0 for t in turns)
-    return _save_output(
+    return save_output(
         content,
         ticker.upper(),
         "debate",
