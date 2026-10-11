@@ -194,6 +194,21 @@ def _computed_forms(values) -> set[str]:
     return out
 
 
+def _matches_computed(bare: str, results: list[float]) -> bool:
+    """True if a memo figure is a calculate() result, to the memo's own
+    precision: "-0.551142522485972" and "0.55" both match -0.5511425.
+
+    Compared by magnitude. The number pattern reads "-0.55" as "0.55", and a
+    memo often states the sign in words ("declined 0.55%"); matching the
+    signed value flagged every negative result as unverified, and matching
+    only 1-2 decimal string forms flagged any result stated in full.
+    """
+    value = float(bare)
+    decimals = len(bare.split(".")[1]) if "." in bare else 0
+    tolerance = 0.5 * 10 ** -decimals
+    return any(abs(abs(r) - value) <= tolerance for r in results)
+
+
 def _rejected_match_tolerance(value: float) -> float:
     """How far a memo figure may sit from a rejected calculate() result and
     still count as the same derivation.
@@ -358,6 +373,7 @@ def verify_answer(
     """
     report = VerificationReport()
     computed = _computed_forms(_with_percent(computed_values))
+    computed_numbers = _with_percent(computed_values)
     # A rejected attempt later backed by a passing calculate() call (same
     # numeric result) is validated, regardless of whether the caller already
     # filtered it out — don't rely solely on the caller's bookkeeping.
@@ -413,7 +429,7 @@ def verify_answer(
 
         # A figure matching a calculate() result is verified as computed,
         # not fabricated. chunk id -1 marks "produced by the calculator".
-        if bare in computed or _computed_forms([bare]) & computed:
+        if bare in computed or _computed_forms([bare]) & computed or _matches_computed(bare, computed_numbers):
             report.verified.append(Finding("computed", raw, context, -1))
             continue
 

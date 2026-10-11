@@ -318,6 +318,14 @@ _UNIT_SCALES = {
 }
 
 
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
 def safe_calculate(expression: str, inputs: list[dict] | None = None) -> str:
     try:
         node = ast.parse(expression, mode="eval").body
@@ -633,9 +641,13 @@ async def _dispatch(name: str, inputs: dict) -> str:
         result = safe_calculate(expression, inputs.get("inputs", []))
         record_calc_result(result)
         # Said, because a bare 10874360000.0 from thousands-scale inputs read
-        # to the agent as an error. No digits: the note must not add a number.
-        if any(_UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0 for i in inputs.get("inputs", [])):
-            result += " (in ones: inputs were converted from their declared units)"
+        # to the agent as an error. Only on a number — an error is not one —
+        # and worded for ratios too, where the scale cancels. No digits: the
+        # note must not add a number.
+        if _is_number(result) and any(
+            _UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0 for i in inputs.get("inputs", [])
+        ):
+            result += " (inputs converted to ones before calculating)"
         cache[key] = result
         return result
 
@@ -846,7 +858,9 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"Rejected: these numbers appear in the expression but are not "
             f"declared in `inputs`: {sorted(unaccounted)}. Every figure must "
             f"be retrieved from a filing and declared with its fiscal period "
-            f"and source."
+            f"and source, and written in the expression exactly as declared: "
+            f"a figure declared with unit 'billions' goes in as that number "
+            f"of billions, and calculate converts the units itself."
         )
  
     # 3 — every declared input states a valid unit
