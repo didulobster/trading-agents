@@ -15,9 +15,9 @@ from datetime import date
 from types import SimpleNamespace
 
 from app.application.ingestion_service import IngestionService
-from app.domain.filing import Filing
-from app.domain.listed_security import ListedSecurity
-from app.domain.values import FilingStatus
+from app.edgar_research.domain.filing import Filing
+from app.edgar_research.domain.listed_security import ListedSecurity
+from app.edgar_research.domain.values import FilingStatus
 
 ACCESSION = "0001467373-25-000217"
 

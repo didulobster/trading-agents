@@ -2,12 +2,12 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from app.domain.chunk import Chunk, chunk_from_draft
-from app.domain.document import Document
-from app.domain.filing import Filing
-from app.domain.listed_security import ListedSecurity
-from app.domain.section import Section
-from app.domain.values import FilingStatus
+from app.edgar_research.domain.chunk import Chunk, chunk_from_draft
+from app.edgar_research.domain.document import Document
+from app.edgar_research.domain.filing import Filing
+from app.edgar_research.domain.listed_security import ListedSecurity
+from app.edgar_research.domain.section import Section
+from app.edgar_research.domain.values import FilingStatus
 
 from app.infrastructure.chunking.section_chunker import chunk_filing
 from app.infrastructure.edgar.client import EdgarClient

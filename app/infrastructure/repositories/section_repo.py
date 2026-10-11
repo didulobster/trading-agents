@@ -1,4 +1,4 @@
-from app.domain.section import Section
+from app.edgar_research.domain.section import Section
 from .db import get_connection
 
 

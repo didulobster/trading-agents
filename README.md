@@ -302,14 +302,14 @@ are exhaustively testable in milliseconds at zero API cost.
 app/
   main.py                    FastAPI server
   cli.py                     ingest / corpus-status / eval / extract-metrics
-  domain/ application/ infrastructure/     EDGAR RAG pipeline
+  application/ infrastructure/            EDGAR RAG pipeline (moving into edgar_research/)
   agent/
     researcher.py prompts.py tools.py      EDGAR research agent (raw tool-use, no framework)
     trading/
       domain/                pure types and rules
       application/           nodes, routers, guards
       infrastructure/        LLM ports, graph, checkpointer, cost log
-  edgar_research/            EDGAR Research glossary and docs (code moving here)
+  edgar_research/            EDGAR Research: glossary, docs, domain/
   shared/                    shared kernel: llm/ (provider routing, model table, pricing),
                              config, cost log path, token usage
 .github/workflows/tests.yml   CI: pytest against a real pgvector service
