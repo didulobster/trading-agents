@@ -354,7 +354,11 @@ explanations warrant a spot-check.
 
 ## Further reading
 
-`docs/` holds the engineering journals — `architecture.md`, `tutorial.md` (a full code
+The repo holds two bounded contexts, EDGAR Research and Trading, plus a shared kernel; start at
+`CONTEXT-MAP.md`. EDGAR Research's architecture lives in `app/edgar_research/docs/architecture.md`,
+the shared kernel's in `app/shared/README.md`, and decisions in `docs/adr/`.
+
+`docs/` holds Trading's engineering journals — `tutorial.md` (a full code
 walkthrough), `trading-agent-known-gaps.md` (32 dated sections), and the validation
 batteries under `docs/validation/`. Two things under `docs/` are gitignored and stay local:
 `cost-log.jsonl`, which every run appends to, and the raw `*.stdout`/`*.stderr` run output

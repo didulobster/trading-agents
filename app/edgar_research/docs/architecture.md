@@ -337,35 +337,100 @@ the watchlist get a generic framing.
 reproduced 7 of 10 manual findings and surfaced 2 the manual pass missed
 (debt/operating-profit deleveraging 5.0x → 2.4x; Caltech patent litigation).
  
-### The `calculate` guard
+### The verification chain
  
-The agent was instructed to route all arithmetic through a `calculate`
-tool. It did — and produced wrong answers anyway, by passing invented
-inputs:
+The agent's numeric reliability was reached through six iterations, each
+closing a channel and relocating the failure to a narrower one. The
+sequence matters more than the destination, so it is documented as an arc.
+ 
+#### The arc
+ 
+| Iteration | Failure observed | Fix applied | Where the failure moved |
+|---|---|---|---|
+| 1 | Growth rates asserted from memory (18.4% YoY that matched no endpoints) | Prose rule: state both endpoints, then call calculate | Inputs to calculate |
+| 2 | `calculate("(32667.3 - 27.6*1000) / (27.6*1000) * 100")` — a rounded recollection, wrong year besides, laundered through the tool | Schema change: `calculate` requires an `inputs` array declaring each figure's value, label, fiscal period, and source; validator rejects undeclared literals and unit-conversion multipliers (`27.6*1000` is the syntactic fingerprint of a remembered figure — a retrieved value never needs multiplication to reach its own units) | The declarations themselves |
+| 3 | Fabricated inputs with plausible citations: `{"value": 7787.6, "source": "ASML 20-F 2026 Item 6"}` where the real figure is 8,193.0. Four segment-margin calls each paired a genuinely retrieved cost with an invented revenue | Run-scoped provenance: every non-calculate tool output is recorded; a third validator check rejects any declared input that no tool returned during the run | Prose |
+| 4 | Figures asserted in narrative, bypassing calculate entirely: "FY2024 SBC was €428M" two sentences from the correct €172.6M; the original €27,600M returned as prose | Citation verifier on `/ask` answers, findings surfaced to the agent as in-band warnings | (closed) |
+ 
+Interim states also produced: fiscal years labelled by filing year
+(a 20-F filed February 2026 labelled FY2026 when it reports FY2025),
+a component added to a total already containing it (€4,374.5M + €1,694.8M
+current portion = a reported €6,069.3M), and principal-vs-carrying
+confusion on the same debt figure. Each got a targeted prompt rule.
+ 
+#### Validation
+ 
+The post-chain run (ASML, `docs/memos/ASML-20260802-*.md`) was audited
+figure-by-figure: **19 of 19 derived values exact, zero fabrications.**
+Every failure class from prior runs was individually resolved — correct
+FY2023 revenue (27,558.5, not 27,600), correct SBC series and the correct
+"modest rise" conclusion where a prior run reported a "material decline"
+from an invented base, an explicit refusal to produce segment margins for
+a single-segment filer where a prior run fabricated a four-cell table,
+debt built from carrying amount with the components named, and no invented
+causation anywhere. Unretrievable figures were reported as data gaps in
+the memo's own words: "queries returned figures that could not be
+verified against retrieved chunks."
+ 
+#### Findings
+ 
+1. **Prose rules were followed procedurally and circumvented four
+   consecutive times.** The rule requiring both endpoints stated before
+   computing was satisfied in prose immediately above an expression using
+   neither endpoint. Instructions constrain the form of compliance, not
+   its substance.
+2. **A calculator launders invented inputs into tool-authorized outputs.**
+   The tool returns the correct answer to the wrong question, and the
+   result carries the apparent authority of a tool call — more persuasive
+   than a bare hallucinated figure, because it looks verified.
+3. **Declaration is not provenance.** Requiring a source citation per
+   input produced fabricated figures with plausible citations. The check
+   that held was mechanical: the value must have literally appeared in a
+   tool output this run.
+4. **Structural constraints held where instructions did not.** The two
+   fixes that stuck were a schema change (the model cannot omit the
+   `inputs` array) and a corpus check (the validator, not the model,
+   decides whether a figure was retrieved). Both are enforced outside the
+   model's discretion.
+5. **When the numeric substrate is fully constrained, confabulated
+   reasoning largely disappears with it.** Fabricated causation ("new
+   Eurobond issuance", "the IPO drove FCF") had accompanied fabricated
+   numbers; the clean run contained neither. The mechanism is plausible —
+   invented explanations existed to explain invented figures — but one
+   run is one run; treated as an observation, not a law.
+#### Layers, as implemented
  
 ```
-calculate("(32667.3 - 27.6*1000) / (27.6*1000) * 100")  ->  18.36%
+answer_question (llm.py)
+  └─ grounding prompt: cite everything, arithmetic on in-context figures only
+/ask (main.py)
+  └─ citation_verifier: literals + quotes vs retrieved chunks,
+     calculate results exempt; unverified → AskResponse.unverified
+agent tools (tools.py)
+  ├─ ask_edgar: appends in-band WARNING for unverified figures
+  ├─ record_tool_output: run-scoped provenance corpus
+  │    (calculate results and verifier warnings excluded — computed
+  │     figures must not count as retrieved, and flagged figures must
+  │     not re-enter through the corpus)
+  └─ calculate: schema-required inputs[] →
+       reject unit multipliers → reject undeclared literals →
+       reject inputs absent from provenance corpus
+agent loop (researcher.py)
+  ├─ reset_run_provenance() per run; MAX_TURNS exhaustion forces a
+  │    memo from gathered data (final call issued without tools=)
+  └─ memo_verifier: re-runs citation_verifier over the final memo text
+       against the full provenance corpus; appends an "Unverified Figures
+       and Quotations" section to the memo for any figure that no tool
+       returned during the run
 ```
  
-The base `27.6*1000` is a rounded recollection of a figure the filing
-states as 27,558.5, and it is the wrong fiscal year besides. The
-calculator returned the correct answer to the wrong question, and the
-result carried the apparent authority of a tool call. **A calculator
-launders invented inputs into tool-authorized outputs.**
+#### Residual limits, named
  
-Prose rules did not fix this. Four successive rule additions were each
-followed procedurally while the error relocated — the rule requiring both
-endpoints to be stated was satisfied in prose immediately before an
-expression using neither.
- 
-The fix is structural: `calculate` now requires an `inputs` array declaring
-each figure's value, label, fiscal period, and source citation. A validator
-rejects any expression containing (a) a numeric literal not declared in
-`inputs`, or (b) a unit-conversion multiplier (1000, 1e6, 1e9) — the latter
-being a syntactic fingerprint of reconstruction from memory, since a
-retrieved figure never needs multiplication to reach its own units.
-Rejections return as normal tool results, so the agent reads the reason and
-retries within the run.
+- **Fabricated reasoning has no mechanical check.** A causal claim with no literal to verify passes every layer. Observed to co-occur with fabricated numbers and to disappear when they did, but not prevented.
+- **Wrong-period attribution of a real figure passes.** The verifier confirms existence, not labelling. Mitigated by prompt rules (period-end date establishes fiscal year), not enforced.
+- **The provenance corpus trusts tool outputs.** A figure that `answer_question` itself misstates enters the corpus as "retrieved." The chain verifies the agent against the tools, and the tools against the chunks, but the second link runs only where the citation verifier is wired — `/ask` — not `extract_metrics`.
+- **Operating envelope** stated for users of the output: retrieved and cited figures are reliable; computed figures are reliable when produced by calculate; period labels and causal explanations warrant a
+spot-check.
  
 ### Known agent limitations
  
@@ -444,269 +509,7 @@ accumulating it in the same tracker. Embedding costs are not tracked at all.
 **Model configuration used to span three call sites** — the agent loop,
 answer generation, and metric extraction — which had disagreed in practice
 and made both cost and quality attribution unreliable. It is now one table
-(`llm/models.py`, below); `uv run python -m app.infrastructure.llm.models`
+(`llm/models.py`, see the shared kernel README); `uv run python -m app.infrastructure.llm.models`
 prints what a run will actually use.
 
-## Provider abstraction (`app/infrastructure/llm/`)
-
-Every LLM client in the app is built by `get_client(model)`. Which provider
-serves a call is decided by the model id's prefix — `claude-*` to Anthropic,
-`deepseek*` to DeepSeek, `gpt-*`/`o1`/`o3`/`o4` to OpenAI — so a run can mix
-providers per role without a global switch. `LLM_PROVIDER` overrides that
-inference wholesale for a gateway whose model ids carry no useful prefix.
-
-### Role configuration
-
-Ten LLM roles, each with its own `.env` variable, all falling back to
-`LLM_CLAUDE_MODEL`:
-
-| Role | Variable |
-| --- | --- |
-| research agent loop, and the fundamentals node that runs it | `LLM_CLAUDE_MODEL` |
-| answer generation behind `POST /ask` | `LLM_ANSWER_MODEL` |
-| query decomposition | `LLM_DECOMPOSER_MODEL` |
-| financial-metric extraction | `LLM_EXTRACTION_MODEL` |
-| news digest | `TRADING_NEWS_DIGEST_MODEL` |
-| technical-indicator interpretation | `TRADING_TECHNICAL_MODEL` |
-| bull/bear debate turns | `TRADING_DEBATE_MODEL` |
-| risk panel personas | `TRADING_RISK_MODEL` |
-| research manager synthesis | `TRADING_RESEARCH_MANAGER_MODEL` |
-| risk judge, final verdict | `TRADING_RISK_JUDGE_MODEL` |
-
-`LLM_CLAUDE_MODEL` is the only required one, so a project that sets nothing
-else behaves exactly as it did when that was the only knob. Five of these
-roles previously had no variable at all and were pinned to it; two more
-(`RISK_MODEL`, `RISK_JUDGE_MODEL`) sat in `.env` and were read by nothing,
-so changing them looked like it worked. `scripts/run_p9_battery.py` records
-`model_env_vars()` with each run rather than a hand-maintained copy — the
-copy had drifted, and a run recorded against the wrong list is one whose
-configuration cannot be reconstructed.
-
-**Anthropic's message shape is the internal lingua franca.** The ports build
-`tool_use`/`tool_result` turns by hand, the synthesis and debate schema
-retries re-send `response.content` verbatim, and the provenance guards read
-block text — that shape is load-bearing in tested code, so it stayed, and
-translation happens at the wire instead. `OpenAICompatClient` duck-types
-`AsyncAnthropic` for the surface this repo uses (`messages.create` returning
-`.content` / `.stop_reason` / `.usage`) and maps it onto an OpenAI-dialect
-chat-completions endpoint.
-
-What does not survive that translation, dropped with a once-per-process
-warning: `cache_control` breakpoints (DeepSeek caches automatically and has
-no equivalent to place), `betas`, `top_k` and `metadata`. `strict: true` on
-a tool schema DOES carry over — the dialect supports it, and it matters:
-`strict` was added to `SUBMIT_TOOL` because 3 of 3 live debate turns came
-back with a flattened payload without it.
-
-**Thinking is on by default on DeepSeek, and it rejects a constrained
-`tool_choice`.** Both `required` and a named function come back
-`400 "Thinking mode does not support this tool_choice"`; only `auto`
-survives. Since the debate, risk and synthesis ports all force a named tool
-— their contract is "call exactly this tool, exactly once", and `_extract`
-raises when no tool block arrives — the shim sends
-`thinking: {"type": "disabled"}` on any call that constrains the choice, and
-translates Anthropic's `thinking`/`output_config` to the provider's
-`thinking` object otherwise. Forcing the tool wins over keeping thinking:
-`auto` would trade a hard API guarantee for a behavioural hope on exactly
-the calls whose output is most load-bearing. Reasoning tokens bill as
-output either way, so no cost accounting depends on the choice. The
-parameter goes out in `extra_body` — the OpenAI SDK raises `TypeError` on
-top-level kwargs it does not recognise.
-
-`max_tokens` is clamped to the provider's ceiling, which surfaces as
-`stop_reason=max_tokens` on genuinely long output rather than as a 400. Both
-V4 models top out at 384K against the research agent's 16000, so it does not
-fire today — it is carried because the retired `deepseek-chat` capped at
-8192, where an unclamped request would have failed on the final turn of a
-run already paid for.
-
-Cost config moved to `llm/pricing.py` and is re-exported from `researcher.py`
-as `_MODEL_PRICING`. `LLM_PRICING_OVERRIDES` (JSON, env) merges over it, so
-a repriced model is a config change rather than a code change — and a
-malformed override raises at import rather than leaving a stale rate in
-place, because an unpriced or mispriced model makes the per-run budget
-assertion silently unable to fire.
-
-For DeepSeek, `input_tokens` is the *cache-miss* count, not `prompt_tokens`:
-their `prompt_tokens` is hits plus misses, and pricing it as input while also
-counting hits as `cache_read` would overstate every cached run.
-
-**DeepSeek prices by time of day and the table does not.** Off-peak rates are
-half of peak, and off-peak is every hour outside 01:00-04:00 and 06:00-10:00
-UTC Monday-Friday — so most runs cost about half what `pricing.py` says. The
-table holds the peak rate deliberately, the same call made for Sonnet 5's
-introductory pricing: over-estimating fails safe, whereas tracking whichever
-rate applies right now turns "did this run exceed its cap" into a question
-about what time it started.
-
-### Mixing DeepSeek and GPT across roles
-
-Because routing is per model id, splitting roles across providers is a
-`.env` change, not a code change. Since 2026-09-11 the configured split is:
-
-| Roles | Model | Why |
-| --- | --- | --- |
-| `answer` (`/ask`), `extraction` (`/extract`) | `deepseek-v4-flash` | Reads filing tables reliably |
-| `agent`, `decomposer`, `news_digest`, `technical`, `debate`, `risk_panel`, `research_manager`, `risk_judge` | `gpt-5.6-luna` | About half the cost, and faster |
-
-**Why the two server-side roles went back to DeepSeek.** An all-Luna ACN run
-(as-of 2026-08-28) cost $0.120 in 418 s. That's half of DeepSeek's ~$0.24 /
-558 s, but its fundamentals memo came back INSUFFICIENT_EVIDENCE with 6 of 12
-checklist items missing. The data was in the index. `/extract` retrieval is
-deterministic (fixed `METRIC_QUERIES` through `retrieve_hybrid`, no rewriter),
-and a replay showed it hands the FY2025 extraction chunk 111, which holds both
-the operating-cash-flow and capex rows. Luna answered "not disclosed in the
-excerpts" on 2 of 4 attempts over identical input; DeepSeek read it 4 of 4.
-The misses look random: the same model reads the table on one call and not
-the next. The roles that read filing excerpts therefore run on the model
-that reads them reliably. The same ACN run on the split setup had 3 of 12
-items missing, with free cash flow found, at ~$0.137 real in 353 s. It is
-still INSUFFICIENT_EVIDENCE because the ICFR item (Item 9A) is missing. One
-run per setup, so these are directional numbers, not a benchmark.
-
-**Luna runs without reasoning in this pipeline, and that is forced, not
-chosen.** On chat completions, GPT-5.x rejects function tools with any
-`reasoning_effort` other than `"none"`. Every port calls with tools, and
-leaving the parameter unset is no escape, because the default is not
-`"none"`. So the shim sends `max_completion_tokens` (GPT-5.x 400s on
-`max_tokens`), `reasoning_effort="none"` unless a caller asks for thinking,
-and `"none"` regardless on any call with tools (#78, #79). `temperature` is
-honoured only while reasoning is off. The query decomposer's hard-coded
-`temperature=0` goes through `create_with_temperature_fallback` in case a
-model rejects it. Getting reasoning back would mean moving the OpenAI path to
-the Responses API. That hasn't been tried, and there's no evidence yet that
-reasoning would fix the table misreads.
-
-**A split setup breaks the assumption that the server's models are the
-agent's.** `/ask` and `/extract` report their spend in `X-LLM-Usage`, and
-`fundamentals_port.py` used to price that whole total at `AGENT_MODEL`. On
-the split run that logged $0.0375 for ~$0.0666 of DeepSeek spend, and the
-$0.75 cap counted the lower number. `/ask` also sums two models in one
-request (DeepSeek answer + Luna decomposer), so the fix has to split usage
-server-side, before the sum. The fix is PR #80
-(`fix/price-delegated-usage-per-model`), open as of 2026-09-11. It makes the header
-per-model and logs one `fundamentals-tools` cost event per model, each at
-its own rate. Until it lands, logged totals under a split setup understate.
-
-**Operating a split setup:**
-- `.env` is read at process start, so restart the API server after moving a
-  role. A server started before the change keeps serving the old model.
-- Every model in use needs a `MODEL_PRICING` entry, or `LLM_PRICING_OVERRIDES`
-  for a model not in the table yet. An unpriced model logs null cost and the
-  budget cap can't fire for it.
-- DeepSeek bills in CNY and can hit a 402 "Insufficient Balance". Check
-  `GET https://api.deepseek.com/user/balance` (free) before blaming the
-  model.
-
-**Open.** The `ask_edgar` tool description tells the agent to "ask one broad
-question that covers several checklist items". Luna follows that literally,
-sending 6-7 compound questions per turn in parallel, so it can't adapt one
-query to what the previous answer said (12 turns against DeepSeek's 39 for a
-similar call count). On the split run, the Luna risk judge also returned
-UNRESOLVED: the fabrication guard dropped 1 of 3 samples and the other two
-split hold/sell. Neither has been compared across runs yet.
-
-
----
-
-
-
----
- 
-# PART 2 — NEW SECTION
- 
-## The verification chain (replaces "The `calculate` guard")
- 
-The agent's numeric reliability was reached through six iterations, each
-closing a channel and relocating the failure to a narrower one. The
-sequence matters more than the destination, so it is documented as an arc.
- 
-### The arc
- 
-| Iteration | Failure observed | Fix applied | Where the failure moved |
-|---|---|---|---|
-| 1 | Growth rates asserted from memory (18.4% YoY that matched no endpoints) | Prose rule: state both endpoints, then call calculate | Inputs to calculate |
-| 2 | `calculate("(32667.3 - 27.6*1000) / (27.6*1000) * 100")` — a rounded recollection, wrong year besides, laundered through the tool | Schema change: `calculate` requires an `inputs` array declaring each figure's value, label, fiscal period, and source; validator rejects undeclared literals and unit-conversion multipliers (`27.6*1000` is the syntactic fingerprint of a remembered figure — a retrieved value never needs multiplication to reach its own units) | The declarations themselves |
-| 3 | Fabricated inputs with plausible citations: `{"value": 7787.6, "source": "ASML 20-F 2026 Item 6"}` where the real figure is 8,193.0. Four segment-margin calls each paired a genuinely retrieved cost with an invented revenue | Run-scoped provenance: every non-calculate tool output is recorded; a third validator check rejects any declared input that no tool returned during the run | Prose |
-| 4 | Figures asserted in narrative, bypassing calculate entirely: "FY2024 SBC was €428M" two sentences from the correct €172.6M; the original €27,600M returned as prose | Citation verifier on `/ask` answers, findings surfaced to the agent as in-band warnings | (closed) |
- 
-Interim states also produced: fiscal years labelled by filing year
-(a 20-F filed February 2026 labelled FY2026 when it reports FY2025),
-a component added to a total already containing it (€4,374.5M + €1,694.8M
-current portion = a reported €6,069.3M), and principal-vs-carrying
-confusion on the same debt figure. Each got a targeted prompt rule.
- 
-### Validation
- 
-The post-chain run (ASML, `docs/memos/ASML-20260802-*.md`) was audited
-figure-by-figure: **19 of 19 derived values exact, zero fabrications.**
-Every failure class from prior runs was individually resolved — correct
-FY2023 revenue (27,558.5, not 27,600), correct SBC series and the correct
-"modest rise" conclusion where a prior run reported a "material decline"
-from an invented base, an explicit refusal to produce segment margins for
-a single-segment filer where a prior run fabricated a four-cell table,
-debt built from carrying amount with the components named, and no invented
-causation anywhere. Unretrievable figures were reported as data gaps in
-the memo's own words: "queries returned figures that could not be
-verified against retrieved chunks."
- 
-### Findings
- 
-1. **Prose rules were followed procedurally and circumvented four
-   consecutive times.** The rule requiring both endpoints stated before
-   computing was satisfied in prose immediately above an expression using
-   neither endpoint. Instructions constrain the form of compliance, not
-   its substance.
-2. **A calculator launders invented inputs into tool-authorized outputs.**
-   The tool returns the correct answer to the wrong question, and the
-   result carries the apparent authority of a tool call — more persuasive
-   than a bare hallucinated figure, because it looks verified.
-3. **Declaration is not provenance.** Requiring a source citation per
-   input produced fabricated figures with plausible citations. The check
-   that held was mechanical: the value must have literally appeared in a
-   tool output this run.
-4. **Structural constraints held where instructions did not.** The two
-   fixes that stuck were a schema change (the model cannot omit the
-   `inputs` array) and a corpus check (the validator, not the model,
-   decides whether a figure was retrieved). Both are enforced outside the
-   model's discretion.
-5. **When the numeric substrate is fully constrained, confabulated
-   reasoning largely disappears with it.** Fabricated causation ("new
-   Eurobond issuance", "the IPO drove FCF") had accompanied fabricated
-   numbers; the clean run contained neither. The mechanism is plausible —
-   invented explanations existed to explain invented figures — but one
-   run is one run; treated as an observation, not a law.
-### Layers, as implemented
- 
-```
-answer_question (llm.py)
-  └─ grounding prompt: cite everything, arithmetic on in-context figures only
-/ask (main.py)
-  └─ citation_verifier: literals + quotes vs retrieved chunks,
-     calculate results exempt; unverified → AskResponse.unverified
-agent tools (tools.py)
-  ├─ ask_edgar: appends in-band WARNING for unverified figures
-  ├─ record_tool_output: run-scoped provenance corpus
-  │    (calculate results and verifier warnings excluded — computed
-  │     figures must not count as retrieved, and flagged figures must
-  │     not re-enter through the corpus)
-  └─ calculate: schema-required inputs[] →
-       reject unit multipliers → reject undeclared literals →
-       reject inputs absent from provenance corpus
-agent loop (researcher.py)
-  ├─ reset_run_provenance() per run; MAX_TURNS exhaustion forces a
-  │    memo from gathered data (final call issued without tools=)
-  └─ memo_verifier: re-runs citation_verifier over the final memo text
-       against the full provenance corpus; appends an "Unverified Figures
-       and Quotations" section to the memo for any figure that no tool
-       returned during the run
-```
- 
-### Residual limits, named
- 
-- **Fabricated reasoning has no mechanical check.** A causal claim with no literal to verify passes every layer. Observed to co-occur with fabricated numbers and to disappear when they did, but not prevented.
-- **Wrong-period attribution of a real figure passes.** The verifier confirms existence, not labelling. Mitigated by prompt rules (period-end date establishes fiscal year), not enforced.
-- **The provenance corpus trusts tool outputs.** A figure that `answer_question` itself misstates enters the corpus as "retrieved." The chain verifies the agent against the tools, and the tools against the chunks, but the second link runs only where the citation verifier is wired — `/ask` — not `extract_metrics`.
-- **Operating envelope** stated for users of the output: retrieved and cited figures are reliable; computed figures are reliable when produced by calculate; period labels and causal explanations warrant a
-spot-check.
- 
+Provider routing, role configuration and pricing belong to the shared kernel: see [app/shared/README.md](../../shared/README.md).
