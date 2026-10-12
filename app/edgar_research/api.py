@@ -23,7 +23,11 @@ from app.edgar_research.application.extraction_service import FinancialMetrics, 
 from app.edgar_research.application.ingestion_service import IngestionService
 from app.edgar_research.application.query_decomposer import QueryDecomposer
 from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries
-from app.edgar_research.infrastructure.edgar.client import EdgarClient, periodic_forms
+from app.edgar_research.infrastructure.edgar.client import (
+    ANNUAL_FORMS,
+    EdgarClient,
+    periodic_forms,
+)
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.queries.corpus_status import CorpusStatusQuery
 from app.edgar_research.infrastructure.repositories.db import get_connection
@@ -352,15 +356,24 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
 
 
 def _new_filings(filings: list[dict]) -> list[dict]:
-    """Filings filed after the newest one already in the corpus.
+    """Filings filed after the newest one already in the corpus, plus the
+    latest annual report if the corpus lacks it.
 
-    Older filings missing from the corpus are not new: counting them told
-    the agent to ingest, and ingest_ticker takes the newest filings, which
-    were already there.
+    Other older filings missing from the corpus are not new: counting them
+    told the agent to ingest, and ingest_ticker takes the newest filings,
+    which were already there. The annual report is the exception because
+    the checklist needs it and ingest_ticker's default takes it first.
     """
     ingested = [f["filing_date"] for f in filings if f["in_corpus"]]
     newest = max(ingested, default="")
-    return [f for f in filings if not f["in_corpus"] and f["filing_date"] > newest]
+    annual = max((f for f in filings if f["form"] in ANNUAL_FORMS),
+                 key=lambda f: f["filing_date"], default=None)
+    return [f for f in filings if not f["in_corpus"]
+            and (f["filing_date"] > newest or f is annual)]
+
+
+def _already_ingested(filings: list[dict]) -> int:
+    return sum(f["in_corpus"] for f in filings)
 
 
 @router.post("/latest-filings")
@@ -423,7 +436,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
         # Echoed so a reader of the agent's trace can see the run was bounded.
         "filed_before": req.filed_before.isoformat() if req.filed_before else None,
         "total_on_sec": len(filings_list),
-        "already_ingested": len(filings_list) - len(new_filings),
+        "already_ingested": _already_ingested(filings_list),
         "new_filings_count": len(new_filings),
         "filings": filings_list,
     }
