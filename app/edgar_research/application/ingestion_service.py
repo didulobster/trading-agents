@@ -10,7 +10,11 @@ from app.edgar_research.domain.section import Section
 from app.edgar_research.domain.values import FilingStatus
 
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
-from app.edgar_research.infrastructure.edgar.client import EdgarClient
+from app.edgar_research.infrastructure.edgar.client import (
+    ANNUAL_FORMS,
+    EdgarClient,
+    periodic_forms,
+)
 from app.edgar_research.infrastructure.edgar.models import FilingSummary
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.parsing.filing_parser import parse_filing
@@ -82,14 +86,20 @@ class IngestionService:
                     ticker, security.id, security.cik)
 
         if form_types is None:
-            form_types = await self.edgar.default_form_types(security.cik)
-            logger.info("No form_types given for %s — detected %s", ticker, form_types)
-
-        summaries = await self.edgar.list_filings(
-            cik=security.cik, form_types=form_types, since=since
-        )
-        if limit:
-            summaries = summaries[:limit]
+            family = await self.edgar.default_form_types(security.cik)
+            logger.info("No form_types given for %s — detected %s", ticker, family)
+            summaries = _latest_annual_first(
+                await self.edgar.list_filings(
+                    cik=security.cik, form_types=periodic_forms(family), since=since
+                ),
+                limit,
+            )
+        else:
+            summaries = await self.edgar.list_filings(
+                cik=security.cik, form_types=form_types, since=since
+            )
+            if limit:
+                summaries = summaries[:limit]
         logger.info("Found %d filings to consider", len(summaries))
 
         # Phase 1: Discover (upsert filing rows, no work done yet)
@@ -322,3 +332,10 @@ class IngestionService:
         await self.chunk_repo.update_embeddings(updates)
         await self.filing_repo.mark_status(filing.id, FilingStatus.EMBEDDED)
         logger.info("Embedded filing %s", filing.accession_number)
+
+def _latest_annual_first(summaries: list[FilingSummary], limit: int | None) -> list[FilingSummary]:
+    """The latest annual report, then the newest other periodic reports up to
+    `limit`. Newest-first alone gave AVGO and ACN three 10-Qs and no 10-K."""
+    annual = next((s for s in summaries if s.form in ANNUAL_FORMS), None)
+    picked = ([annual] if annual else []) + [s for s in summaries if s is not annual]
+    return picked[:limit] if limit else picked

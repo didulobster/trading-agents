@@ -106,11 +106,11 @@ TOOLS = [
         "description": (
             "Ingest SEC filings for a ticker not in the corpus or lacking "
             "history. Slow: 30-60s per filing. Call once with limit=3. "
-            "Omit form_type to auto-detect the filer's form family: 10-K "
-            "for a domestic filer, or 20-F for a foreign private issuer "
-            "(e.g. ASML) — those never file a 10-K. Pass form_type "
-            "explicitly for a specific type: '10-Q'/'8-K' (domestic) or "
-            "'6-K' (foreign private issuer's interim/current report)."
+            "Omit form_type to get the latest annual report plus the newest "
+            "quarterlies: the 10-K and 10-Qs for a domestic filer, or 20-Fs "
+            "for a foreign private issuer (e.g. ASML), which never files a "
+            "10-K. Pass form_type only for one specific type: '10-K', "
+            "'10-Q' or '8-K' (domestic), or '20-F' or '6-K' (foreign)."
         ),
         "input_schema": {
             "type": "object",

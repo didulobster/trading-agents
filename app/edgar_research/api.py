@@ -115,9 +115,9 @@ class IngestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ticker: Ticker
-    # None = auto-detect: 10-K for a domestic filer, 20-F for a foreign
-    # private issuer (see EdgarClient.default_form_types). Pass explicitly
-    # to override, e.g. "10-Q" or "6-K".
+    # None = the latest annual report plus the newest quarterlies, from the
+    # filer's detected family (10-K/10-Q, or 20-F for a foreign private
+    # issuer). Pass explicitly to override, e.g. "8-K" or "6-K".
     form_type: str | None = None
     limit: int = 3
     since_year: int | None = None
