@@ -1,9 +1,13 @@
-"""An ingest with no form type always includes the latest annual report.
+"""An ingest with no form type takes the two latest annual reports first.
 
 Found 2026-10-12. With form_type omitted, /ingest took the 3 newest filings
 of the whole family, 8-Ks included: ACN got three 8-Ks, ASML three 6-Ks, and
 a cold AVGO memo listed every annual-report item as a data gap. Narrowing to
 periodic forms alone still gave AVGO and ACN three 10-Qs and no 10-K.
+
+Two, not one: the checklist's risk-factor and MD&A items compare the two
+most recent 10-Ks. A live AVGO run with only the FY2025 10-K listed both,
+and FY2024 RPO, as data gaps.
 """
 
 import asyncio
@@ -62,9 +66,9 @@ def _ingested(edgar: _FakeEdgar, **kwargs) -> list[str]:
     return picked
 
 
-def test_default_takes_the_latest_10k_and_the_newest_10qs_not_8ks():
+def test_default_takes_the_two_latest_10ks_then_the_newest_10q_not_8ks():
     picked = _ingested(_FakeEdgar(["10-K", "10-Q", "8-K"], ACN), limit=3)
-    assert picked == ["10-K-2025-10-10", "10-Q-2026-06-18", "10-Q-2026-03-19"]
+    assert picked == ["10-K-2025-10-10", "10-K-2024-10-03", "10-Q-2026-06-18"]
 
 
 def test_a_foreign_filer_gets_its_20fs_not_6ks():

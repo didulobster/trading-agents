@@ -12,6 +12,7 @@ from app.edgar_research.domain.values import FilingStatus
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
 from app.edgar_research.infrastructure.edgar.client import (
     ANNUAL_FORMS,
+    ANNUAL_REPORTS_NEEDED,
     EdgarClient,
     periodic_forms,
 )
@@ -88,7 +89,7 @@ class IngestionService:
         if form_types is None:
             family = await self.edgar.default_form_types(security.cik)
             logger.info("No form_types given for %s — detected %s", ticker, family)
-            summaries = _latest_annual_first(
+            summaries = _latest_annuals_first(
                 await self.edgar.list_filings(
                     cik=security.cik, form_types=periodic_forms(family), since=since
                 ),
@@ -333,9 +334,9 @@ class IngestionService:
         await self.filing_repo.mark_status(filing.id, FilingStatus.EMBEDDED)
         logger.info("Embedded filing %s", filing.accession_number)
 
-def _latest_annual_first(summaries: list[FilingSummary], limit: int | None) -> list[FilingSummary]:
-    """The latest annual report, then the newest other periodic reports up to
-    `limit`. Newest-first alone gave AVGO and ACN three 10-Qs and no 10-K."""
-    annual = next((s for s in summaries if s.form in ANNUAL_FORMS), None)
-    picked = ([annual] if annual else []) + [s for s in summaries if s is not annual]
+def _latest_annuals_first(summaries: list[FilingSummary], limit: int | None) -> list[FilingSummary]:
+    """The latest annual reports, then the newest other periodic reports up
+    to `limit`. Newest-first alone gave AVGO and ACN three 10-Qs and no 10-K."""
+    annuals = [s for s in summaries if s.form in ANNUAL_FORMS][:ANNUAL_REPORTS_NEEDED]
+    picked = annuals + [s for s in summaries if s not in annuals]
     return picked[:limit] if limit else picked

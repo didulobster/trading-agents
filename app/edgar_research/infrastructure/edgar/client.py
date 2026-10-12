@@ -32,6 +32,8 @@ PERIODIC_ONLY = {
     "20-F": ["20-F"],
 }
 ANNUAL_FORMS = set(PERIODIC_ONLY)
+# The checklist's risk-factor and MD&A items compare the two most recent.
+ANNUAL_REPORTS_NEEDED = 2
 
 
 def periodic_forms(form_types: list[str]) -> list[str]:
