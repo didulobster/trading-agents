@@ -182,6 +182,16 @@ def _with_percent(values) -> list[float]:
     return out
 
 
+def _with_scales(values: list[float]) -> list[float]:
+    """Each result, and the same result in thousands, millions and billions.
+
+    calculate converts its inputs to ones, so 27537 - 623 millions returns
+    26914000000.0 and a memo states it as "$26,914 million". Results below a
+    thousand are ratios and percents, which have no scaled form.
+    """
+    return values + [v / scale for v in values if abs(v) >= 1e3 for scale in (1e3, 1e6, 1e9)]
+
+
 def _computed_forms(values) -> set[str]:
     """String forms a calculate() result may take in the answer text."""
     out: set[str] = set()
@@ -373,7 +383,7 @@ def verify_answer(
     """
     report = VerificationReport()
     computed = _computed_forms(_with_percent(computed_values))
-    computed_numbers = _with_percent(computed_values)
+    computed_numbers = _with_scales(_with_percent(computed_values))
     # A rejected attempt later backed by a passing calculate() call (same
     # numeric result) is validated, regardless of whether the caller already
     # filtered it out — don't rely solely on the caller's bookkeeping.
