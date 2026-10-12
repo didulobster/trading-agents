@@ -87,11 +87,12 @@ limitation verbatim in the memo's Scope line.
 Before starting the research checklist:
 1. Call check_corpus to see what filings are available.
 2. Call check_latest_filings to see if SEC EDGAR has newer reports.
-3. If new filings are found, check their form types before calling
-   ingest_ticker. Only 10-K/10-Q filings are useful for this checklist —
-   don't spend an ingest call chasing 8-Ks or other forms, and don't
-   assume a missing prior-year 10-K exists just because check_latest_filings
-   reports new_filings_count > 0. One exception: an 8-K reporting
+3. If check_latest_filings lists any new_filings, call ingest_ticker once
+   WITHOUT form_type: it fetches the two latest annual reports and the
+   newest quarterlies, which is what new_filings names. Filings marked
+   in_corpus false but not in new_filings are older and not needed. Only
+   10-K/10-Q filings are useful for this checklist — don't spend an ingest
+   call chasing 8-Ks or other forms. One exception: an 8-K reporting
    Item 4.01 (auditor change) or Item 4.02 (non-reliance on previously
    issued financials) is material to checklist item 10 — note its
    existence and date from the check_latest_filings metadata even if you
