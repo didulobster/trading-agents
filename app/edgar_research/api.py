@@ -439,6 +439,10 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
         "total_on_sec": len(filings_list),
         "already_ingested": _already_ingested(filings_list),
         "new_filings_count": len(new_filings),
+        # Named, not just counted: with dozens of older filings also marked
+        # in_corpus false, a count alone left the agent guessing which one
+        # was new, and it ingested 10-Qs while the missing 10-K was the one.
+        "new_filings": [{"form": f["form"], "filing_date": f["filing_date"]} for f in new_filings],
         "filings": filings_list,
     }
 
