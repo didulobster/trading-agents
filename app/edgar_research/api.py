@@ -351,6 +351,18 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     return {"status": "ok", "ticker": req.ticker, "limit": req.limit}
 
 
+def _new_filings(filings: list[dict]) -> list[dict]:
+    """Filings filed after the newest one already in the corpus.
+
+    Older filings missing from the corpus are not new: counting them told
+    the agent to ingest, and ingest_ticker takes the newest filings, which
+    were already there.
+    """
+    ingested = [f["filing_date"] for f in filings if f["in_corpus"]]
+    newest = max(ingested, default="")
+    return [f for f in filings if not f["in_corpus"] and f["filing_date"] > newest]
+
+
 @router.post("/latest-filings")
 async def latest_filings_endpoint(req: LatestFilingsRequest):
     user_agent = require_env("EDGAR_USER_AGENT")
@@ -404,7 +416,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
             "corpus_status": status,
         })
 
-    new_filings = [f for f in filings_list if not f["in_corpus"]]
+    new_filings = _new_filings(filings_list)
     return {
         "ticker": req.ticker,
         "form_types_searched": form_types,
