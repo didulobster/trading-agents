@@ -25,6 +25,7 @@ from app.edgar_research.application.query_decomposer import QueryDecomposer
 from app.edgar_research.application.retrieval_service import RetrievalService, _fuse_across_queries
 from app.edgar_research.infrastructure.edgar.client import (
     ANNUAL_FORMS,
+    ANNUAL_REPORTS_NEEDED,
     EdgarClient,
     periodic_forms,
 )
@@ -119,7 +120,7 @@ class IngestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ticker: Ticker
-    # None = the latest annual report plus the newest quarterlies, from the
+    # None = the two latest annual reports, then the newest quarterlies, from the
     # filer's detected family (10-K/10-Q, or 20-F for a foreign private
     # issuer). Pass explicitly to override, e.g. "8-K" or "6-K".
     form_type: str | None = None
@@ -357,19 +358,19 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
 
 def _new_filings(filings: list[dict]) -> list[dict]:
     """Filings filed after the newest one already in the corpus, plus the
-    latest annual report if the corpus lacks it.
+    two latest annual reports if the corpus lacks them.
 
     Other older filings missing from the corpus are not new: counting them
     told the agent to ingest, and ingest_ticker takes the newest filings,
-    which were already there. The annual report is the exception because
-    the checklist needs it and ingest_ticker's default takes it first.
+    which were already there. The annual reports are the exception because
+    the checklist compares them and ingest_ticker's default takes them first.
     """
     ingested = [f["filing_date"] for f in filings if f["in_corpus"]]
     newest = max(ingested, default="")
-    annual = max((f for f in filings if f["form"] in ANNUAL_FORMS),
-                 key=lambda f: f["filing_date"], default=None)
+    annuals = sorted((f for f in filings if f["form"] in ANNUAL_FORMS),
+                     key=lambda f: f["filing_date"], reverse=True)[:ANNUAL_REPORTS_NEEDED]
     return [f for f in filings if not f["in_corpus"]
-            and (f["filing_date"] > newest or f is annual)]
+            and (f["filing_date"] > newest or f in annuals)]
 
 
 def _already_ingested(filings: list[dict]) -> int:

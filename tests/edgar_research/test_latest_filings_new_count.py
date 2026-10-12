@@ -17,7 +17,8 @@ def _f(form: str, filed: str, in_corpus: bool) -> dict:
 
 def test_older_filings_missing_from_the_corpus_are_not_new():
     filings = [_f("10-Q", "2026-06-18", True), _f("10-K", "2025-10-10", True),
-               _f("10-Q", "2025-06-20", False), _f("10-K", "2023-10-12", False)]
+               _f("10-Q", "2025-06-20", False), _f("10-K", "2024-10-03", True),
+               _f("10-K", "2023-10-12", False)]
     assert _new_filings(filings) == []
 
 
@@ -32,17 +33,21 @@ def test_on_an_empty_corpus_every_filing_is_new():
     assert _new_filings(filings) == filings
 
 
-def test_the_latest_annual_report_is_new_when_the_corpus_lacks_it():
+def test_the_two_latest_annual_reports_are_new_when_the_corpus_lacks_them():
     """AVGO, 2026-10-12: a 10-Q and two 8-Ks ingested, nothing newer on
     EDGAR, so the count was 0 and the run went ahead without a 10-K."""
     filings = [_f("10-Q", "2026-09-10", True), _f("10-Q", "2026-06-09", False),
-               _f("10-K", "2025-12-18", False), _f("10-K", "2024-12-19", False)]
-    assert _new_filings(filings) == [filings[2]]
+               _f("10-K", "2025-12-18", False), _f("10-K", "2024-12-19", False),
+               _f("10-K", "2023-12-14", False)]
+    assert _new_filings(filings) == [filings[2], filings[3]]
 
 
-def test_an_older_annual_report_is_not_new_once_the_latest_is_ingested():
-    filings = [_f("10-K", "2025-12-18", True), _f("10-K", "2024-12-19", False)]
-    assert _new_filings(filings) == []
+def test_the_prior_year_annual_report_is_new_when_only_the_latest_is_ingested():
+    """The next AVGO run: FY2025 10-K ingested, FY2024 not, so the
+    risk-factor and MD&A comparisons had nothing to compare against."""
+    filings = [_f("10-K", "2025-12-18", True), _f("10-K", "2024-12-19", False),
+               _f("10-K", "2023-12-14", False)]
+    assert _new_filings(filings) == [filings[1]]
 
 
 def test_a_20f_counts_as_the_annual_report():
