@@ -64,7 +64,7 @@ def test_omitted_form_types_auto_detects_foreign_private_issuer():
 
     asyncio.run(service.ingest_security("ASML", form_types=None, limit=3))
 
-    assert edgar.list_filings_calls == [["20-F", "6-K"]]
+    assert edgar.list_filings_calls == [["20-F"]]   # its periodic member
 
 
 def test_omitted_form_types_auto_detects_domestic_filer():
@@ -75,7 +75,7 @@ def test_omitted_form_types_auto_detects_domestic_filer():
 
     asyncio.run(service.ingest_security("AAPL", form_types=None, limit=3))
 
-    assert edgar.list_filings_calls == [["10-K", "10-Q", "8-K"]]
+    assert edgar.list_filings_calls == [["10-K", "10-Q"]]   # no 8-Ks
 
 
 def test_explicit_form_types_bypasses_auto_detection():

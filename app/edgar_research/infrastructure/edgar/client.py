@@ -31,6 +31,7 @@ PERIODIC_ONLY = {
     "10-K": ["10-K", "10-Q"],
     "20-F": ["20-F"],
 }
+ANNUAL_FORMS = set(PERIODIC_ONLY)
 
 
 def periodic_forms(form_types: list[str]) -> list[str]:

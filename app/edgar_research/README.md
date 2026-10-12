@@ -72,8 +72,8 @@ curl -s localhost:8000/ingest -H 'Content-Type: application/json' \
   -d '{"ticker": "AVGO", "limit": 3, "since_year": 2023}'
 ```
 
-`form_type` defaults to the filer's family (10-K for a domestic filer, 20-F for a foreign
-one). `retry_failed: true` re-runs filings a previous ingest marked FAILED. Blocks until
+With no `form_type` it takes the latest annual report plus the newest quarterlies (10-K and
+10-Qs, or 20-Fs for a foreign filer). `retry_failed: true` re-runs filings a previous ingest marked FAILED. Blocks until
 done; returns `{"status": "ok", "ticker", "limit"}`.
 
 ### `POST /latest-filings`
