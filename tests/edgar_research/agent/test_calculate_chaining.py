@@ -207,3 +207,28 @@ def test_a_small_result_gains_no_scaled_forms():
     report = verify_answer("It was 0.03792.", {0: "unrelated 7,777"},
                            computed_values=[37.92])
     assert [f.value for f in report.verified if f.kind == "computed"] == []
+
+
+@pytest.mark.anyio
+async def test_a_result_reused_in_the_unit_its_inputs_had_is_accepted():
+    """AVGO, 2026-10-12: calculate returned 26914000000.0 for 27537 - 623
+    millions, and the agent reused it as 26914 millions — the same value.
+    Both attempts were rejected and FCF growth was never derived."""
+    await _calc("27537 - 623", _retrieved(27537, "millions"), _retrieved(623, "millions"))
+    await _calc("19962 - 548", _retrieved(19962, "millions"), _retrieved(548, "millions"))
+
+    growth = await _calc("(26914 - 19414) / 19414 * 100",
+                         _chained(26914, "millions"), _chained(19414, "millions"))
+
+    assert "Rejected" not in growth
+    assert float(growth.split()[0]) == pytest.approx(38.632, abs=0.001)
+
+
+@pytest.mark.anyio
+async def test_a_result_reused_at_the_wrong_scale_is_still_rejected():
+    """26914 thousands is not the 26914000000 calculate returned."""
+    await _calc("27537 - 623", _retrieved(27537, "millions"), _retrieved(623, "millions"))
+
+    result = await _calc("26914 * 2", _chained(26914, "thousands"), _chained(2.0))
+
+    assert result.startswith("Rejected")

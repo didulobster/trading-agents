@@ -4,6 +4,7 @@ Tool schemas and dispatch for the research agent.
 
 import ast
 import logging
+import math
 import operator
 import os
 import re
@@ -320,6 +321,15 @@ _UNIT_SCALES = {
     "percent": 1.0,
     "ratio": 1.0,
 }
+
+
+def _is_prior_result(i: dict, prior: set[float]) -> bool:
+    """True if a declared input is an earlier passing calculate result, in
+    ones or in its declared unit: results are in ones, and the agent states
+    26914000000.0 as 26914 millions."""
+    value = float(i["value"])
+    in_ones = value * _UNIT_SCALES.get(i.get("unit"), 1.0)
+    return value in prior or any(math.isclose(in_ones, p, rel_tol=1e-9) for p in prior)
 
 
 def _is_number(text: str) -> bool:
@@ -888,8 +898,11 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
         )
 
     prior = set(_state().calc_results)
-    chained = [i for i in inputs if i.get("value") is not None and float(i["value"]) in prior]
-    rescaled = [i for i in chained if _UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0]
+    chained = [i for i in inputs if i.get("value") is not None and _is_prior_result(i, prior)]
+    rescaled = [
+        i for i in chained
+        if float(i["value"]) in prior and _UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0
+    ]
     if rescaled:
         detail = "; ".join(f"{i['value']} unit={i['unit']!r}" for i in rescaled)
         return (
@@ -922,7 +935,8 @@ def validate_calculate_inputs(expression: str, inputs: list[dict]) -> str | None
             f"retrieve the figure first, or — if you derived it yourself — "
             f"show the derivation as a separate calculate call using only "
             f"retrieved figures. An earlier calculate result can be reused "
-            f"at its exact returned value."
+            f"at its exact returned value, in ones or in the unit you state "
+            f"it in (26914000000 ones is 26914 millions)."
         )
 
     # 5 — real value, wrong period label
