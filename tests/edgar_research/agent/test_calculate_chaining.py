@@ -181,3 +181,29 @@ def test_a_negative_result_is_recognised_however_the_memo_states_it(memo):
 
     assert report.unverified == []
     assert [f.kind for f in report.verified] == ["computed"]
+
+
+# ---------------------------------------------------------------------------
+# Found on the 2026-10-12 AVGO run after #145
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("memo", [
+    "FY2025 free cash flow was $26,914 million.",
+    "FY2025 free cash flow was $26.914 billion.",
+    "FY2025 free cash flow was $26.9 billion.",
+])
+def test_a_result_restated_in_the_inputs_unit_is_recognised(memo):
+    """calculate returned 26914000000.0 for 27537 - 623 millions; the memo
+    said "$26,914 million" and the verifier listed it as unverified."""
+    report = verify_answer(memo, {0: "operating cash 27,537 and capex 623"},
+                           computed_values=[26914000000.0])
+
+    assert report.unverified == []
+    assert [f.kind for f in report.verified] == ["computed"]
+
+
+def test_a_small_result_gains_no_scaled_forms():
+    """A ratio of 37.92 must not back a memo's "0.03792"."""
+    report = verify_answer("It was 0.03792.", {0: "unrelated 7,777"},
+                           computed_values=[37.92])
+    assert [f.value for f in report.verified if f.kind == "computed"] == []
