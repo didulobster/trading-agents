@@ -36,7 +36,7 @@ word. Commands and endpoints are listed in [../README.md](../README.md); how it 
    ```
 
    A memo costs cents to about $0.45; the AVGO run above cost $0.07. It is also saved to
-   the vault under `$HOME/$MEMO_DIR/<TICKER>/<date>/`, next to a `-provenance.md` with every
+   the vault as `$HOME/$MEMO_DIR/<TICKER>/<TICKER>-<timestamp>.md`, next to a `-provenance.md` with every
    tool call and result the memo was built from.
 
 3. **Drill into what the memo flags** with `/ask`, one narrow question at a time.
