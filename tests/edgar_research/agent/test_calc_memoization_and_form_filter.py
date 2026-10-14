@@ -103,6 +103,26 @@ async def test_a_repeat_does_not_double_record_the_calc_result():
     assert tools.get_calc_results() == after_first
 
 
+@pytest.mark.anyio
+async def test_a_repeated_failure_is_not_reported_as_already_computed():
+    """ACN on Haiku 5.5 (2026-10-14) resent `A/B*100` and was told
+    "identical expression, identical result" about an error."""
+    args = _declared("A/B*100", 2093878, 69673)
+    await tools._dispatch("calculate", args)
+    second = await tools._dispatch("calculate", dict(args))
+
+    assert second.startswith("Error")
+    assert "already computed" not in second
+
+
+def test_a_name_in_the_expression_says_to_write_the_numbers():
+    """17 of 32 ACN calls used letters for the inputs; the bare
+    `disallowed expression element: Name` did not say what to do instead."""
+    result = tools.safe_calculate("A/B*100", [])
+    assert "numbers" in result
+    assert "not names" in result
+
+
 def test_the_cache_is_per_run():
     tools._state().calc_cache["x"] = "1"
     tools.reset_run_provenance()
