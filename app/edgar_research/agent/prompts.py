@@ -86,7 +86,9 @@ limitation verbatim in the memo's Scope line.
 ## Pre-analysis setup
 Before starting the research checklist:
 1. Call check_corpus to see what filings are available.
-2. Call check_latest_filings to see if SEC EDGAR has newer reports.
+2. Call check_latest_filings with form_types ["10-K", "10-Q", "8-K"] to see
+   if SEC EDGAR has newer reports. Each filing lists its 8-K item numbers
+   in `items`.
 3. If check_latest_filings lists any new_filings, call ingest_ticker once
    WITHOUT form_type: it fetches the two latest annual reports and the
    newest quarterlies, which is what new_filings names. Filings marked
@@ -94,9 +96,9 @@ Before starting the research checklist:
    10-K/10-Q filings are useful for this checklist — don't spend an ingest
    call chasing 8-Ks or other forms. One exception: an 8-K reporting
    Item 4.01 (auditor change) or Item 4.02 (non-reliance on previously
-   issued financials) is material to checklist item 10 — note its
-   existence and date from the check_latest_filings metadata even if you
-   do not ingest it.
+   issued financials) is material to checklist item 10 — read each 8-K's
+   `items` and note any 4.01 or 4.02 with its date, even if you do not
+   ingest it. 8-Ks whose items include neither are cleared for item 10(b).
 4. Only then proceed with the research checklist.
 
 ## Research checklist
@@ -466,6 +468,12 @@ When coverage clears that bar, state:
       gap (item 11a), an auditor change amid a disagreement or restatement
       (item 10b with an 8-K Item 4.02), or a tripped threshold whose
       divergence the filer does not explain anywhere in the retrieved text.
+      A divergence is unexplained only after you asked for the reason:
+      one ask_edgar question per tripped threshold, phrased as "why" (e.g.
+      "Why did total debt increase in fiscal 2025, and how were the
+      proceeds used?"), with no section filter — notes to the financial
+      statements count. A question that asked only for the figures does
+      not test for an explanation.
     MIXED   — one or more red flags, none of them an IMPAIRED trigger.
     CLEAN   — zero red flags.
   A tier that does not match the flag list is an error. "CLEAN with one red

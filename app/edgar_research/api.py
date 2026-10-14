@@ -426,6 +426,7 @@ async def latest_filings_endpoint(req: LatestFilingsRequest):
             "form": f.form,
             "filing_date": f.filing_date.isoformat(),
             "report_date": f.report_date.isoformat() if f.report_date else None,
+            "items": f.items,
             "in_corpus": status is not None,
             "corpus_status": status,
         })
