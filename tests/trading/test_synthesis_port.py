@@ -721,13 +721,15 @@ def test_research_manager_and_risk_judge_follow_the_project_wide_model_by_defaul
     """Not pinned to Sonnet, despite the spec text naming it — Sonnet 5
     deprecated `temperature` outright, which undercuts the determinism
     guarantee these two roles exist to support. See synthesis_port's module
-    docstring and create_with_temperature_fallback."""
-    import os
+    docstring and create_with_temperature_fallback.
 
-    from app.shared.llm.models import DEFAULT_MODEL_ENV
+    Compared through the role, not against LLM_CLAUDE_MODEL: a .env that
+    sets TRADING_RESEARCH_MANAGER_MODEL failed this test the day the agent's
+    model stopped matching it. The fallback itself is test_model_roles'."""
+    from app.shared.llm.models import model_for
 
-    assert port.RESEARCH_MANAGER_MODEL == os.environ[DEFAULT_MODEL_ENV]
-    assert port.RISK_JUDGE_MODEL == os.environ[DEFAULT_MODEL_ENV]
+    assert port.RESEARCH_MANAGER_MODEL == model_for("research_manager")
+    assert port.RISK_JUDGE_MODEL == model_for("risk_judge")
 
 
 @pytest.mark.anyio

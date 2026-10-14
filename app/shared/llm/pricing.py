@@ -38,6 +38,17 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
         "cache_write": 1.25,
         "cache_read": 0.10,
     },
+    # Prompts up to 100,000 tokens. Over that, every rate is 5x ($0.50/$2.50,
+    # $0.625 cache writes, $0.05 cache reads), the whole request at the
+    # higher rate. Research turns peaked at 37k tokens on 2026-10-12.
+    #
+    # Verified 2026-10-14 against https://platform.claude.com/docs/en/about-claude/pricing
+    "claude-haiku-5-5": {
+        "input": 0.10,
+        "output": 0.50,
+        "cache_write": 0.125,
+        "cache_read": 0.01,
+    },
     "claude-sonnet-4-5-20250929": {
         "input": 3.00,
         "output": 15.00,

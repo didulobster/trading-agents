@@ -38,6 +38,7 @@ from app.shared.llm.openai_compat import (
     [
         ("claude-haiku-4-5-20251001", "anthropic"),
         ("claude-sonnet-5", "anthropic"),
+        ("claude-haiku-5-5", "anthropic"),
         ("deepseek-v4-flash", "deepseek"),
         ("deepseek-v4-pro", "deepseek"),
         ("gpt-4.1-nano", "openai"),
@@ -719,3 +720,15 @@ async def test_decomposer_survives_a_model_that_rejects_temperature(monkeypatch)
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_haiku_5_5_is_priced_at_its_published_rates():
+    """The research agent runs on it; an unpriced model logs cost None,
+    which sums to 0.00 and never trips a budget guard."""
+    from app.shared.cost import UsageSummary, compute_cost
+
+    usage = UsageSummary()
+    usage.input_tokens, usage.cache_write_tokens = 1_000_000, 1_000_000
+    usage.cache_read_tokens, usage.output_tokens = 1_000_000, 1_000_000
+
+    assert compute_cost(usage, "claude-haiku-5-5") == 0.10 + 0.125 + 0.01 + 0.50
