@@ -26,3 +26,7 @@ __pycache__/
 .fundamentals_cache/
 # env backups
 .env.bak-*
+
+# API server pid and log from scripts/server-start.sh
+/.server.pid
+/.server.log
