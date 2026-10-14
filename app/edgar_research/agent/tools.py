@@ -373,6 +373,11 @@ def _eval_node(node, scale_by_value: dict[float, float] | None = None):
         )
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_OPS:
         return _ALLOWED_OPS[type(node.op)](_eval_node(node.operand, scale_by_value))
+    if isinstance(node, ast.Name):
+        raise ValueError(
+            f"'{node.id}' is a name; write the figures themselves into the "
+            "expression as numbers, not names"
+        )
     raise ValueError(f"disallowed expression element: {type(node).__name__}")
 
 
@@ -658,9 +663,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
         # to the agent as an error. Only on a number — an error is not one —
         # and worded for ratios too, where the scale cancels. No digits: the
         # note must not add a number.
-        if _is_number(result) and any(
-            _UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0 for i in inputs.get("inputs", [])
-        ):
+        if not _is_number(result):
+            return result
+        if any(_UNIT_SCALES.get(i.get("unit"), 1.0) != 1.0 for i in inputs.get("inputs", [])):
             result += " (inputs converted to ones before calculating)"
         cache[key] = result
         return result
