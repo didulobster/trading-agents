@@ -460,30 +460,27 @@ spot-check.
 
 ## Additional Limitations
  
-- **Parser changes do not retroactively fix ingested filings.** `_parse`
-  skips a document when `sections` rows already exist. Resetting a filing's
-  status and deleting its chunks is insufficient — the stale sections
-  survive and get re-chunked into the same broken output. A FIG 10-Q
-  produced 118 chunks containing only Risk Factors and Legal Proceedings,
-  with Item 1 Financial Statements (58K chars) and Item 2 MD&A (45K chars)
-  entirely absent, because it had been ingested before a parser fix. Correct
-  recovery is: delete `sections` **and** `chunks`, reset status to
-  `discovered`, re-run. Result: 167 chunks with the financial statements
-  present. `corpus-status` now lists embedded 10-Ks missing Part II
-  Item 7 or 8 and 10-Qs missing Part I Item 1 or 2, so a filing left like
-  this, or one the parser fell back to a single `Full Document` section
-  for, shows up instead of passing on chunk count.
-- **`ingest` cannot resume a locally-reset filing.** The candidate set comes
-  entirely from the live SEC submissions API; the command never
-  cross-references local `filings` rows sitting below `EMBEDDED`. Resuming a
-  reset filing requires calling `IngestionService._advance_filing()`
-  directly with a constructed `FilingSummary`.
-- **Foreign private issuers parse but with sparse section labels.** ASML's
-  20-F yields usable content (1,591 chunks across three filings) but section
-  paths carry Item numbers without titles (`{"Part I", "Item 2"}`), and the
-  cover-page basis checkbox produces an artifact section
-  (`{Unknown, "Item 17", "☐ Item 18 ☐"}`). Retrieval works; section-targeted
-  filtering does not.
+- **[Resolved] Parser changes did not retroactively fix ingested filings.**
+  `_parse` skips a document when `sections` rows already exist, so a FIG
+  10-Q ingested before a parser fix kept 118 chunks of only Risk Factors
+  and Legal Proceedings, with Item 1 (58K chars) and Item 2 (45K chars)
+  absent. `corpus-status` now lists embedded 10-Ks missing Part II Item 7
+  or 8 and 10-Qs missing Part I Item 1 or 2, including filings the parser
+  fell back to a single `Full Document` section for. `cli reparse
+  ACCESSION...` deletes a filing's sections (chunks cascade) and rebuilds
+  it from the downloaded document.
+- **[Resolved] `ingest` could not resume a locally-reset filing.** It walks
+  only SEC's live filing list. `cli reparse` works from local rows and
+  never calls SEC.
+- **Some foreign private issuers have no sections at all.** ASML files an
+  IFRS annual report with a 20-F cross-reference table instead of captioning
+  content "Item N". Its only Item matches are the cover-page checkbox and a
+  run of bare "Item 1"…"Item 6" lines near the end, the last of which would
+  hold 78% of the text, so the parser falls back to one
+  `['Unknown', 'Full Document']` section (re-checked 2026-10-15 on the
+  FY2024 and FY2025 20-Fs). Retrieval works; section-targeted filtering does
+  not. Fixing it means mapping the cross-reference table's Items to the
+  report's own headings — the same work as the TOC-anchor parsing above.
 - **Some tickers are not ingestable at all.** LVMH (LVMUY) is a Level 1 ADR
   whose parent files with the French AMF, not the SEC. No 10-K, no 20-F, no
   corpus entry possible.

@@ -42,3 +42,12 @@ class ListedSecurityRepository:
                 )
                 row = await cur.fetchone()
         return ListedSecurity.model_validate(row) if row else None
+    async def get_by_id(self, security_id: int) -> ListedSecurity | None:
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT * FROM listed_securities WHERE id = %s",
+                    (security_id,),
+                )
+                row = await cur.fetchone()
+        return ListedSecurity.model_validate(row) if row else None

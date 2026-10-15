@@ -26,7 +26,8 @@ word. Commands and endpoints are listed in [../README.md](../README.md); how it 
    uv run python -m app.edgar_research.cli corpus-status --ticker AVGO --verbose
    ```
 
-   Check `corpus-status`: a filing can be `EMBEDDED` with far too few chunks.
+   Check `corpus-status`: a filing can be `EMBEDDED` with far too few chunks, or with
+   no MD&A or financial statements section, which section-filtered questions then miss.
 
 2. **Start the server and run the memo.**
 
