@@ -150,9 +150,10 @@ def _should_skip_number(raw: str, context: str) -> bool:
     if _YEAR_RE.match(bare):
         return True
 
-    # Section references: "Item 1A", "Item 7". Only the section number
-    # itself is skipped — not every number that happens to sit near one.
-    if re.search(rf"Item\s+{re.escape(raw)}\b", context):
+    # Section references: "Item 1A", "Item 7", and lists of them such as
+    # "Items 4.01/4.02" or "Item 4.01 or 4.02". Only the section numbers
+    # themselves are skipped — not every number that happens to sit near one.
+    if re.search(rf"Items?\s+(?:[\dA-Z.]+\s*(?:/|,|or|and)\s*)*{re.escape(raw)}\b", context):
         return True
 
     try:
