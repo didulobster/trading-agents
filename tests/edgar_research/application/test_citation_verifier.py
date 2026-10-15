@@ -288,3 +288,23 @@ def test_verify_memo_adds_unbacked_derivations_section():
 
     assert "## Unbacked Derivations" in out
     assert "26.2" in out.split("## Unbacked Derivations")[1]
+
+
+def test_listed_8k_item_numbers_are_section_references_not_figures():
+    """ACN memos on 2026-10-14 and 2026-10-15 listed "4.01" and "4.02" as
+    unverified figures. The Item rule only caught a lone "Item 4.01", not
+    the plural or the second number of a list."""
+    for answer in ("8-Ks screened for Items 4.01/4.02: none found.",
+                   "I could not rule out an Item 4.01 or 4.02 filing.",
+                   "No Items 4.01, 4.02 or 5.02 appear."):
+        report = verify_answer(answer, {0: "unrelated"}, computed_values=[], rejected_calcs=[])
+
+        assert not report.unverified, answer
+
+
+def test_a_figure_after_an_item_reference_is_still_checked():
+    answer = "Item 7 says revenue was 4.75 billion."
+
+    report = verify_answer(answer, {0: "unrelated"}, computed_values=[], rejected_calcs=[])
+
+    assert "4.75" in {f.value for f in report.unverified}
