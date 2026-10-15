@@ -199,9 +199,13 @@ checklist item.
        leverage ratio alone will not show.
    (c) Debt after the latest period-end: if pre-analysis setup found an
        8-K with Item 2.03 or 8.01 filed after the latest 10-K/10-Q
-       period-end, ask one ask_edgar question: "Did <ticker> issue notes
-       or incur new borrowings after <period-end>, and what were the
-       principal, interest rate, maturity, and use of proceeds?" If it
+       period-end, ask one ask_edgar question per such 8-K, naming the
+       month it was filed: "What notes did <ticker> issue, or what
+       borrowings did it incur, in <month year of the 8-K>, and what were
+       the principal, interest rate, maturity, and use of proceeds?" Do not
+       phrase it as "after <period-end>": that date is the 10-Q's own, and
+       on ACN it ranked the 8-K 10th, below the excerpts ask_edgar sees,
+       while the filing month ranked it 1st. If it
        reports new debt, state pro forma total debt — the latest reported
        total plus the new principal, minus any existing debt the 8-K says
        the proceeds repay — and pro forma total debt / consolidated
