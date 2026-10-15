@@ -122,8 +122,11 @@ _NO_ALNUM_RE = re.compile(r"^[^A-Za-z0-9]+$")
 # table), so heading detection produces a few bogus matches with one
 # swallowing most of the document. Below this only shows up as one section
 # holding a suspiciously large share of the document's content.
+# Risk Factors is exempt: some issuers reprint theirs in full in every 10-Q,
+# where little else is long (FIG's 2026 10-Qs: 65-68% of a correct split).
 _PERIODIC_FORM_TYPES = {"10-K", "10-K/A", "10-Q", "10-Q/A", "20-F", "20-F/A"}
 _DOMINANT_SECTION_RATIO = 0.65
+_MAY_DOMINATE_ITEM = "Item 1A"
 
 # The audited financial statements of an annual report are bound after the
 # signature pages, not under the Item that nominally covers them: Item 8 (or
@@ -182,8 +185,13 @@ def parse_filing(html_path: Path, form_type: str = "10-K") -> list[ParsedSection
     unreliable = False
     if form_type.upper() in _PERIODIC_FORM_TYPES and sections:
         total_chars = sum(len(b) for b in blocks)
-        largest = max(len(s.content) for s in sections)
-        unreliable = bool(total_chars) and largest / total_chars > _DOMINANT_SECTION_RATIO
+        dominant = max(sections, key=lambda s: len(s.content))
+        largest = len(dominant.content)
+        unreliable = (
+            bool(total_chars)
+            and largest / total_chars > _DOMINANT_SECTION_RATIO
+            and _MAY_DOMINATE_ITEM not in dominant.section_path
+        )
         if unreliable:
             logger.warning(
                 "Item-heading split looks unreliable for %s (one section holds "

@@ -186,6 +186,23 @@ def test_dominant_section_falls_back_to_whole_document_for_20f(tmp_path):
     assert "Sentence 0 of unrelated" in sections[0].content
 
 
+def test_dominant_risk_factors_section_is_kept(tmp_path):
+    """Mirrors FIG's 10-Qs: the full Risk Factors reprinted every quarter
+    holds most of a correctly split filing."""
+    filler = " ".join(f"Risk factor sentence {i}." for i in range(200))
+    blocks = [
+        "PART I", "Item 1. Financial Statements", "Balance sheet.",
+        "Item 2. Management's Discussion and Analysis", "Revenue grew.",
+        "PART II", "Item 1. Legal Proceedings", "None.",
+        "Item 1A. Risk Factors", filler,
+        "Item 6. Exhibits", "Exhibit list.",
+    ]
+    html_path = _write_html(tmp_path, blocks)
+    sections = parse_filing(html_path, form_type="10-Q")
+
+    assert ["Part II", "Item 1A", "Risk Factors"] in [s.section_path for s in sections]
+
+
 def test_dominant_section_fallback_not_applied_to_event_driven_forms(tmp_path):
     """8-K/6-K are event-driven and legitimately concentrate content under
     one item; the safety net must not suppress that."""
