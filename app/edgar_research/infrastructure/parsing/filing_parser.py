@@ -50,6 +50,37 @@ _ITEM_TO_PART = {
 # so a range lookup is used instead of an exhaustive dict.
 _FORM_TYPES_20F = {"20-F", "20-F/A"}
 
+# A 10-Q reuses Item numbers across its two Parts — Part I Items 1-4
+# (financial statements, MD&A, market risk, controls) and Part II Items
+# 1, 1A, 2-6 (legal proceedings, risk factors, buybacks, ...) — so the Part
+# can't come from the Item number.
+_QUARTERLY_FORM_TYPES = {"10-Q", "10-Q/A"}
+
+
+def _item_value(item_no: str) -> float:
+    """Sort value of an Item number: "1" -> 1, "1A" -> 1.5, "10" -> 10."""
+    m = re.match(r"(\d+)([A-Z]?)", item_no)
+    return int(m.group(1)) + (0.5 if m.group(2) else 0)
+
+
+def _quarterly_parts(candidates: list[tuple[int, str, str]]) -> dict[int, str]:
+    """Part of each 10-Q Item heading, by block index, from the Item sequence.
+
+    Items run Part I 1-4, then Part II 1, 1A, 2-6, in the TOC and again in
+    the body, so the Part flips whenever the Item number goes down. Running
+    page headers repeat a number and never flip it. The filing's own Part
+    headings are not used: NFLX's body has no "PART I" heading, so its MD&A
+    followed the TOC's "Part II" line and read as Part II.
+    """
+    parts: dict[int, str] = {}
+    part, prev = "Part I", None
+    for idx, item_no, _ in candidates:
+        if prev is not None and _item_value(item_no) < _item_value(prev):
+            part = "Part II" if part == "Part I" else "Part I"
+        parts[idx] = part
+        prev = item_no
+    return parts
+
 
 def _item_to_part_20f(item_no: str) -> str:
     m = re.match(r"(\d{1,2})", item_no)
@@ -136,8 +167,14 @@ def parse_filing(html_path: Path, form_type: str = "10-K") -> list[ParsedSection
     # tables before heading detection moved section boundaries in 14 of 44
     # cached filings — some better, some dropping a 10-Q's financial
     # statements — so the two are kept apart.
-    item_positions = _locate_item_headings(blocks)
-    sections = _slice_sections(blocks, item_positions, form_type=form_type, tables=tables)
+    parts = (
+        _quarterly_parts(_item_candidates(blocks))
+        if form_type.upper() in _QUARTERLY_FORM_TYPES else None
+    )
+    item_positions = _locate_item_headings(blocks, parts)
+    sections = _slice_sections(
+        blocks, item_positions, form_type=form_type, tables=tables, parts=parts
+    )
 
     # Judge the split before promoting the F-pages, not after: splitting one
     # oversized section in two lowers the largest section's share, and on
@@ -311,15 +348,9 @@ def _render_table(table) -> str:
     lines = [" | ".join(cells) for cells in (_row_cells(tr) for tr in _own_rows(table)) if cells]
     return "\n".join(lines)
 
-def _locate_item_headings(blocks: list[str]) -> list[tuple[int, str, str]]:
-    """
-    Find blocks that look like 'Item N[A]. <title>' headings.
-
-    Multiple occurrences of the same Item are common (TOC + content).
-    We prefer the occurrence with the most content between it and the
-    NEXT Item heading — that's the real section, not a TOC entry.
-    """
-    candidates: dict[str, list[tuple[int, str]]] = {}
+def _item_candidates(blocks: list[str]) -> list[tuple[int, str, str]]:
+    """(block index, item_no, title) for every block shaped like an Item heading."""
+    found: list[tuple[int, str, str]] = []
     for i, block in enumerate(blocks):
         m = _ITEM_HEADING_RE.match(block)
         if not m:
@@ -341,15 +372,35 @@ def _locate_item_headings(blocks: list[str]) -> list[tuple[int, str, str]]:
             # (e.g. "...as well as NYSE Section 303A.11 requires...").
             if title[0].islower():
                 continue
-        candidates.setdefault(item_no, []).append((i, title))
+        found.append((i, item_no, title))
+    return found
+
+
+def _locate_item_headings(
+    blocks: list[str], parts: dict[int, str] | None = None
+) -> list[tuple[int, str, str]]:
+    """
+    Find blocks that look like 'Item N[A]. <title>' headings.
+
+    Multiple occurrences of the same Item are common (TOC + content).
+    We prefer the occurrence with the most content between it and the
+    NEXT Item heading — that's the real section, not a TOC entry.
+
+    With `parts` (10-Qs), an Item is identified by its Part as well as its
+    number, so Part II Item 1 is not a rival copy of Part I Item 1.
+    """
+    candidates: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    for i, item_no, title in _item_candidates(blocks):
+        part = parts[i] if parts is not None else ""
+        candidates.setdefault((part, item_no), []).append((i, title))
 
     if not candidates:
         return []
 
     # Flatten all (block_idx, item_no, title) candidates and sort by position
     all_positions = sorted(
-        (idx, item_no, title)
-        for item_no, occurrences in candidates.items()
+        (idx, key, title)
+        for key, occurrences in candidates.items()
         for idx, title in occurrences
     )
 
@@ -358,18 +409,18 @@ def _locate_item_headings(blocks: list[str]) -> list[tuple[int, str, str]]:
     # For each item_no, pick the occurrence with the most blocks before
     # the NEXT heading-of-any-kind. Real content sections have body
     # between them; TOC entries are packed together.
-    occurrence_scores: dict[str, list[tuple[int, str, int]]] = {}
-    for n, (idx, item_no, title) in enumerate(all_positions):
+    occurrence_scores: dict[tuple[str, str], list[tuple[int, str, int]]] = {}
+    for n, (idx, key, title) in enumerate(all_positions):
         next_idx = (
             all_positions[n + 1][0]
             if n + 1 < len(all_positions)
             else len(blocks)
         )
         gap = next_idx - idx - 1  # blocks of body between this heading and next
-        occurrence_scores.setdefault(item_no, []).append((idx, title, gap))
+        occurrence_scores.setdefault(key, []).append((idx, title, gap))
 
     located: list[tuple[int, str, str]] = []
-    for item_no, occurrences in occurrence_scores.items():
+    for (_, item_no), occurrences in occurrence_scores.items():
         # Best occurrence = the one with the largest body gap. Ties (e.g.
         # two equally-short "Not applicable" stub sections) prefer the
         # later position, since TOC entries always precede real content.
@@ -477,6 +528,7 @@ def _slice_sections(
     item_positions: list[tuple[int, str, str]],
     form_type: str = "10-K",
     tables: list[tuple[int, str] | None] | None = None,
+    parts: dict[int, str] | None = None,
 ) -> list[ParsedSection]:
     """Take blocks between consecutive Item headings as one section's content."""
     is_20f = form_type.upper() in _FORM_TYPES_20F
@@ -493,7 +545,12 @@ def _slice_sections(
         if not content:
             continue
 
-        part = _item_to_part_20f(item_no) if is_20f else _ITEM_TO_PART.get(item_no, "Unknown")
+        if parts is not None:
+            part = parts[start_idx]
+        elif is_20f:
+            part = _item_to_part_20f(item_no)
+        else:
+            part = _ITEM_TO_PART.get(item_no, "Unknown")
         path = [part, f"Item {item_no}"]
         if title:
             path.append(title)

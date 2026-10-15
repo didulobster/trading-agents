@@ -360,3 +360,60 @@ def test_10k_part_bucketing_still_uses_four_part_scheme(tmp_path):
 
     section_7a = next(s for s in sections if s.section_path[1] == "Item 7A")
     assert section_7a.section_path[0] == "Part II"
+
+
+# ---- 10-Q Parts ----
+
+def _ten_q(body_part_i_heading: bool) -> list[str]:
+    toc = [
+        "Part I. Financial Information", "Item 1.", "Item 2.", "Item 3.", "Item 4.",
+        "Part II. Other Information", "Item 1.", "Item 1A.", "Item 2.", "Item 6.",
+    ]
+    body = (["PART I. FINANCIAL INFORMATION"] if body_part_i_heading else []) + [
+        "Item 1. Financial Statements", "Revenue was $10 billion. " * 20,
+        "Item 2. Management's Discussion and Analysis", "Revenue grew 7%. " * 20,
+        "Item 3. Quantitative and Qualitative Disclosures About Market Risk",
+        "Rates moved. " * 5,
+        "Item 4. Controls and Procedures", "Controls were effective. " * 5,
+        "PART II. OTHER INFORMATION",
+        "Item 1. Legal Proceedings", "See Note 9 for pending litigation. " * 5,
+        "Item 1A. Risk Factors", "Export controls could hurt demand. " * 40,
+        "Item 2. Unregistered Sales of Equity Securities", "We repurchased shares. " * 5,
+        "Item 6. Exhibits", "Exhibit 31.1. " * 5,
+    ]
+    return toc + body
+
+
+def test_10q_part_ii_items_get_their_own_part_ii_sections(tmp_path):
+    """Part II Items 1, 1A and 2 reuse Part I's numbers. Keyed by number alone
+    they were rival copies of Part I's Items, and Risk Factors was filed as
+    "Part I / Item 1A"."""
+    sections = parse_filing(_write_html(tmp_path, _ten_q(True)), form_type="10-Q")
+    paths = {tuple(s.section_path[:2]): s.content for s in sections}
+
+    assert "Export controls" in paths[("Part II", "Item 1A")]
+    assert "pending litigation" in paths[("Part II", "Item 1")]
+    assert "repurchased" in paths[("Part II", "Item 2")]
+    assert "Revenue was" in paths[("Part I", "Item 1")]
+    assert "Revenue grew" in paths[("Part I", "Item 2")]
+    assert ("Part I", "Item 1A") not in paths
+
+
+def test_10q_parts_do_not_depend_on_a_body_part_i_heading(tmp_path):
+    """NFLX's body has no "PART I" heading. Taking the Part from the last Part
+    heading put its MD&A under the TOC's "Part II" line."""
+    sections = parse_filing(_write_html(tmp_path, _ten_q(False)), form_type="10-Q")
+    paths = {tuple(s.section_path[:2]): s.content for s in sections}
+
+    assert "Revenue grew" in paths[("Part I", "Item 2")]
+    assert "Export controls" in paths[("Part II", "Item 1A")]
+
+
+def test_10k_parts_still_come_from_the_item_number(tmp_path):
+    blocks = [
+        "Item 1A. Risk Factors", "Competition is intense. " * 10,
+        "Item 7. Management's Discussion and Analysis", "Revenue grew. " * 10,
+    ]
+    sections = parse_filing(_write_html(tmp_path, blocks), form_type="10-K")
+
+    assert [s.section_path[:2] for s in sections] == [["Part I", "Item 1A"], ["Part II", "Item 7"]]
