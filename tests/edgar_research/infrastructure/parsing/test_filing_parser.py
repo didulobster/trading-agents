@@ -128,6 +128,41 @@ def test_prefers_titled_later_occurrence_when_toc_and_content_gaps_tie(tmp_path)
     assert item1.section_path[-1] == "REAL TITLE"
 
 
+# ---- Running page headers ----
+
+def test_running_page_headers_do_not_move_the_section_start():
+    """ACN's 10-Qs repeat "Item 2. MD&A" atop every page. Scored copy by
+    copy, a later copy won, and MD&A's opening pages were filed under Item 1."""
+    blocks = [
+        "Item 1.", "Item 2.",                      # TOC
+        "Item 1. Financial Statements",
+        "Balance sheet. " * 5,
+        "Item 2. Management's Discussion and Analysis",
+        "MD&A opening page: revenue grew 7%.",
+        "Item 2. Management's Discussion and Analysis",   # page header
+        "MD&A page two.", "More MD&A.", "Even more MD&A.",
+        "Item 2. Management's Discussion and Analysis",   # page header
+        "MD&A page three.",
+        "Item 4. Controls and Procedures",
+        "Controls were effective.",
+    ]
+    positions = _locate_item_headings(blocks)
+
+    assert [(idx, no) for idx, no, _ in positions] == [(2, "1"), (4, "2"), (12, "4")]
+
+
+def test_toc_entries_are_not_collapsed_as_running_headers():
+    """TOC entries alternate Items, so collapsing runs leaves them alone."""
+    blocks = [
+        "Item 1.", "Item 2.",
+        "Item 1. Business", "Body. " * 5, "More body.",
+        "Item 2. Properties", "Body. " * 5, "More body.",
+    ]
+    positions = _locate_item_headings(blocks)
+
+    assert [(idx, no) for idx, no, _ in positions] == [(2, "1"), (5, "2")]
+
+
 # ---- Dominant-section fallback (ASML-style filings with no real Item headings) ----
 
 def test_dominant_section_falls_back_to_whole_document_for_20f(tmp_path):

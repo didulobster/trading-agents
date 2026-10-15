@@ -353,6 +353,8 @@ def _locate_item_headings(blocks: list[str]) -> list[tuple[int, str, str]]:
         for idx, title in occurrences
     )
 
+    all_positions = _collapse_running_headers(all_positions)
+
     # For each item_no, pick the occurrence with the most blocks before
     # the NEXT heading-of-any-kind. Real content sections have body
     # between them; TOC entries are packed together.
@@ -377,6 +379,26 @@ def _locate_item_headings(blocks: list[str]) -> list[tuple[int, str, str]]:
 
     located.sort(key=lambda x: x[0])
     return located
+
+def _collapse_running_headers(
+    positions: list[tuple[int, str, str]],
+) -> list[tuple[int, str, str]]:
+    """Keep only the first of consecutive occurrences of the same Item.
+
+    Some filers repeat the current Item's heading at the top of every page.
+    ACN's 10-Qs print "Item 2. Management's Discussion and Analysis…" 13
+    times through MD&A; scored one by one, the copy with the largest gap
+    won, MD&A started 280 blocks late, and Item 1 swallowed the difference.
+    A run with no other Item between its copies is one section, starting
+    at its first copy. TOC entries alternate Items, so they never form a run.
+    """
+    collapsed: list[tuple[int, str, str]] = []
+    for pos in positions:
+        if collapsed and collapsed[-1][1] == pos[1]:
+            continue
+        collapsed.append(pos)
+    return collapsed
+
 
 def _fpages_start(blocks: list[str]) -> int | None:
     """Where the audited statements begin: their own index if the filing has
