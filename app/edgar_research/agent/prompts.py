@@ -99,6 +99,13 @@ Before starting the research checklist:
    issued financials) is material to checklist item 10 — read each 8-K's
    `items` and note any 4.01 or 4.02 with its date, even if you do not
    ingest it. 8-Ks whose items include neither are cleared for item 10(b).
+   A second exception: an 8-K filed AFTER the period-end of the latest
+   ingested 10-K/10-Q whose items include 2.03 (new direct financial
+   obligation) or 8.01 (other events, the item many filers use for a notes
+   offering) may report debt the periodic filings don't yet show — it is
+   input to checklist item 6(c). If such an 8-K is in_corpus false, call
+   ingest_ticker with form_type "8-K" and a limit that reaches it (8-Ks
+   are listed newest first).
 4. Only then proceed with the research checklist.
 
 ## Research checklist
@@ -175,7 +182,7 @@ checklist item.
    segments, and is any segment's margin deteriorating while its revenue
    grows?
 
-6. Debt trajectory & maturity wall — Two parts.
+6. Debt trajectory & maturity wall — Three parts.
    (a) Leverage: define total debt as the sum of current and non-current
        borrowings from the debt footnote, EXCLUDING operating lease
        liabilities; retrieve and state operating lease liabilities as a
@@ -190,6 +197,21 @@ checklist item.
        24 months of the latest period-end that exceeds one year of
        consolidated operating income — that is a refinancing risk the
        leverage ratio alone will not show.
+   (c) Debt after the latest period-end: if pre-analysis setup found an
+       8-K with Item 2.03 or 8.01 filed after the latest 10-K/10-Q
+       period-end, ask one ask_edgar question per such 8-K, naming the
+       month it was filed: "What notes did <ticker> issue, or what
+       borrowings did it incur, in <month year of the 8-K>, and what were
+       the principal, interest rate, maturity, and use of proceeds?" Do not
+       phrase it as "after <period-end>": that date is the 10-Q's own, and
+       on ACN it ranked the 8-K 10th, below the excerpts ask_edgar sees,
+       while the filing month ranked it 1st. If it
+       reports new debt, state pro forma total debt — the latest reported
+       total plus the new principal, minus any existing debt the 8-K says
+       the proceeds repay — and pro forma total debt / consolidated
+       operating income, labeled pro forma beside the reported figure,
+       never replacing it. A new maturity counts toward the (b) test. If
+       no such 8-K exists, say debt is current as of the latest period-end.
 
 7. Contingent liabilities — Ask THREE separate questions, not one:
    (a) Material commitments and loss contingencies from the Commitments
@@ -343,8 +365,9 @@ growth is partly inorganic]
 
 ## 6. Debt, Leverage & Maturity Wall
 [finding with citations — state debt definition, debt/operating profit
-ratio gross and net, lease liabilities separately, and the maturity
-schedule with any flagged wall]
+ratio gross and net, lease liabilities separately, the maturity
+schedule with any flagged wall, and any debt issued after the latest
+period-end with pro forma leverage]
 
 ## 7. Contingent Liabilities
 [finding with citations]
@@ -389,8 +412,8 @@ threshold is not met, however concerning the finding reads.
     is excluded from run-rate for this test and reported separately.
 5.  A reported segment's operating margin fell more than 200 basis points
     year over year while that segment's revenue grew.
-6.  (a) Total debt / consolidated operating income exceeds 3.0x, OR rose in
-        every covered year.
+6.  (a) Total debt / consolidated operating income exceeds 3.0x, reported
+        or pro forma (item 6c), OR rose in every covered year.
     (b) Any single maturity within 24 months of the latest period-end
         exceeds one year of consolidated operating income.
 7.  Any loss contingency disclosed as unaccrued, OR any regulatory,
