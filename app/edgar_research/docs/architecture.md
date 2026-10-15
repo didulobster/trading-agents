@@ -472,12 +472,15 @@ spot-check.
 - **[Resolved] `ingest` could not resume a locally-reset filing.** It walks
   only SEC's live filing list. `cli reparse` works from local rows and
   never calls SEC.
-- **Foreign private issuers parse but with sparse section labels.** ASML's
-  20-F yields usable content (1,591 chunks across three filings) but section
-  paths carry Item numbers without titles (`{"Part I", "Item 2"}`), and the
-  cover-page basis checkbox produces an artifact section
-  (`{Unknown, "Item 17", "☐ Item 18 ☐"}`). Retrieval works; section-targeted
-  filtering does not.
+- **Some foreign private issuers have no sections at all.** ASML files an
+  IFRS annual report with a 20-F cross-reference table instead of captioning
+  content "Item N". Its only Item matches are the cover-page checkbox and a
+  run of bare "Item 1"…"Item 6" lines near the end, the last of which would
+  hold 78% of the text, so the parser falls back to one
+  `['Unknown', 'Full Document']` section (re-checked 2026-10-15 on the
+  FY2024 and FY2025 20-Fs). Retrieval works; section-targeted filtering does
+  not. Fixing it means mapping the cross-reference table's Items to the
+  report's own headings — the same work as the TOC-anchor parsing above.
 - **Some tickers are not ingestable at all.** LVMH (LVMUY) is a Level 1 ADR
   whose parent files with the French AMF, not the SEC. No 10-K, no 20-F, no
   corpus entry possible.
