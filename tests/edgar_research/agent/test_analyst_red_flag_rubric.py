@@ -112,3 +112,17 @@ def test_coverage_gate_still_precedes_the_tier():
     tier = assessment.index("Earnings quality tier")
     assert gate < tier
     assert "Never assign a tier when the coverage gate above says not to." in assessment
+
+
+def test_debt_issued_after_the_latest_period_reaches_item_6():
+    """An ACN memo scoped debt to 10-K/10-Q figures and missed a $5.0B notes
+    offering reported only in a later 8-K. That 8-K carried Item 8.01, not
+    2.03, so the prompt must name both and route them into item 6."""
+    setup = PROMPT.split("## Pre-analysis setup")[1].split("## Research checklist")[0]
+    assert "2.03" in setup and "8.01" in setup
+
+    item_6 = PROMPT.split("6. Debt trajectory")[1].split("7. Contingent")[0]
+    assert "(c)" in item_6 and "pro forma" in item_6
+
+    rubric_6 = re.split(r"^6\.", RUBRIC, flags=re.M)[1].split("7.")[0]
+    assert "pro forma" in rubric_6
