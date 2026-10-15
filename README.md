@@ -179,6 +179,9 @@ This cross-check is the first step of every session, not an occasional audit.
 uv run uvicorn app.main:app --reload
 ```
 
+Or run it in the background with `scripts/server-start.sh` and stop it with `scripts/server-stop.sh`.
+The log goes to `.server.log`.
+
 The agent tool layer calls this over HTTP at a hardcoded `http://localhost:8000`
 (`app/edgar_research/agent/tools.py`), so **the server must be running on port 8000 before any agent or
 trading run** — the fundamentals leg goes through it.
