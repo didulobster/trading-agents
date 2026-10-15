@@ -1,5 +1,5 @@
 # response dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 @dataclass(frozen=True)
@@ -11,6 +11,7 @@ class FilingSummary:
     filing_data: date | None # period of report
     primary_document: str    # "aapl-20240928.htm"
     report_date: date | None
+    items: list[str] = field(default_factory=list)  # 8-K item numbers, e.g. ["4.01", "9.01"]
 
     @property
     def accession_no_dashes(self) -> str:

@@ -131,6 +131,7 @@ class EdgarClient:
         filing_dates = recent.get("filingDate", [])
         report_dates = recent.get("reportDate", [])
         primary_docs = recent.get("primaryDocument", [])
+        items = recent.get("items", [""] * len(accessions))
 
         filings = []
         for i in range(len(accessions)):
@@ -153,7 +154,8 @@ class EdgarClient:
                     filing_date=filing_date,
                     report_date=report_date,
                     primary_document=primary_docs[i],
-                    filing_data=data
+                    filing_data=data,
+                    items=[n for n in items[i].split(",") if n],
                 )
             )
 
