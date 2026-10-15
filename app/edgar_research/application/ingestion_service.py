@@ -168,12 +168,43 @@ class IngestionService:
         )
         return await self.filing_repo.upsert(filing)
 
+    async def reparse_filing(self, accession_number: str) -> None:
+        """Rebuild one filing's sections, chunks and embeddings from its
+        downloaded document, with no call to SEC.
+
+        Parsing skips a document that already has sections, so a parser fix
+        never reached filings ingested before it, and `ingest` can't resume
+        a filing reset by hand because it only walks SEC's live filing list.
+        This deletes the sections (chunks cascade) and walks the filing
+        forward from DOWNLOADED.
+        """
+        filing = await self.filing_repo.get_by_accession(accession_number)
+        if filing is None:
+            raise ValueError(f"No filing {accession_number} in the corpus")
+        documents = await self.document_repo.list_for_filing(filing.id)
+        if not documents:
+            raise ValueError(
+                f"Filing {accession_number} has no downloaded document — run ingest instead"
+            )
+
+        for doc in documents:
+            deleted = await self.section_repo.delete_for_document(doc.id)
+            logger.info("Filing %s: deleted %d sections", accession_number, deleted)
+
+        if filing.status == FilingStatus.FAILED:
+            filing.transition_to(FilingStatus.DISCOVERED)
+        filing.transition_to(FilingStatus.DOWNLOADED)
+        await self.filing_repo.mark_status(filing.id, FilingStatus.DOWNLOADED)
+
+        security = await self.security_repo.get_by_id(filing.security_id)
+        await self._advance_filing(filing, None, security)
+
     # ----------------------- State transitions -----------------------
 
     async def _advance_filing(
         self,
         filing: Filing,
-        summary: FilingSummary,
+        summary: FilingSummary | None,
         security: ListedSecurity,
     ) -> None:
         """Walk one filing through whatever transitions remain."""

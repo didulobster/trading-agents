@@ -115,6 +115,12 @@ def ingest_cmd(
     """Run the full ingestion pipeline for one ticker."""
     asyncio.run(_ingest(ticker, form_type, limit, since_year, retry_failed))
 
+@app.command(name="reparse")
+def reparse_cmd(accessions: list[str]):
+    """Rebuild filings' sections, chunks and embeddings from their downloaded
+    documents — after a parser fix, or to resume a filing reset by hand."""
+    asyncio.run(_reparse(accessions))
+
 @app.command(name="corpus-status")
 def corpus_status_cmd(
     ticker: str | None = typer.Option(None, "--ticker", "-t"),
@@ -259,6 +265,34 @@ def _print_per_filing(rows: list[FilingDetail]) -> None:
             f"{emb_pct:>5}"
         )
 
+def _ingestion_service(edgar: EdgarClient, user_agent: str, cache_root: Path) -> IngestionService:
+    return IngestionService(
+        edgar_client=edgar,
+        ticker_resolver=TickerResolver(user_agent, cache_root / "company_tickers.json"),
+        embedding_service=EmbeddingService(),
+        security_repo=ListedSecurityRepository(),
+        filing_repo=FilingRepository(),
+        document_repo=DocumentRepository(),
+        section_repo=SectionRepository(),
+        chunk_repo=ChunkRepository(),
+    )
+
+
+async def _reparse(accessions: list[str]) -> None:
+    user_agent = require_env("EDGAR_USER_AGENT")
+    cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
+
+    await init_pool()
+    try:
+        async with EdgarClient(user_agent, cache_root / "filings") as edgar:
+            service = _ingestion_service(edgar, user_agent, cache_root)
+            for accession in accessions:
+                await service.reparse_filing(accession)
+                typer.echo(f"Reparsed {accession}")
+    finally:
+        await close_pool()
+
+
 async def _ingest(
     ticker: str, form_type: str, limit: int, since_year: int | None,
     retry_failed: bool = False,
@@ -269,22 +303,7 @@ async def _ingest(
     await init_pool()
     try:
         async with EdgarClient(user_agent, cache_root / "filings") as edgar:
-            resolver = TickerResolver(
-                user_agent, cache_root / "company_tickers.json"
-            )
-            embedder = EmbeddingService()
-
-            service = IngestionService(
-                edgar_client=edgar,
-                ticker_resolver=resolver,
-                embedding_service=embedder,
-                security_repo=ListedSecurityRepository(),
-                filing_repo=FilingRepository(),
-                document_repo=DocumentRepository(),
-                section_repo=SectionRepository(),
-                chunk_repo=ChunkRepository(),
-            )
-
+            service = _ingestion_service(edgar, user_agent, cache_root)
             since = date(since_year, 1, 1) if since_year else None
             await service.ingest_security(
                 ticker=ticker,

@@ -111,7 +111,8 @@ uv run python -m app.edgar_research.cli --help
 | Command | Spends | What it is for |
 |---|---|---|
 | `ingest TICKER [--type 10-K] [--limit 4] [--since YEAR] [--retry-failed]` | embeddings | Discover → download → parse → chunk → embed. Resumable: a rerun picks up at the last completed phase. |
-| `corpus-status [--ticker T] [--verbose]` | — | Summary of the corpus and its integrity issues. Run it after every ingest: a filing can be `EMBEDDED` with far too few chunks. |
+| `corpus-status [--ticker T] [--verbose]` | — | Summary of the corpus and its integrity issues. Run it after every ingest: a filing can be `EMBEDDED` with far too few chunks, or with no MD&A or financial statements section. |
+| `reparse ACCESSION...` | embeddings | Rebuild filings' sections, chunks and embeddings from their downloaded documents, after a parser fix. No SEC call. |
 | `fetch TICKER [--type 10-K] [--limit 4] [--since-year YEAR]` | — | Download filings into the local cache without ingesting them. |
 | `inspect-chunks HTML_PATH [--type 10-K] [--json-out] …` | — | Parse and chunk one cached filing and print the result, for tuning the chunker. |
 

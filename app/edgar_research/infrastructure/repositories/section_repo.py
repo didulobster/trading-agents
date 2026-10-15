@@ -52,3 +52,13 @@ class SectionRepository:
                 )
                 rows = await cur.fetchall()
         return [Section.model_validate(r) for r in rows]
+    async def delete_for_document(self, document_id: int) -> int:
+        """Delete a document's sections; their chunks go with them (FK cascade)."""
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM sections WHERE document_id = %s", (document_id,)
+                )
+                deleted = cur.rowcount
+                await conn.commit()
+        return deleted

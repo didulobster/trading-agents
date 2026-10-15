@@ -460,24 +460,18 @@ spot-check.
 
 ## Additional Limitations
  
-- **Parser changes do not retroactively fix ingested filings.** `_parse`
-  skips a document when `sections` rows already exist. Resetting a filing's
-  status and deleting its chunks is insufficient — the stale sections
-  survive and get re-chunked into the same broken output. A FIG 10-Q
-  produced 118 chunks containing only Risk Factors and Legal Proceedings,
-  with Item 1 Financial Statements (58K chars) and Item 2 MD&A (45K chars)
-  entirely absent, because it had been ingested before a parser fix. Correct
-  recovery is: delete `sections` **and** `chunks`, reset status to
-  `discovered`, re-run. Result: 167 chunks with the financial statements
-  present. `corpus-status` now lists embedded 10-Ks missing Part II
-  Item 7 or 8 and 10-Qs missing Part I Item 1 or 2, so a filing left like
-  this, or one the parser fell back to a single `Full Document` section
-  for, shows up instead of passing on chunk count.
-- **`ingest` cannot resume a locally-reset filing.** The candidate set comes
-  entirely from the live SEC submissions API; the command never
-  cross-references local `filings` rows sitting below `EMBEDDED`. Resuming a
-  reset filing requires calling `IngestionService._advance_filing()`
-  directly with a constructed `FilingSummary`.
+- **[Resolved] Parser changes did not retroactively fix ingested filings.**
+  `_parse` skips a document when `sections` rows already exist, so a FIG
+  10-Q ingested before a parser fix kept 118 chunks of only Risk Factors
+  and Legal Proceedings, with Item 1 (58K chars) and Item 2 (45K chars)
+  absent. `corpus-status` now lists embedded 10-Ks missing Part II Item 7
+  or 8 and 10-Qs missing Part I Item 1 or 2, including filings the parser
+  fell back to a single `Full Document` section for. `cli reparse
+  ACCESSION...` deletes a filing's sections (chunks cascade) and rebuilds
+  it from the downloaded document.
+- **[Resolved] `ingest` could not resume a locally-reset filing.** It walks
+  only SEC's live filing list. `cli reparse` works from local rows and
+  never calls SEC.
 - **Foreign private issuers parse but with sparse section labels.** ASML's
   20-F yields usable content (1,591 chunks across three filings) but section
   paths carry Item numbers without titles (`{"Part I", "Item 2"}`), and the
