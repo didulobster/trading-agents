@@ -34,3 +34,11 @@ class FilingDetail:
     chunks: int
     embedded: int
 
+
+@dataclass(frozen=True)
+class IncompleteFiling:
+    ticker: str
+    accession_number: str
+    filing_type: str
+    filed_date: date
+    missing: list[str]

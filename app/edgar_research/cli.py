@@ -19,7 +19,7 @@ from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
 from app.edgar_research.infrastructure.parsing.filing_parser import parse_filing
-from app.edgar_research.infrastructure.queries.models import FilingDetail, FilingIssue
+from app.edgar_research.infrastructure.queries.models import FilingDetail, FilingIssue, IncompleteFiling
 from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
 from app.edgar_research.infrastructure.repositories.db import close_pool, init_pool
 from app.edgar_research.infrastructure.repositories.document_repo import DocumentRepository
@@ -166,6 +166,12 @@ async def _corpus_status(ticker: str | None, verbose: bool) -> None:
         else:
             typer.echo("\nāœ“ No stuck or failed filings.")
 
+        incomplete = await query.incomplete_filings(ticker)
+        if incomplete:
+            _print_incomplete(incomplete)
+        else:
+            typer.echo("āœ“ Every 10-K/10-Q has MD&A and financial statements sections.")
+
         if verbose:
             details = await query.per_filing(ticker)
             _print_per_filing(details)
@@ -220,6 +226,15 @@ def _print_issues(issues: list[FilingIssue]) -> None:
         if i.error_message:
             line += f"\n    → {i.error_message}"
         typer.echo(line)
+
+
+def _print_incomplete(rows: list[IncompleteFiling]) -> None:
+    typer.echo("\n⚠ļø  Embedded but missing sections (ask_edgar section filters miss them):")
+    for r in rows:
+        typer.echo(
+            f"  - {r.ticker} {r.filing_type} {r.filed_date} "
+            f"({r.accession_number}): no {', '.join(r.missing)}"
+        )
 
 
 def _print_per_filing(rows: list[FilingDetail]) -> None:
