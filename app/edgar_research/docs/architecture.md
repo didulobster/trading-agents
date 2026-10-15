@@ -469,8 +469,10 @@ spot-check.
   entirely absent, because it had been ingested before a parser fix. Correct
   recovery is: delete `sections` **and** `chunks`, reset status to
   `discovered`, re-run. Result: 167 chunks with the financial statements
-  present. `corpus-status` checks chunk *counts*, not section
-  *completeness*, so this class of staleness is currently invisible.
+  present. `corpus-status` now lists embedded 10-Ks missing Part II
+  Item 7 or 8 and 10-Qs missing Part I Item 1 or 2, so a filing left like
+  this, or one the parser fell back to a single `Full Document` section
+  for, shows up instead of passing on chunk count.
 - **`ingest` cannot resume a locally-reset filing.** The candidate set comes
   entirely from the live SEC submissions API; the command never
   cross-references local `filings` rows sitting below `EMBEDDED`. Resuming a

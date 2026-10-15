@@ -1,10 +1,33 @@
 import re
 from datetime import date
 
-from app.edgar_research.infrastructure.queries.models import CorpusSummaryRow, FilingDetail, FilingIssue
+from app.edgar_research.infrastructure.queries.models import (
+    CorpusSummaryRow, FilingDetail, FilingIssue, IncompleteFiling,
+)
 from app.edgar_research.infrastructure.repositories.db import get_connection
 
 _ITEM_LABEL = re.compile(r"^Item (\d{1,2})([A-Z]?)$")
+
+# The sections a memo is built from: MD&A and the financial statements.
+REQUIRED_SECTIONS = {
+    "10-K": (("Part II", "Item 7"), ("Part II", "Item 8")),
+    "10-Q": (("Part I", "Item 1"), ("Part I", "Item 2")),
+}
+
+
+def missing_sections(filing_type: str, part_items: set[tuple[str, str]]) -> list[str]:
+    """Required (Part, Item) pairs a periodic filing has no section for.
+
+    A filing can reach EMBEDDED with its whole text in one
+    ['Unknown', 'Full Document'] section — the parser's fallback when the
+    Item split looks unreliable — and chunk counts look normal. ACN's
+    March and June 2026 10-Qs sat in the corpus that way unnoticed.
+    """
+    return [
+        f"{part} {item}"
+        for part, item in REQUIRED_SECTIONS.get(filing_type, ())
+        if (part, item) not in part_items
+    ]
 
 
 def _item_sort_key(label: str) -> tuple[int, str]:
@@ -170,3 +193,40 @@ class CorpusStatusQuery:
             rows = await cur.fetchall()
 
         return [FilingDetail(**r) for r in rows]
+
+    async def incomplete_filings(
+        self, ticker: str | None = None, filed_before: date | None = None
+    ) -> list[IncompleteFiling]:
+        """Embedded 10-Ks and 10-Qs missing MD&A or the financial statements."""
+        where_clause, params = _scope(ticker, filed_before, trailing="AND")
+
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT s.ticker, f.accession_number, f.filing_type, f.filed_date,
+                       array_agg(sec.section_path[1] || '|' || sec.section_path[2])
+                           FILTER (WHERE sec.id IS NOT NULL) AS part_items
+                FROM filings f
+                JOIN listed_securities s ON s.id = f.security_id
+                LEFT JOIN documents d ON d.filing_id = f.id
+                LEFT JOIN sections sec ON sec.document_id = d.id
+                {where_clause} f.status = 'embedded'
+                    AND f.filing_type = ANY(%s)
+                GROUP BY s.ticker, f.accession_number, f.filing_type, f.filed_date
+                ORDER BY s.ticker, f.filed_date DESC
+                """,
+                params + (list(REQUIRED_SECTIONS),),
+            )
+            rows = await cur.fetchall()
+
+        out = []
+        for r in rows:
+            part_items = {tuple(p.split("|", 1)) for p in r["part_items"] or [] if p}
+            missing = missing_sections(r["filing_type"], part_items)
+            if missing:
+                out.append(IncompleteFiling(
+                    ticker=r["ticker"], accession_number=r["accession_number"],
+                    filing_type=r["filing_type"], filed_date=r["filed_date"],
+                    missing=missing,
+                ))
+        return out
