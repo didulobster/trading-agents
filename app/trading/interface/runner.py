@@ -111,7 +111,7 @@ def initial_state(
     }
 
 
-def _describe_stale_budget(values: dict, max_usd: float, wall_clock_timeout_s: float) -> str | None:
+def _describe_stale_budget(values: dict, max_usd: float) -> str | None:
     """Refuse a resume whose inherited deadline has already passed, and say
     so when the inherited budget disagrees with the flags just given.
 
@@ -189,7 +189,7 @@ async def start_or_resume(
         return RunOutcome("completed", thread_id, result=state.values)
 
     if state.next:
-        stale = _describe_stale_budget(state.values, max_usd, wall_clock_timeout_s)
+        stale = _describe_stale_budget(state.values, max_usd)
         if stale:
             return RunOutcome("refused", thread_id, refusal=stale)
         result = await graph.ainvoke(None, config=config)

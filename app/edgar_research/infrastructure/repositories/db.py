@@ -52,3 +52,9 @@ async def get_connection() -> AsyncIterator[psycopg.AsyncConnection]:
     assert _pool is not None
     async with _pool.connection() as conn:
         yield conn
+
+@asynccontextmanager
+async def cursor() -> AsyncIterator[psycopg.AsyncCursor]:
+    """Yield a cursor on a pooled connection, for reads that never need `conn`."""
+    async with get_connection() as conn, conn.cursor() as cur:
+        yield cur

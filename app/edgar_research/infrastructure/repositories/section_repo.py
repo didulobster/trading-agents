@@ -1,5 +1,5 @@
 from app.edgar_research.domain.section import Section
-from .db import get_connection
+from .db import cursor, get_connection
 
 
 
@@ -44,13 +44,12 @@ class SectionRepository:
         return results
 
     async def list_for_document(self, document_id: int) -> list[Section]:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    'SELECT * FROM sections WHERE document_id = %s ORDER BY "order"',
-                    (document_id,),
-                )
-                rows = await cur.fetchall()
+        async with cursor() as cur:
+            await cur.execute(
+                'SELECT * FROM sections WHERE document_id = %s ORDER BY "order"',
+                (document_id,),
+            )
+            rows = await cur.fetchall()
         return [Section.model_validate(r) for r in rows]
     async def delete_for_document(self, document_id: int) -> int:
         """Delete a document's sections; their chunks go with them (FK cascade)."""

@@ -1,6 +1,6 @@
 from app.edgar_research.domain.filing import Filing
 from app.edgar_research.domain.values import FilingStatus
-from .db import get_connection
+from .db import cursor, get_connection
 
 class FilingRepository:
     async def upsert(self, filing: Filing) -> Filing:
@@ -69,27 +69,25 @@ class FilingRepository:
         Oldest first because the caller is walking a company forward
         through time, and a trend read the other way round is a trap.
         """
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    SELECT f.*
-                    FROM filings f
-                    JOIN listed_securities s ON s.id = f.security_id
-                    WHERE s.ticker = %s AND f.status = ANY(%s)
-                    ORDER BY f.filed_date ASC
-                    """,
-                    (ticker.upper(), [st.value for st in statuses]),
-                )
-                rows = await cur.fetchall()
+        async with cursor() as cur:
+            await cur.execute(
+                """
+                SELECT f.*
+                FROM filings f
+                JOIN listed_securities s ON s.id = f.security_id
+                WHERE s.ticker = %s AND f.status = ANY(%s)
+                ORDER BY f.filed_date ASC
+                """,
+                (ticker.upper(), [st.value for st in statuses]),
+            )
+            rows = await cur.fetchall()
         return [Filing.model_validate(r) for r in rows]
 
     async def get_by_accession(self, accession_number: str) -> Filing | None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT * FROM filings WHERE accession_number = %s",
-                    (accession_number,),
-                )
-                row = await cur.fetchone()
+        async with cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM filings WHERE accession_number = %s",
+                (accession_number,),
+            )
+            row = await cur.fetchone()
         return Filing.model_validate(row) if row else None

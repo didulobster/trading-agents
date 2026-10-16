@@ -1,5 +1,5 @@
 from app.edgar_research.domain.chunk import Chunk
-from .db import get_connection
+from .db import cursor, get_connection
 
 from dataclasses import dataclass
 from datetime import date
@@ -114,10 +114,9 @@ class ChunkRepository:
         if tickers:
             sql += " AND ticker = ANY(%s)"
             params.append([t.upper() for t in tickers])   # as search_by_embedding does
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, params)
-                found = {row["part"] for row in await cur.fetchall()}
+        async with cursor() as cur:
+            await cur.execute(sql, params)
+            found = {row["part"] for row in await cur.fetchall()}
         return {s for s in sections if s in found}
 
     async def list_without_embeddings(
@@ -126,23 +125,22 @@ class ChunkRepository:
         limit: int = 1000,
     ) -> list[Chunk]:
         """Resumability: chunks ready to be embedded."""
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                query = """
-                    SELECT c.* FROM chunks c
-                    JOIN sections s ON s.id = c.section_id
-                    JOIN documents d ON d.id = s.document_id
-                    WHERE c.embedding IS NULL
-                """
-                params: tuple = ()
-                if filing_id is not None:
-                    query += " AND d.filing_id = %s"
-                    params = (filing_id,)
-                query += " ORDER BY c.id LIMIT %s"
-                params = (*params, limit)
+        async with cursor() as cur:
+            query = """
+                SELECT c.* FROM chunks c
+                JOIN sections s ON s.id = c.section_id
+                JOIN documents d ON d.id = s.document_id
+                WHERE c.embedding IS NULL
+            """
+            params: tuple = ()
+            if filing_id is not None:
+                query += " AND d.filing_id = %s"
+                params = (filing_id,)
+            query += " ORDER BY c.id LIMIT %s"
+            params = (*params, limit)
 
-                await cur.execute(query, params)
-                rows = await cur.fetchall()
+            await cur.execute(query, params)
+            rows = await cur.fetchall()
         return [Chunk.model_validate(r) for r in rows]
 
     async def update_embeddings(self, updates: list[tuple[int, list[float]]]) -> None:
@@ -212,10 +210,9 @@ class ChunkRepository:
             LIMIT %s
         """
 
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, params)
-                rows = await cur.fetchall()
+        async with cursor() as cur:
+            await cur.execute(query, params)
+            rows = await cur.fetchall()
 
         results: list[RetrievedChunk] = []
         for row in rows:
@@ -294,10 +291,9 @@ class ChunkRepository:
             LIMIT %s
         """
 
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, params)
-                rows = await cur.fetchall()
+        async with cursor() as cur:
+            await cur.execute(sql, params)
+            rows = await cur.fetchall()
     
         results: list[RetrievedChunk] = []
         for row in rows:
