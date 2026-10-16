@@ -118,7 +118,8 @@ def ingest_cmd(
 @app.command(name="reparse")
 def reparse_cmd(accessions: list[str]):
     """Rebuild filings' sections, chunks and embeddings from their downloaded
-    documents — after a parser fix, or to resume a filing reset by hand."""
+    documents — after a parser fix, or to resume a filing reset by hand.
+    Filings not in the corpus are skipped and listed at the end."""
     asyncio.run(_reparse(accessions))
 
 @app.command(name="corpus-status")
@@ -282,15 +283,26 @@ async def _reparse(accessions: list[str]) -> None:
     user_agent = require_env("EDGAR_USER_AGENT")
     cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
 
+    skipped: list[str] = []
     await init_pool()
     try:
         async with EdgarClient(user_agent, cache_root / "filings") as edgar:
             service = _ingestion_service(edgar, user_agent, cache_root)
             for accession in accessions:
-                await service.reparse_filing(accession)
+                try:
+                    await service.reparse_filing(accession)
+                except ValueError as e:
+                    skipped.append(str(e))
+                    continue
                 typer.echo(f"Reparsed {accession}")
     finally:
         await close_pool()
+
+    if skipped:
+        typer.echo(f"Skipped {len(skipped)}:", err=True)
+        for reason in skipped:
+            typer.echo(f"  {reason}", err=True)
+        raise typer.Exit(1)
 
 
 async def _ingest(
