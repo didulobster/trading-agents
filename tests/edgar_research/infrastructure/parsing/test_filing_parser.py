@@ -203,6 +203,27 @@ def test_dominant_risk_factors_section_is_kept(tmp_path):
     assert ["Part II", "Item 1A", "Risk Factors"] in [s.section_path for s in sections]
 
 
+def test_one_paragraph_items_beat_their_toc_entries(tmp_path):
+    """Mirrors FIG's 10-Qs: a TOC entry is title + page number (two blocks),
+    a body Item answered in one paragraph is one block. The TOC copy must
+    not win and swallow the preamble before Part I."""
+    blocks = [
+        "ITEM 1.", "Financial Statements 3", "ITEM 2.", "MD&A 20",
+        "ITEM 1.", "Legal Proceedings 50", "ITEM 2.", "Unregistered Sales 51",
+        "Special note regarding forward-looking statements.",
+        "Item 1. Financial Statements", "Balance sheet.", "Income statement.",
+        "Item 2. MD&A", "Revenue grew.", "Margins rose.",
+        "Item 1. Legal Proceedings", "We are party to lawsuits.",
+        "Item 2. Unregistered Sales", "None.",
+    ]
+    html_path = _write_html(tmp_path, blocks)
+    sections = {tuple(s.section_path[:2]): s.content for s in parse_filing(html_path, form_type="10-Q")}
+
+    assert sections[("Part II", "Item 1")] == "We are party to lawsuits."
+    assert sections[("Part II", "Item 2")] == "None."
+    assert "forward-looking" not in "".join(sections.values())
+
+
 def test_dominant_section_fallback_not_applied_to_event_driven_forms(tmp_path):
     """8-K/6-K are event-driven and legitimately concentrate content under
     one item; the safety net must not suppress that."""
