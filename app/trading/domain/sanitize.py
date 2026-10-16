@@ -96,3 +96,26 @@ def sanitize_external_text(
     return SanitizedText(
         body=text, source=source, retrieved_at=date.today(), flags=flags
     )
+
+
+# A quote field asks for a verbatim span, and the model sometimes labels the span
+# as one: `"Verbatim: Operating cash flow ($10,149,273k FY2025; ...) trailed
+# net income ..."` (NFLX, 2026-08-29), where everything after the label was
+# exact. `check_quotes` compares the WHOLE field against the report, so four
+# characters of the model's own bookkeeping turned a faithful quote into
+# "cites a report but the quoted span is not in it" — on the claim that
+# debate turned on.
+#
+# Stripped in the domain rather than inside the check, so the transcript and
+# the vault memo show the span the model meant too. Only these labels, only
+# at the start, only with the colon: a report sentence that genuinely opens
+# this way still matches, because the tail is what gets compared either way.
+# Used by both DebateClaim and RiskFactor: the risk panel's `evidence_quote`
+# goes through the same containment check, so it is reachable by the same label.
+_QUOTE_LABEL = re.compile(r"^\s*(?:verbatim quote|verbatim|quoted|quote)\s*[:\-\u2014]\s*", re.I)
+
+
+def strip_quote_label(value: object) -> object:
+    if isinstance(value, str):
+        return _QUOTE_LABEL.sub("", value, count=1)
+    return value

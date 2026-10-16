@@ -468,7 +468,7 @@ async def test_system_prompt_is_identical_across_phases_for_the_same_persona():
 def test_a_verbatim_label_on_a_risk_factor_quote_is_stripped_too():
     """The panel's `evidence_quote` is checked by the same `_norm`
     containment as a debate claim, so it is reachable by the same
-    model-written label — see domain/debate.py's `_QUOTE_LABEL`."""
+    model-written label — see domain/sanitize.py's `strip_quote_label`."""
     factor = RiskFactor(
         factor_id="RF00",
         text="x",
