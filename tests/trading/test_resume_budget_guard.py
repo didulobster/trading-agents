@@ -27,11 +27,11 @@ def _budget(max_usd=1.10, **offset):
 
 
 def test_a_live_deadline_with_matching_budget_proceeds():
-    assert _describe_stale_budget({"budget": _budget(minutes=20)}, 1.10, 1800.0) is None
+    assert _describe_stale_budget({"budget": _budget(minutes=20)}, 1.10) is None
 
 
 def test_an_expired_deadline_refuses():
-    msg = _describe_stale_budget({"budget": _budget(hours=-17)}, 1.10, 1800.0)
+    msg = _describe_stale_budget({"budget": _budget(hours=-17)}, 1.10)
     assert msg is not None
     assert "REFUSING TO RESUME" in msg
 
@@ -40,7 +40,7 @@ def test_the_refusal_explains_the_cost_rather_than_just_saying_no():
     """The whole point is that the failure was expensive and non-obvious.
     A bare 'cannot resume' would send the reader to the source to find out
     why the deadline did not simply restart."""
-    msg = _describe_stale_budget({"budget": _budget(hours=-2)}, 1.10, 1800.0)
+    msg = _describe_stale_budget({"budget": _budget(hours=-2)}, 1.10)
     assert "absolute instant" in msg
     assert "no memo" in msg
     assert "--thread-id" in msg  # tells them what to do instead
@@ -49,19 +49,19 @@ def test_the_refusal_explains_the_cost_rather_than_just_saying_no():
 def test_an_ignored_max_usd_flag_is_called_out():
     """Silently ignoring a flag the operator just typed is how $0.4069 got
     spent against a cap the operator thought they had raised."""
-    msg = _describe_stale_budget({"budget": _budget(minutes=20)}, 1.40, 1800.0)
+    msg = _describe_stale_budget({"budget": _budget(minutes=20)}, 1.40)
     assert msg is not None
     assert "IGNORED" in msg
     assert "1.40" in msg and "1.10" in msg
 
 
 def test_a_matching_max_usd_is_not_called_out():
-    assert _describe_stale_budget({"budget": _budget(1.40, minutes=20)}, 1.40, 1800.0) is None
+    assert _describe_stale_budget({"budget": _budget(1.40, minutes=20)}, 1.40) is None
 
 
 def test_a_checkpoint_without_a_budget_proceeds():
     """Pre-Phase-8 threads carry no budget at all; they must stay resumable."""
-    assert _describe_stale_budget({}, 1.10, 1800.0) is None
+    assert _describe_stale_budget({}, 1.10) is None
 
 
 def test_humanize_reads_naturally_at_both_scales():

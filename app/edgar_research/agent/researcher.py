@@ -86,7 +86,7 @@ def _get_watchlist_entry(ticker: str) -> dict | None:
             return entry
     return None
 
-def _build_news_prompt(ticker: str, news_text: str) -> str:
+def _build_news_prompt(ticker: str) -> str:
     """
     Build the news assessment prompt with the watchlist context filled in.
     If the ticker isn't in the watchlist, uses a generic framing.
@@ -504,7 +504,7 @@ def main() -> None:
     task = f"Today's date is {today}. "
     ticker = args.ticker
     if args.news:
-        prompt = _build_news_prompt(ticker, args.news)
+        prompt = _build_news_prompt(ticker)
         task += f"Assess this news for {ticker}:\n\n{args.news}"
         mode = "news"
     else:
