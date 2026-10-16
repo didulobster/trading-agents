@@ -307,7 +307,7 @@ async def test_synthesizer_refuses_to_date_a_memo_without_as_of():
     state = _synth_state()
     del state["as_of_date"]
 
-    with pytest.raises(ValueError, match="refusing to date a memo"):
+    with pytest.raises(ValueError, match="refusing to run the synthesizer"):
         await nodes.synthesizer_node(state)
 
 
