@@ -63,6 +63,13 @@ def _item_value(item_no: str) -> float:
     return int(m.group(1)) + (0.5 if m.group(2) else 0)
 
 
+def _item_order(key: tuple[str, str]) -> tuple[str, int, str]:
+    """Filing order of a (Part, Item number) key: Part I 1, 1A, 1B, 2, ... Part II 1."""
+    part, item_no = key
+    m = re.match(r"(\d+)([A-Z]?)", item_no)
+    return part, int(m.group(1)), m.group(2)
+
+
 def _quarterly_parts(candidates: list[tuple[int, str, str]]) -> dict[int, str]:
     """Part of each 10-Q Item heading, by block index, from the Item sequence.
 
@@ -427,14 +434,22 @@ def _locate_item_headings(
         gap = next_idx - idx - 1  # blocks of body between this heading and next
         occurrence_scores.setdefault(key, []).append((idx, title, gap))
 
+    # Items are picked in their numbered order, each from the copies after
+    # the previous pick: a real section can't precede an earlier Item's.
+    # Scored alone, FIG's one-paragraph Part II Items 1-4 (gap 1) lost to
+    # their TOC entries (title + page number, gap 2), and TOC Item 4 took
+    # the 10K-char preamble before Part I.
     located: list[tuple[int, str, str]] = []
-    for (_, item_no), occurrences in occurrence_scores.items():
+    floor = -1
+    for key in sorted(occurrence_scores, key=_item_order):
+        occurrences = occurrence_scores[key]
+        after = [o for o in occurrences if o[0] > floor] or occurrences
         # Best occurrence = the one with the largest body gap. Ties (e.g.
         # two equally-short "Not applicable" stub sections) prefer the
         # later position, since TOC entries always precede real content.
-        best = max(occurrences, key=lambda x: (x[2], x[0]))
-        idx, title, _ = best
-        located.append((idx, item_no, title))
+        idx, title, _ = max(after, key=lambda x: (x[2], x[0]))
+        located.append((idx, key[1], title))
+        floor = max(floor, idx)
 
     located.sort(key=lambda x: x[0])
     return located
