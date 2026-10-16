@@ -697,14 +697,21 @@ async def _dispatch(name: str, inputs: dict) -> str:
     headers = {"X-API-Key": api_key} if api_key else {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers) as http:
         await _warn_if_server_is_stale(http)
+
+        async def _call(method: str, path: str, label: str, **kw) -> httpx.Response | str:
+            """The response, or the error string the agent reads instead."""
+            resp = await getattr(http, method)(f"{API_BASE}{path}", **kw)
+            if resp.status_code != 200:
+                return f"Error from {label}: {resp.status_code} — {resp.text[:500]}"
+            return resp
+
         if name == "check_corpus":
-            resp = await http.get(
-                f"{API_BASE}/corpus-status",
+            resp = await _call(
+                "get", "/corpus-status", "/check_corpus",
                 params={"ticker": inputs["ticker"], **_as_of_bound()},
             )
-            if resp.status_code != 200:
-                return f"Error from /check_corpus: {resp.status_code} — {resp.text[:500]}"
-
+            if isinstance(resp, str):
+                return resp
             return resp.text
 
         if name == "ingest_ticker":
@@ -715,10 +722,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
             payload = {"ticker": inputs["ticker"], "limit": inputs.get("limit") or 3}
             if inputs.get("form_type"):
                 payload["form_type"] = inputs["form_type"]
-            resp = await http.post(f"{API_BASE}/ingest", json=payload)
-            if resp.status_code != 200:
-                return f"Error from /ingest_ticker: {resp.status_code} — {resp.text[:500]}"
-
+            resp = await _call("post", "/ingest", "/ingest_ticker", json=payload)
+            if isinstance(resp, str):
+                return resp
             return resp.text
 
         if name == "ask_edgar":
@@ -732,9 +738,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
                 "k": ASK_EDGAR_K,
             }
             payload.update(_as_of_bound())
-            resp = await http.post(f"{API_BASE}/ask", json=payload)
-            if resp.status_code != 200:
-                return f"Error from /ask: {resp.status_code} — {resp.text[:500]}"
+            resp = await _call("post", "/ask", "/ask", json=payload)
+            if isinstance(resp, str):
+                return resp
             _record_delegated_usage(resp)
 
             data = resp.json()
@@ -788,9 +794,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
             # top of it. A model asking for metrics "through 2026" during a
             # run dated March 2026 gets March, not 2026.
             payload = {**inputs, **_clamped_window(inputs)}
-            resp = await http.post(f"{API_BASE}/extract", json=payload)
-            if resp.status_code != 200:
-                return f"Error from /extract_metrics: {resp.status_code} — {resp.text[:500]}"
+            resp = await _call("post", "/extract", "/extract_metrics", json=payload)
+            if isinstance(resp, str):
+                return resp
             _record_delegated_usage(resp)
             return resp.text
 
@@ -802,9 +808,9 @@ async def _dispatch(name: str, inputs: dict) -> str:
             # be the same thing but makes the wire format depend on a null.
             if inputs.get("form_types"):
                 payload["form_types"] = inputs["form_types"]
-            resp = await http.post(f"{API_BASE}/latest-filings", json=payload)
-            if resp.status_code != 200:
-                return f"Error from /latest-filings: {resp.status_code} — {resp.text[:500]}"
+            resp = await _call("post", "/latest-filings", "/latest-filings", json=payload)
+            if isinstance(resp, str):
+                return resp
             return resp.text
 
     return f"Unknown tool: {name}"
