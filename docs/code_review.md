@@ -241,17 +241,17 @@ Rejecting these is part of the review — each looks like duplication and is not
 
 Cheap and independent first; the reorganisation last.
 
-- [ ] `ruff check app --select F401 --fix`, then the two `main.py` import fixes by hand (#10)
-- [ ] Delete the three stale `STEP 2` comments and fix the `number_matching.py` pointer (#11)
-- [ ] Delete the eight uncalled definitions; decide `crash_marker`'s fate (#9)
+- [x] `ruff check app --select F401 --fix`, then the two `main.py` import fixes by hand (#10)
+- [x] Delete the three stale `STEP 2` comments and fix the `number_matching.py` pointer (#11)
+- [x] Delete the eight uncalled definitions; decide `crash_marker`'s fate (#9)
 - [ ] Resolve the two dead parameters (#12)
-- [ ] `require_as_of` in `guards.py`, four call sites (#4)
-- [ ] `_retrieval()` in `main.py`, two call sites (#5)
+- [x] `require_as_of` in `guards.py`, four call sites (#4)
+- [x] `_retrieval()` in `main.py`, two call sites (#5)
 - [ ] `cursor()` in `db.py`, 23 call sites (#8)
 - [ ] `_call` helper in `tools.py._dispatch` (#6)
-- [ ] Move `_QUOTE_LABEL` to `domain/sanitize.py` (#7)
-- [ ] **Move `ANALYST_OUTPUTS` to `domain/trading_state.py`; convert the 9 deferred imports to top-level ones and delete their apologies (#1)**
-- [ ] Extract `vault.py` / usage helpers out of `researcher.py` (#2)
-- [ ] Split the shared third of `debate_port.py` into `evidence.py` (#3)
+- [x] Move `_QUOTE_LABEL` to `domain/sanitize.py` (#7)
+- [x] **Move `ANALYST_OUTPUTS` to `domain/trading_state.py`; convert the 9 deferred imports to top-level ones and delete their apologies (#1)**
+- [x] Extract `vault.py` / usage helpers out of `researcher.py` (#2)
+- [x] Split the shared third of `debate_port.py` into `evidence.py` (#3)
 
 Everything above #1 is local and safely reviewable in one PR each. #1 is the one with real leverage: it is a five-line move that deletes nine workarounds and the comments explaining them.
