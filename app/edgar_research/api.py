@@ -56,6 +56,15 @@ def _decomposer(state) -> QueryDecomposer:
     return getattr(state, "decomposer", None) or QueryDecomposer()
 
 
+def _retrieval(state) -> RetrievalService:
+    """A retrieval service on the server's shared embedder and decomposer."""
+    return RetrievalService(
+        embedding_service=_embedder(state),
+        chunk_repo=ChunkRepository(),
+        decomposer=_decomposer(state),
+    )
+
+
 # ---- Request / response models ----
 
 class AskRequest(BaseModel):
@@ -178,13 +187,7 @@ async def ask(req: AskRequest, request: Request, response: Response) -> AskRespo
     if not req.question.strip():
         raise HTTPException(400, "question must not be empty")
 
-    embedder = _embedder(request.app.state)
-    chunk_repo = ChunkRepository()
-    decomposer = _decomposer(request.app.state)
-    retrieval = RetrievalService(
-        embedding_service=embedder, 
-        chunk_repo=chunk_repo,
-        decomposer=decomposer)
+    retrieval = _retrieval(request.app.state)
 
     sections = req.section_path_contains
     if sections:
@@ -192,7 +195,7 @@ async def ask(req: AskRequest, request: Request, response: Response) -> AskRespo
         # reads to the caller as "the filing doesn't say" rather than "you
         # spelled the section wrong". Drop the filter and say so, instead of
         # spending the answer call on no excerpts at all.
-        matched = await chunk_repo.sections_with_content(sections, req.tickers)
+        matched = await retrieval.chunk_repo.sections_with_content(sections, req.tickers)
         if not matched:
             logging.warning(
                 "/ask: no chunk is filed under %s; answering without the "
@@ -215,7 +218,7 @@ async def ask(req: AskRequest, request: Request, response: Response) -> AskRespo
         model=claude_model)
     # BOTH calls: the decomposer's rewrite is billed just like the answer.
     _report_usage(
-        response, (claude_model, result.usage), (decomposer.model, decomposition.usage)
+        response, (claude_model, result.usage), (retrieval.decomposer.model, decomposition.usage)
     )
 
     report = verify_answer(
@@ -250,13 +253,7 @@ async def ask(req: AskRequest, request: Request, response: Response) -> AskRespo
 
 @router.post("/extract", response_model=FinancialMetrics, dependencies=SPENDS_MONEY)
 async def extract(req: ExtractRequest, request: Request, response: Response) -> FinancialMetrics:
-    embedder = _embedder(request.app.state)
-    chunk_repo = ChunkRepository()
-    decomposer = _decomposer(request.app.state)
-    retrieval = RetrievalService(
-        embedding_service=embedder, 
-        chunk_repo=chunk_repo,
-        decomposer=decomposer)
+    retrieval = _retrieval(request.app.state)
     extractor = MetricsExtractor()
 
     # The window defaults to filed_date ± 30 days; a caller that names its

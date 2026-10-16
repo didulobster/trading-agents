@@ -20,9 +20,10 @@ which a router that reads the wall clock itself could not do.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from app.trading.domain.budget import CostEvent, RunBudget, RunTermination, total_spend
+from app.trading.domain.trading_state import TradingState
 
 
 def check_run_guards(
@@ -65,3 +66,18 @@ def check_run_guards(
     if now >= budget.deadline_utc:
         return RunTermination.DEADLINE_EXCEEDED
     return None
+
+
+def require_as_of(state: TradingState, leg: str) -> date:
+    """The run's analysis date, or refuse. Every source in the pipeline is
+    capped at this date; `date.today()` belongs at the CLI boundary and
+    nowhere else, because a silent fallback is how lookahead gets into a
+    historical run (Gate C, trading-agent-known-gaps.md item 16)."""
+    as_of = state.get("as_of_date")
+    if as_of is None:
+        raise ValueError(
+            f"as_of_date missing from TradingState — refusing to run the "
+            f"{leg} leg unbounded. Reading a source without an explicit "
+            f"upper bound is a lookahead bug."
+        )
+    return as_of

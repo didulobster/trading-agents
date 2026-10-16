@@ -125,8 +125,8 @@ class _StubChunkRepo:
 
 def _stub_ask(monkeypatch, repo, seen_filters: list):
     class _Retrieval:
-        def __init__(self, **kw):
-            pass
+        chunk_repo = repo
+        decomposer = type("D", (), {"model": "m"})()
 
         async def retrieve_full(self, question, k=8, filters=None):
             seen_filters.append(filters.section_path_contains)
@@ -147,10 +147,7 @@ def _stub_ask(monkeypatch, repo, seen_filters: list):
         def summary(self):
             return ""
 
-    monkeypatch.setattr(api, "ChunkRepository", lambda: repo)
-    monkeypatch.setattr(api, "RetrievalService", _Retrieval)
-    monkeypatch.setattr(api, "_embedder", lambda state: None)
-    monkeypatch.setattr(api, "_decomposer", lambda state: type("D", (), {"model": "m"})())
+    monkeypatch.setattr(api, "_retrieval", lambda state: _Retrieval())
     monkeypatch.setattr(api, "_report_usage", lambda *a, **k: None)
     monkeypatch.setattr(api, "verify_answer", lambda *a, **k: _Report())
 

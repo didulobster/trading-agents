@@ -14,7 +14,7 @@ from datetime import date, datetime, timezone
 from app.shared.llm import get_client
 
 from app.trading.application import risk_nodes
-from app.trading.application.guards import check_run_guards
+from app.trading.application.guards import check_run_guards, require_as_of
 from app.trading.application.risk_ledger import (
     build_risk_ledger,
     unexpected_missing_scores,
@@ -102,18 +102,9 @@ async def graceful_abort_node(state: TradingState) -> dict:
 
 
 async def fundamentals_node(state: TradingState) -> dict:
-    as_of = state.get("as_of_date")
-    if as_of is None:
-        # Same rule as technical_node and news_node, and the last leg to
-        # adopt it. This node used to call date.today() inside the port and
-        # never see the run's analysis date at all, so a historical run
-        # bounded its prices and news and let its most heavily-weighted
-        # analyst read whatever had been filed since.
-        raise ValueError(
-            "as_of_date missing from TradingState — refusing to run the "
-            "fundamentals agent unbounded. Filing retrieval without an "
-            "explicit upper bound is a lookahead bug."
-        )
+    # The last leg to adopt the rule: this node used to let the port call
+    # date.today(), so historical runs read filings made since.
+    as_of = require_as_of(state, "fundamentals")
     print(f"[fundamentals] running for {state['ticker']} as of {as_of}")
     # The budget and the run's earlier spend go in so the agent loop can stop
     # itself: the edge guard around this node cannot see inside it.
@@ -138,17 +129,7 @@ async def fundamentals_node(state: TradingState) -> dict:
 
 async def technical_node(state: TradingState) -> dict:
     ticker = state["ticker"]
-    as_of = state.get("as_of_date")
-    if as_of is None:
-        # Same rule as news_node, for the same reason: a silent fallback to
-        # "whatever the vendor considers current" is exactly how lookahead
-        # contamination gets into a historical probe. See Gate C,
-        # trading-agent-known-gaps.md item 16.
-        raise ValueError(
-            "as_of_date missing from TradingState — refusing to fetch price "
-            "history unbounded. A technical fetch without an explicit upper "
-            "bound is a lookahead bug."
-        )
+    as_of = require_as_of(state, "technical")
     print(f"[technical] running for {ticker} as of {as_of}")
 
     try:
@@ -196,15 +177,7 @@ async def technical_node(state: TradingState) -> dict:
 
 async def news_node(state: TradingState) -> dict:
     ticker = state["ticker"]
-    as_of = state.get("as_of_date")
-    if as_of is None:
-        # Fail loud rather than defaulting to today: a silent
-        # `or date.today()` fallback is precisely how lookahead
-        # contamination gets into a backtest.
-        raise ValueError(
-            "as_of_date missing from TradingState — refusing to run unbounded. "
-            "A news fetch without an explicit upper bound is a lookahead bug."
-        )
+    as_of = require_as_of(state, "news")
     print(f"[news] running for {ticker} as of {as_of}")
 
     raw, window_start = await fetch_company_news(ticker, as_of)
@@ -661,17 +634,9 @@ def _verify_or_raise(memo, state, ledger, debate_turns):
 
 async def synthesizer_node(state: TradingState) -> dict:
     print(f"[synthesizer] running for {state['ticker']}")
-    as_of = state.get("as_of_date")
-    if as_of is None:
-        # Same rule as news_node, for the same reason: date.today() belongs at
-        # the CLI boundary and nowhere else. Defaulting here would silently
-        # misdate every historical probe — the memo would claim to be current
-        # as of today while describing a window from months earlier.
-        raise ValueError(
-            "as_of_date missing from TradingState — refusing to date a memo by "
-            "wall-clock time. The memo's data_as_of_date must be the run's "
-            "analysis date, not whenever the synthesizer happened to execute."
-        )
+    # Defaulting here would date the memo by wall-clock time while it
+    # describes a window from months earlier.
+    as_of = require_as_of(state, "synthesizer")
     missing = sorted(
         name for name, key in ANALYST_OUTPUTS.items() if state.get(key) is None
     )
