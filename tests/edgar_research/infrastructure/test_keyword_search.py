@@ -93,7 +93,13 @@ async def repo(monkeypatch):
     async def _this_connection():
         yield conn
 
+    @asynccontextmanager
+    async def _this_cursor():
+        async with conn.cursor() as cur:
+            yield cur
+
     monkeypatch.setattr(chunk_repo, "get_connection", _this_connection)
+    monkeypatch.setattr(chunk_repo, "cursor", _this_cursor)
     yield ChunkRepository()
     await conn.close()
 

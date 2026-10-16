@@ -1,5 +1,5 @@
 from app.edgar_research.domain.listed_security import ListedSecurity
-from .db import get_connection
+from .db import cursor, get_connection
 
 class ListedSecurityRepository:
     """Persistence for ListedSecurity."""
@@ -34,20 +34,18 @@ class ListedSecurityRepository:
         })
 
     async def get_by_cik(self, cik: str) -> ListedSecurity | None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT * FROM listed_securities WHERE cik = %s",
-                    (cik,),
-                )
-                row = await cur.fetchone()
+        async with cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM listed_securities WHERE cik = %s",
+                (cik,),
+            )
+            row = await cur.fetchone()
         return ListedSecurity.model_validate(row) if row else None
     async def get_by_id(self, security_id: int) -> ListedSecurity | None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT * FROM listed_securities WHERE id = %s",
-                    (security_id,),
-                )
-                row = await cur.fetchone()
+        async with cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM listed_securities WHERE id = %s",
+                (security_id,),
+            )
+            row = await cur.fetchone()
         return ListedSecurity.model_validate(row) if row else None

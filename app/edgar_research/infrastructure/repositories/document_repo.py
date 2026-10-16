@@ -1,5 +1,5 @@
 from app.edgar_research.domain.document import Document
-from .db import get_connection
+from .db import cursor, get_connection
 
 class DocumentRepository:
     async def insert(self, document: Document) -> Document:
@@ -30,11 +30,10 @@ class DocumentRepository:
         })
 
     async def list_for_filing(self, filing_id: int) -> list[Document]:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT * FROM documents WHERE filing_id = %s ORDER BY id",
-                    (filing_id,),
-                )
-                rows = await cur.fetchall()
+        async with cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM documents WHERE filing_id = %s ORDER BY id",
+                (filing_id,),
+            )
+            rows = await cur.fetchall()
         return [Document.model_validate(r) for r in rows]
