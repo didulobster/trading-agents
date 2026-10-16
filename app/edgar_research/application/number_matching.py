@@ -14,8 +14,9 @@ displayed precision (text "10874.36", number "10,874.4").
 
 The trading pipeline's grounding checks (evidence.unbacked_figures,
 evidence.unmatched_by_tolerance) still carry their
-own matchers, with deliberately different tolerances; folding them in is a
-separate change (docs/code_review.md, Medium #6).
+own matchers, with deliberately different tolerances. Keep them separate:
+each implements a different rule, and merging them would silently re-tolerance
+two guards.
 """
 
 from __future__ import annotations

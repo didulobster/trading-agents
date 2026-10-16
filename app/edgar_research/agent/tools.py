@@ -20,9 +20,9 @@ from app.shared.token_usage import USAGE_HEADER, TokenUsage, decode_usage_header
 from app.edgar_research.application.number_matching import value_in_text, value_spans
 
 
-# Base URL of your running FastAPI server. Override when you wire step 2.
 logger = logging.getLogger(__name__)
 
+# Base URL of the running FastAPI server.
 API_BASE = "http://localhost:8000"
 HTTP_TIMEOUT = 300.0  # ingestion can be slow; give it room
 
