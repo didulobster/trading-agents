@@ -3076,8 +3076,13 @@ attack on the opponent as a surrender to them. Prose is not a channel.
    side moved. `_debate_caveats` adds the same as a memo `data_gap`. This
    half holds regardless of whether the prompt change ever moves the model.
 
-**Not verified live.** No pipeline run was made for this — the change is
-covered by unit tests only, and whether debaters actually start populating
-`concession_trigger` is unmeasured. The reporting fix (3) is deliberately
+**Not verified live** at the time — unit tests only. *Since verified from
+the vault (2026-10-17, no new spend):* every one of the 18 debate transcripts
+written 2026-08-30 to 2026-09-13 records at least one structurally-justified
+concession — 43 in total, 1-4 per debate, all partial, none full — across
+ACN, AVGO, FIG, MSFT and NFLX and both the deepseek-v4-flash and
+gpt-5.6-luna debate models. None carries an `unresolved_concession` flag, so
+every trigger named a real opposing claim. Against 0 in the 42 transcripts
+before the fix, debaters do populate `concession_trigger`. The reporting fix (3) is deliberately
 independent of that: if the model never fills the field, the artifacts now
 say "nothing was recorded" instead of "nobody moved".
