@@ -95,6 +95,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | P2 filing-date hints (`date_hints.py`) | 0.84 hybrid | 0.87 hybrid | 8k_by_date hit@8 0.50 -> 0.75; `acn-notes-offering-after-period-end` hybrid rank 9 -> 5. No other question's rank changed. The vague 'raise new debt recently' question has no date and still ranks 15. hit@1 0.45, MRR 0.57 unchanged |
 | 2026-10-17 | Measured the decomposer (`--decompose`), no retrieval change | 0.87 hybrid | 0.84 decomposed | Production path is a wash vs plain hybrid: 4 better, 3 worse, 1 lost from top 8. Multi-part still unfixed because 3 of 4 never trip the regex. Cost $0.0016 |
 | 2026-10-17 | Compound-question trigger (`is_compound`, PR #175), rejected | multi_part 0.75 decomposed | multi_part 0.50 decomposed | All 3 targets worse or still missed; `acn-rpo-and-cash` is blocked by the balance-sheet table chunk, not by decomposition. Decomposer output varies run to run |
+| 2026-10-17 | P1 contextual chunk prefix (PR #176) | 0.87 hybrid | 0.87 hybrid | Target `acn-cash-fy25` still missed. hit@5 0.74 -> 0.77, hit@1 0.45 -> 0.39, MRR 0.57 -> 0.54. 6 questions up, 5 down. No clear gain |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -139,6 +140,30 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - 15 of 31 questions trip the regex, mostly on "compared with"; plain numeric-table questions get an LLM rewrite they did not need. The rewrite helped some of them and hurt others, with no clear pattern at n=31.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
+
+### Contextual chunk prefix measured (2026-10-17, PR #176)
+
+ACN and AVGO re-embedded with `"{ticker} {form} filed {date} | {section}"` above each chunk
+(1,363 chunks, about $0.014). Plain hybrid, which is deterministic:
+
+| | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|
+| hybrid before | 0.45 | 0.74 | 0.87 | 0.57 |
+| hybrid with prefix | 0.39 | 0.77 | 0.87 | 0.54 |
+| vector before | 0.35 | 0.68 | 0.77 | 0.50 |
+| vector with prefix | 0.26 | 0.68 | 0.87 | 0.43 |
+
+- The target was not fixed: `acn-cash-fy25` and `acn-rpo-and-cash` are still missed by every mode.
+  Missing filing context is not why the balance-sheet chunk is unreachable.
+- Vector recall at 8 rose (0.77 -> 0.87) but its top ranks got worse (hit@1 0.35 -> 0.26).
+  The shared header seems to pull chunks of one filing closer together: more right chunks
+  land somewhere in the top 8, fewer land first.
+- Hybrid moved 6 questions up (avgo-auditor 4 -> 2, avgo-rpo 2 -> 1, acn-opcash-and-revenue
+  8 -> 5, avgo-buybacks 8 -> 6, avgo-revenue-and-opcash 5 -> 4, avgo-auditor-and-icfr 5 -> 4) and
+  5 down (avgo-icfr 1 -> 2, acn-icfr 1 -> 3, avgo-supplier-dependence 1 -> 2, avgo-repurchases-fy24
+  2 -> 3, avgo-contingent-liabilities 19 -> beyond 20). hit@8 is unchanged.
+- Net: no clear gain, and a cost in first-rank precision. The dense-table miss needs a
+  different diagnosis (what does outrank that chunk, and why).
 
 ### Compound-question trigger tried and rejected (2026-10-17, PR #175)
 
