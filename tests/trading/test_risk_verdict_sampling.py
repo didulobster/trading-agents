@@ -38,6 +38,17 @@ from app.trading.infrastructure.synthesis_port import (
     SynthesisReferenceError,
 )
 
+
+@pytest.fixture(autouse=True)
+def _three_verdict_samples(monkeypatch):
+    """These scenarios are written as 3-sample votes. Pinned so they keep
+    testing what they say when the production sample count changes."""
+    monkeypatch.setattr(nodes, "RISK_VERDICT_SAMPLES", 3)
+
+
+# Read at import, before the fixture above pins the module to 3.
+PRODUCTION_SAMPLES = nodes.RISK_VERDICT_SAMPLES
+
 AS_OF = date(2026, 8, 22)
 
 
@@ -461,3 +472,44 @@ async def test_agreement_is_measured_over_surviving_trials_only(monkeypatch):
     assert memo.verdict_samples == ["hold", "hold"]
     assert memo.verdict_agreement == 0.75
     assert any("dropped by the citation/fabrication guard" in g for g in memo.data_gaps)
+
+
+# ---------------------------------------------------------------------------
+# The production count: 5, so the shrunk agreement has more than three values
+# ---------------------------------------------------------------------------
+
+
+def test_production_runs_five_verdict_samples():
+    assert PRODUCTION_SAMPLES == 5
+
+
+@pytest.mark.anyio
+async def test_five_samples_split_three_two_take_the_majority(monkeypatch):
+    monkeypatch.setattr(nodes, "RISK_VERDICT_SAMPLES", PRODUCTION_SAMPLES)
+    _stub_extra_panel_samples(monkeypatch)
+    _stub_synthesis_sequence(monkeypatch, [
+        _memo("ACN", v, tag=str(i), quality=0.9)
+        for i, v in enumerate([Verdict.SELL, Verdict.HOLD, Verdict.SELL, Verdict.HOLD, Verdict.SELL])
+    ])
+
+    memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
+
+    assert memo.verdict == Verdict.SELL
+    assert memo.verdict_samples == ["sell", "hold", "sell", "hold", "sell"]
+    assert memo.verdict_agreement == 0.57  # (3+1)/(5+2)
+
+
+@pytest.mark.anyio
+async def test_five_samples_split_two_two_one_are_unresolved(monkeypatch):
+    monkeypatch.setattr(nodes, "RISK_VERDICT_SAMPLES", PRODUCTION_SAMPLES)
+    _stub_extra_panel_samples(monkeypatch)
+    _stub_synthesis_sequence(monkeypatch, [
+        _memo("ACN", v, tag=str(i), quality=0.9)
+        for i, v in enumerate([Verdict.HOLD, Verdict.SELL, Verdict.HOLD, Verdict.SELL, Verdict.BUY])
+    ])
+
+    memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
+
+    assert memo.verdict == Verdict.UNRESOLVED
+    assert memo.verdict_agreement == 0.43  # (2+1)/(5+2)
+

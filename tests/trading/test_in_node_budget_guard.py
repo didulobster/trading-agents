@@ -30,6 +30,13 @@ from tests.trading.test_risk_verdict_sampling import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _three_verdict_samples(monkeypatch):
+    """These scenarios are written as 3-sample votes. Pinned so they keep
+    testing what they say when the production sample count changes."""
+    monkeypatch.setattr(nodes, "RISK_VERDICT_SAMPLES", 3)
+
+
 def _event(usd: float, event_id: str = "earlier:1") -> CostEvent:
     return CostEvent(
         event_id=event_id, node="earlier", model="m", input_tokens=0, output_tokens=0,

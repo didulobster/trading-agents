@@ -37,6 +37,13 @@ from tests.trading.test_risk_verdict_sampling import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _three_verdict_samples(monkeypatch):
+    """These scenarios are written as 3-sample votes. Pinned so they keep
+    testing what they say when the production sample count changes."""
+    monkeypatch.setattr(nodes, "RISK_VERDICT_SAMPLES", 3)
+
+
 def _synthesis_calls(monkeypatch, outcomes):
     """run_synthesis returns or raises outcomes[0], outcomes[1], ... in order."""
     calls = iter(outcomes)

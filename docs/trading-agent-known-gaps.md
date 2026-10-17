@@ -3137,3 +3137,12 @@ The ~$0.07/run figure above is Haiku-era. On gpt-5.6-luna one extra sample
 N=5 adds about **$0.02-0.03/run** plus wall clock for two more sequential
 panels. Not changed here: that is ongoing spend and a decision for the owner.
 
+*Raised to 5 the same day, by the owner's decision.* One sample took
+45-50 s in the same FIG run (`trading-FIG-postreview-20260913`, 07:09:06 to
+07:11:29 for three), so two more add ~95 s against the 1800 s deadline.
+Votes now need 3 of 5; a 2-2-1 split is UNRESOLVED. Shrunk agreement takes
+{0.86, 0.71, 0.57} on a majority and 0.43 on a 2-2-1. The sampling tests
+pin `RISK_VERDICT_SAMPLES = 3` because their scenarios are written as
+3-sample votes; without the pin, samples 4 and 5 ran out of stubbed memos
+and were silently dropped as errored, and most of those tests still passed.
+
