@@ -44,7 +44,7 @@ retrieval.
 - [ ] **Rerank.** Fetch ~30 candidates, rerank with a cross-encoder, keep 8.
   Only worth building if the gold set shows the right chunk at rank 9-30.
   Check that first; do not build on a guess.
-- [ ] **Split compound questions before retrieval, not only on regex signals.**
+- [ ] **Split compound questions before retrieval, not only on regex signals.** (Measured 2026-10-17: 3 of the 4 multi-part gold questions never trip the regex, so the decomposer never sees them.)
   A 3-part question ranked the ICFR chunk nowhere; asked alone it ranked 1.
   The regex gate in `query_decomposer` misses compound questions with no
   trigger word.
@@ -93,6 +93,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | P0 baseline, gold set grown to 30 questions | - | 0.80 hybrid | vector 0.73, keyword 0.60, hybrid 0.80. Hybrid hit@1 0.43, MRR 0.54. Superseded by the next row: two gold entries undercounted answering chunks |
 | 2026-10-17 | P0 baseline, 31 questions after gold fixes | - | 0.84 hybrid | vector 0.77, keyword 0.61, hybrid 0.84. Hybrid hit@1 0.45, MRR 0.57. Reference for later changes |
 | 2026-10-17 | P2 filing-date hints (`date_hints.py`) | 0.84 hybrid | 0.87 hybrid | 8k_by_date hit@8 0.50 -> 0.75; `acn-notes-offering-after-period-end` hybrid rank 9 -> 5. No other question's rank changed. The vague 'raise new debt recently' question has no date and still ranks 15. hit@1 0.45, MRR 0.57 unchanged |
+| 2026-10-17 | Measured the decomposer (`--decompose`), no retrieval change | 0.87 hybrid | 0.84 decomposed | Production path is a wash vs plain hybrid: 4 better, 3 worse, 1 lost from top 8. Multi-part still unfixed because 3 of 4 never trip the regex. Cost $0.0016 |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -120,6 +121,23 @@ What it shows:
 - 8-K questions are the weakest tag: the vague wording ("raise new debt recently") ranks 15 hybrid, and "after May 31, 2026" ranks 9. Only wording that names the notes or the month ranks 1. Supports the filing-date item (P2).
 - Multi-part: `acn-rpo-and-cash` is missed by every mode (its two answers sit in different chunks). This run does not use the decomposer, so it is a floor.
 - `acn-cash-fy25` (strict statement table) is still missed by vector and hybrid, keyword rank 16. See below.
+
+### Decomposer measured (2026-10-17, `eval_retrieval --decompose`)
+
+Production path (`retrieve_full`) vs plain hybrid, 31 questions. The run made 15 decomposer
+calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
+
+| | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|
+| hybrid (no decomposer) | 0.45 | 0.74 | 0.87 | 0.57 |
+| decomposed (production) | 0.42 | 0.71 | 0.84 | 0.55 |
+
+- A wash overall, slightly negative. Four questions improved, three got worse, and one fell out of the top 8.
+  Better: `avgo-revenue-fy25` 3 -> 1, `avgo-rpo` 2 -> 1, `avgo-revenue-and-opcash` 5 -> 3, `avgo-buybacks` 8 -> 6.
+  Worse: `avgo-supplier-dependence` 1 -> 10 (an "expand" rewrite for "supply chain"), `acn-revenue-fy26` 1 -> 2, `acn-cash-fy25-prose` 1 -> 3.
+- 15 of 31 questions trip the regex, mostly on "compared with"; plain numeric-table questions get an LLM rewrite they did not need. The rewrite helped some of them and hurt others, with no clear pattern at n=31.
+- Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
+- Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
 
 ### The two misses, examined (2026-10-17)
 
