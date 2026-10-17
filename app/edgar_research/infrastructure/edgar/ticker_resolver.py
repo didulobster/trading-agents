@@ -20,6 +20,7 @@ class TickerResolver:
         self.user_agent = user_agent
         self.cache_path = cache_path
         self._index: dict[str, str] | None = None # ticker (upper) -> cik (padded)
+        self._names: dict[str, str] = {}           # ticker (upper) -> SEC company title
 
     async def _load(self) -> dict[str, str]:
         if self._index is not None:
@@ -35,6 +36,7 @@ class TickerResolver:
             for entry in raw.values()
         }
         self._index = index
+        self._names = {entry["ticker"].upper(): entry["title"] for entry in raw.values()}
         return index
 
     def _needs_refresh(self) -> bool:
@@ -59,3 +61,8 @@ class TickerResolver:
             raise ValueError("ticket cannot be None")
         index = await self._load()
         return index.get(ticker.upper())
+
+    async def company_name(self, ticker: str) -> str | None:
+        """SEC's registered company name for `ticker`, e.g. "Accenture plc"."""
+        await self._load()
+        return self._names.get(ticker.upper())

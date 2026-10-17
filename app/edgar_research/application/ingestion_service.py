@@ -140,16 +140,13 @@ class IngestionService:
         if not cik:
             raise ValueError(f"Unknown ticker: {ticker}")
 
+        name = await self.resolver.company_name(ticker) or ticker
         existing = await self.security_repo.get_by_cik(cik)
-        if existing:
+        if existing and existing.name != existing.ticker:
             return existing
-
-        security = ListedSecurity(
-            cik=cik,
-            ticker=ticker,
-            name=ticker,    # name unknown until we parse a filing
-        )
-        return await self.security_repo.upsert(security)
+        # New, or stored before names were looked up (when name was the ticker).
+        security = existing or ListedSecurity(cik=cik, ticker=ticker, name=name)
+        return await self.security_repo.upsert(security.model_copy(update={"name": name}))
 
     async def _upsert_filing(
         self, security_id: int, summary: FilingSummary
@@ -359,7 +356,8 @@ class IngestionService:
 
         logger.info("Embedding %d chunks for filing %s",
                     len(chunks), filing.accession_number)
-        vectors = await self.embedder.embed_many([c.content for c in chunks])
+        security = await self.security_repo.get_by_id(filing.security_id)
+        vectors = await self.embedder.embed_many([c.embedding_text(security.name) for c in chunks])
         updates = [(c.id, v) for c, v in zip(chunks, vectors)]
         await self.chunk_repo.update_embeddings(updates)
         await self.filing_repo.mark_status(filing.id, FilingStatus.EMBEDDED)

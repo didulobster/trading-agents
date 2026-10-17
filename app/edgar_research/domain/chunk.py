@@ -22,6 +22,16 @@ class Chunk(BaseModel):
 
     created_at: datetime | None = None
 
+    def embedding_text(self, company_name: str) -> str:
+        """What gets embedded: the content under the company's name.
+
+        Statement tables never name the company: ACN's balance-sheet chunk
+        ranked 111th of 359 for "Accenture's cash and cash equivalents", and
+        8th with "Accenture plc" above it. The ticker did not help (86th).
+        Only the vector sees the name; `content` is unchanged.
+        """
+        return f"{company_name}\n\n{self.content}"
+
 def chunk_from_draft(
     draft: ChunkDraft,
     section_id: int,

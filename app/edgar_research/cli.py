@@ -15,6 +15,7 @@ import typer
 
 from app.edgar_research.application.embedding_service import EmbeddingService
 from app.edgar_research.application.ingestion_service import IngestionService
+from app.edgar_research.application.reembed import reembed_ticker
 from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
@@ -121,6 +122,35 @@ def reparse_cmd(accessions: list[str]):
     documents — after a parser fix, or to resume a filing reset by hand.
     Filings not in the corpus are skipped and listed at the end."""
     asyncio.run(_reparse(accessions))
+
+@app.command(name="reembed")
+def reembed_cmd(tickers: list[str]):
+    """Re-embed every chunk of these tickers in place, under the company's SEC
+    name. Needed after the embedding text changes: vectors from two versions
+    are not comparable. Also stores the name on the security row."""
+    asyncio.run(_reembed(tickers))
+
+
+async def _reembed(tickers: list[str]) -> None:
+    user_agent = require_env("EDGAR_USER_AGENT")
+    cache_root = Path(os.environ.get("EDGAR_CACHE_DIR", "./data/edgar-cache"))
+    resolver = TickerResolver(user_agent, cache_root / "company_tickers.json")
+    securities = ListedSecurityRepository()
+    await init_pool()
+    try:
+        embedder, repo = EmbeddingService(), ChunkRepository()
+        for ticker in tickers:
+            cik, name = await resolver.resolve(ticker), await resolver.company_name(ticker)
+            if not cik or not name:
+                raise typer.BadParameter(f"Unknown ticker: {ticker}")
+            security = await securities.get_by_cik(cik)
+            if security:
+                await securities.upsert(security.model_copy(update={"name": name}))
+            count = await reembed_ticker(ticker, name, embedder, repo)
+            typer.echo(f"Re-embedded {count} chunks for {ticker.upper()} as {name!r}")
+    finally:
+        await close_pool()
+
 
 @app.command(name="corpus-status")
 def corpus_status_cmd(

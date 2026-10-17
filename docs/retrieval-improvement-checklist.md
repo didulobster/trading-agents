@@ -3,6 +3,8 @@
 Ranked by priority: expected accuracy gain, divided by cost and risk, with
 measurement first because nothing below can be judged without it.
 
+Why each change was made, kept or dropped: `retrieval-decision-log.md`.
+
 Status as of 2026-10-17. No standing accuracy number exists: the eval harness
 was removed on 2026-10-11 and its 8-question set was never committed. The last
 recorded figure is vector-only S@5 = 0.625, which predates hybrid search and
@@ -97,6 +99,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | Compound-question trigger (`is_compound`, PR #175), rejected | multi_part 0.75 decomposed | multi_part 0.50 decomposed | All 3 targets worse or still missed; `acn-rpo-and-cash` is blocked by the balance-sheet table chunk, not by decomposition. Decomposer output varies run to run |
 | 2026-10-17 | P1 contextual chunk prefix (PR #176) | 0.87 hybrid | 0.87 hybrid | Target `acn-cash-fy25` still missed. hit@5 0.74 -> 0.77, hit@1 0.45 -> 0.39, MRR 0.57 -> 0.54. 6 questions up, 5 down. No clear gain; reverted, vectors restored to plain content |
 | 2026-10-17 | Baseline refreshed: 37 questions (6 balance-sheet line items added) | 0.87 hybrid (31 q) | 0.86 hybrid (37 q) | hit@1 0.49, hit@5 0.76, MRR 0.60. The original 31 questions rank exactly as before, confirming the vector revert. New misses: acn-total-assets-fy25 (17), acn-cash-fy25 still missed. Reference for later changes |
+| 2026-10-17 | Company-name embedding (PR #177) | 0.86 hybrid (37 q) | 0.95 hybrid (37 q) | 3 misses enter the top 8 (ranks 7-8); 10 up, 5 down by 1-2 ranks; hit@1 0.49 -> 0.46, MRR 0.60 flat |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -141,6 +144,28 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - 15 of 31 questions trip the regex, mostly on "compared with"; plain numeric-table questions get an LLM rewrite they did not need. The rewrite helped some of them and hurt others, with no clear pattern at n=31.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
+
+### Company-name embedding trial (2026-10-17, PR #177)
+
+Every ACN and AVGO chunk re-embedded with its SEC company name ("Accenture plc", "Broadcom
+Inc.") above the content (about $0.014). Securities had been stored with the ticker as their
+name; that is fixed too. Plain hybrid against the 37-question baseline:
+
+| | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|
+| hybrid before | 0.49 | 0.76 | 0.86 | 0.60 |
+| hybrid with company name | 0.46 | 0.78 | 0.95 | 0.60 |
+
+- hit@8 0.86 -> 0.95: three misses enter the top 8: `acn-cash-fy25` (missed -> 7),
+  `acn-rpo-and-cash` (missed -> 8), `acn-total-assets-fy25` (17 -> 8). The only misses left are
+  `avgo-contingent-liabilities` (13) and `acn-new-debt-vague` (14).
+- 10 questions up, 5 down. The five down each lost 1-2 ranks and stayed in the top 8
+  (`acn-revenue-fy26` 1 -> 2, `acn-icfr` 1 -> 2, `acn-9mo-opcash` 1 -> 2, `avgo-auditor` 4 -> 5,
+  `acn-auditor` 6 -> 8). hit@1 falls by one question.
+- Vector alone: hit@8 0.92 (0.77 on the 31-question set before).
+- Cautions: the three gains land at ranks 7-8, on the edge of k=8; six of the 37 questions
+  were added for this very problem; two tickers only. The ingestion path (`_embed` reading the
+  stored name) is unit-untested; the trial used `reembed`.
 
 ### Balance-sheet chunk diagnosed (2026-10-17, one query embedding)
 
