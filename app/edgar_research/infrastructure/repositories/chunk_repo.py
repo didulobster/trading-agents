@@ -143,6 +143,16 @@ class ChunkRepository:
             rows = await cur.fetchall()
         return [Chunk.model_validate(r) for r in rows]
 
+    async def list_for_ticker(self, ticker: str) -> list[Chunk]:
+        """Every chunk of one ticker, embedded or not."""
+        async with cursor() as cur:
+            await cur.execute("SELECT * FROM chunks WHERE ticker = %s ORDER BY id", (ticker.upper(),))
+            rows = await cur.fetchall()
+        for row in rows:
+            if row["embedding"] is not None:
+                row["embedding"] = row["embedding"].to_list()
+        return [Chunk.model_validate(r) for r in rows]
+
     async def update_embeddings(self, updates: list[tuple[int, list[float]]]) -> None:
         """Set embeddings on existing chunks. updates: list of (chunk_id, vector)."""
         if not updates:
