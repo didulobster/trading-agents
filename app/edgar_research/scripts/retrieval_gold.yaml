@@ -274,3 +274,59 @@
   question: Who audits Broadcom and for how long, and is its internal control over financial reporting effective?
   answers: ["We have served as the Company's auditor since 2006", "our internal control over financial reporting is effective based on those criteria"]
   require: all
+
+# --- grown 2026-10-17: single balance-sheet line items (the dense-table case) ---
+
+- id: acn-total-assets-fy25
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What were Accenture's total assets as of August 31, 2025 and August 31, 2024?
+  answers: ["65,394,897", "55,932,363"]
+  require: all
+
+- id: acn-goodwill-fy25
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What was Accenture's goodwill on the balance sheet at August 31, 2025 compared with August 31, 2024?
+  answers: ["22,536,416", "21,120,179"]
+  require: all
+
+- id: acn-long-term-debt-fy25
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What was Accenture's long-term debt on the consolidated balance sheet at August 31, 2025 and August 31, 2024?
+  answers: ["5,034,169", "78,628"]
+  require: all
+
+- id: avgo-cash-fy25
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What were Broadcom's cash and cash equivalents at November 2, 2025 compared with November 3, 2024 on the consolidated balance sheet?
+  answers: ["16,178", "9,348"]
+  require: all
+
+- id: avgo-total-assets-fy25
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What were Broadcom's total assets at November 2, 2025 and November 3, 2024?
+  answers: ["171,092", "165,645"]
+  require: all
+
+- id: avgo-long-term-debt-fy25
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What was Broadcom's long-term debt on the consolidated balance sheet at November 2, 2025 and November 3, 2024?
+  answers: ["61,984", "66,295"]
+  require: all
