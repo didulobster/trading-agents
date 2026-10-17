@@ -96,6 +96,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | Measured the decomposer (`--decompose`), no retrieval change | 0.87 hybrid | 0.84 decomposed | Production path is a wash vs plain hybrid: 4 better, 3 worse, 1 lost from top 8. Multi-part still unfixed because 3 of 4 never trip the regex. Cost $0.0016 |
 | 2026-10-17 | Compound-question trigger (`is_compound`, PR #175), rejected | multi_part 0.75 decomposed | multi_part 0.50 decomposed | All 3 targets worse or still missed; `acn-rpo-and-cash` is blocked by the balance-sheet table chunk, not by decomposition. Decomposer output varies run to run |
 | 2026-10-17 | P1 contextual chunk prefix (PR #176) | 0.87 hybrid | 0.87 hybrid | Target `acn-cash-fy25` still missed. hit@5 0.74 -> 0.77, hit@1 0.45 -> 0.39, MRR 0.57 -> 0.54. 6 questions up, 5 down. No clear gain; reverted, vectors restored to plain content |
+| 2026-10-17 | Baseline refreshed: 37 questions (6 balance-sheet line items added) | 0.87 hybrid (31 q) | 0.86 hybrid (37 q) | hit@1 0.49, hit@5 0.76, MRR 0.60. The original 31 questions rank exactly as before, confirming the vector revert. New misses: acn-total-assets-fy25 (17), acn-cash-fy25 still missed. Reference for later changes |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -196,6 +197,20 @@ Question: `acn-cash-fy25`, plain-content vectors, filters ACN / 10-K / filed bef
   never says "Accenture". The failed prefix used the ticker "ACN", not the name.
 - Decision: a row index is not justified yet. It would fix one of two real misses on this
   set. Test the company-name confound first (two embeddings).
+- Company-name test (4 embeddings). Only the ACN balance-sheet chunk was re-embedded; every
+  other chunk kept its plain vector:
+
+  | Embedded text | acn-cash-fy25 | acn-total-assets-fy25 |
+  |---|---|---|
+  | original chunk | 111 | 152 |
+  | ticker header, as in the failed prefix ("ACN 10-K filed ...") | 86 | 86 |
+  | "Accenture plc Consolidated Balance Sheets" header | 5 | 1 |
+
+- The company name, not the ticker, is what moves it. Two cautions before building on this:
+  the header also repeats "Consolidated Balance Sheets", so name and title are not yet
+  separated; and only one chunk changed, so this is an upper bound. Naming the company on
+  every chunk also lifts every competitor, which is how the corpus-wide ticker prefix lost
+  its gain.
 - Direction this points to: index statement-table rows individually (title + column headers
   + one row) as extra retrieval entries that return the full table chunk. Carrying the column
   headers on every row would also address the wrong-fiscal-year column problem.
