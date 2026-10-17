@@ -438,3 +438,33 @@
   question: How much customer concentration does ASML have?
   answers: ["our sales remain concentrated among a limited group", "Total net sales to our largest customer amounted to",
             "As a result of our limited number of customers", "Our three largest customers (based on total net sales)"]
+
+# Compound questions the fundamentals agent actually asked (vault provenance,
+# 2026-09/10), verbatim. One statement figure per part.
+- id: acn-sbc-and-revenue-agent
+  tag: multi_part
+  ticker: ACN
+  question: "Accenture plc FY2025 vs FY2024: what were share-based compensation expense and revenue, and what is the resulting share-based compensation percentage of revenue?"
+  answers: ["2,093,878", "69,672,977"]
+  require: all
+
+- id: acn-opinc-and-debt-agent
+  tag: multi_part
+  ticker: ACN
+  question: "Accenture plc FY2025 versus FY2024: What consolidated operating income was reported, and did total debt divided by consolidated operating income rise or fall across the covered years? Retrieve the exact operating income figures and debt figures needed, without summing segment results."
+  answers: ["10,225,664", "5,034,169"]
+  require: all
+
+- id: acn-netinc-and-opcash-agent
+  tag: multi_part
+  ticker: ACN
+  question: "Accenture plc FY2025 versus FY2024: What were net income and cash flow from operating activities, and what were the largest reconciling items when operating cash flow differed from net income?"
+  answers: ["7,832,400", "11,474,399"]
+  require: all
+
+- id: avgo-fy23-revenue-and-net-income-agent
+  tag: multi_part
+  ticker: AVGO
+  question: "For Broadcom (AVGO) FY2023 (period ended October 29, 2023), what was total net revenue, and what was net income? Also for FY2025 (period ended November 2, 2025) and FY2024 (ended November 3, 2024), what was net income for each year?"
+  answers: ["35,819", "14,082", "23,126"]
+  require: all
