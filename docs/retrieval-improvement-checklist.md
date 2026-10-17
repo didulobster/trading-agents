@@ -5,10 +5,8 @@ measurement first because nothing below can be judged without it.
 
 Why each change was made, kept or dropped: `retrieval-decision-log.md`.
 
-Status as of 2026-10-17. No standing accuracy number exists: the eval harness
-was removed on 2026-10-11 and its 8-question set was never committed. The last
-recorded figure is vector-only S@5 = 0.625, which predates hybrid search and
-the OR-query fix.
+Status as of 2026-10-17: 49-question gold set, hybrid hit@8 0.94, hit@5 0.86,
+MRR 0.63 (latest row of the done log).
 
 Rule for every item: measure by answer content (does a top-k chunk contain the
 answer string), never by chunk id, and rank the right chunk before changing
@@ -16,14 +14,15 @@ retrieval.
 
 ## P0. Build the measuring stick (do first)
 
-- [ ] **Answer-content gold set**, committed to git (~40-60 questions).
+- [x] **Answer-content gold set**, committed to git (~40-60 questions).
+  Done: 49 questions in `app/edgar_research/scripts/retrieval_gold.yaml`.
   Each entry: question, ticker, filing, answer strings, shape tag.
   Seed from the ~100 real agent questions in the vault provenance files plus
   known failures (see "Known failures" below).
   Tags: numeric_table, numeric_prose, narrative, vocab_mismatch, multi_part, 8k_by_date.
-- [ ] **Runner** `scripts/eval_retrieval.py`: hit@k, MRR and first-hit rank per
-  tag. Embeddings only, about $0.01 per run. Print a per-tag table.
-- [ ] **Record a baseline** in this file before any other change.
+- [x] **Runner** `app/edgar_research/scripts/eval_retrieval.py`: hit@k, MRR and
+  first-hit rank per tag. Embeddings only, about $0.01 per run. Print a per-tag table.
+- [x] **Record a baseline** in this file before any other change. See the done log.
 - [ ] **Parser sanity check** in `corpus-status`: flag filings where Item 1A, 7
   or 8 is empty or tiny. Zero API cost. It would have caught McDonald's and IBM.
 
@@ -36,6 +35,9 @@ retrieval.
 - [ ] **Contextual chunk prefix.** Embed `"{ticker} {form} FY{year} > {section}: "`
   plus the chunk text, so vector search separates companies, years and sections.
   Needs a re-embed. Measure on multi_part and 8k_by_date.
+  Tried and rejected 2026-10-17 (PR #176): no hit@8 gain, hit@1 fell.
+- [x] **Company-name embedding** (shipped 2026-10-17, PR #177). Embed the SEC
+  company name above each chunk. Hybrid hit@8 0.86 -> 0.95 on 37 questions.
 - [ ] **Synonym map for analyst-to-filer vocabulary.** Deterministic and
   testable; extend `_VOCABULARY_MISMATCH_TERMS` into a real mapping
   ("supply chain" -> "third-party vendors", "contingent liabilities" ->
