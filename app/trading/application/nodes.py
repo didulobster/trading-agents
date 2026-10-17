@@ -63,7 +63,9 @@ from app.trading.infrastructure.technical_interpreter_port import interpret_indi
 # trading-agent-known-gaps.md for the measurements this decision rests on.
 logger = logging.getLogger(__name__)
 
-RISK_VERDICT_SAMPLES = 3
+# 5, not 3: the shrunk verdict_agreement has only three values at N=3.
+# Each extra sample costs ~$0.009-0.014 and ~45-50 s on gpt-5.6-luna.
+RISK_VERDICT_SAMPLES = 5
 
 
 async def graceful_abort_node(state: TradingState) -> dict:
@@ -672,7 +674,7 @@ async def synthesizer_node(state: TradingState) -> dict:
     # calls carry a citation/fabrication guard that raises on an untrusted
     # output (SynthesisFabricationError, SynthesisReferenceError). Measured
     # live hit rate is ~1-in-8 calls (trading-agent-known-gaps.md, FIG,
-    # 2026-08-26) — at that rate a 3-sample run has better than even odds of
+    # 2026-08-26) — at that rate even a 3-sample run has better than even odds of
     # tripping it somewhere, and letting one trial's guard crash the whole
     # node threw away every OTHER trial already paid for, including ones
     # that passed cleanly. A trial the guard blocks is dropped from the
@@ -700,7 +702,7 @@ async def synthesizer_node(state: TradingState) -> dict:
     # run_synthesis, which uses it for BOTH the Research Manager and the
     # Risk Judge, and those read two different model env vars.
     client = get_client()
-    # Checked before each EXTRA sample. Samples 2 and 3 each run a fresh
+    # Checked before each EXTRA sample. Samples 2 onward each run a fresh
     # 9-turn risk panel plus the Research Manager and Risk Judge, all inside
     # this one node, where the edge guard cannot see them. The first sample
     # needs no check: the guard on the edge into this node just ran.
