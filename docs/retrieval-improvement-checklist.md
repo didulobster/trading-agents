@@ -23,8 +23,11 @@ retrieval.
 - [x] **Runner** `app/edgar_research/scripts/eval_retrieval.py`: hit@k, MRR and
   first-hit rank per tag. Embeddings only, about $0.01 per run. Print a per-tag table.
 - [x] **Record a baseline** in this file before any other change. See the done log.
-- [ ] **Parser sanity check** in `corpus-status`: flag filings where Item 1A, 7
+- [x] **Parser sanity check** in `corpus-status`: flag filings where Item 1A, 7
   or 8 is empty or tiny. Zero API cost. It would have caught McDonald's and IBM.
+  Done 2026-10-17: required Items under 5,000 characters are flagged. Parsed
+  offline, MCD's 2025 10-K flags 1A/7/8 (21-93 chars) and IBM's flags 7/8
+  (116, 196); healthy ACN/AVGO Items hold 23k+. 20-Fs are not checked.
 
 ## P1. High gain, low cost
 
