@@ -207,7 +207,7 @@ async def _corpus_status(ticker: str | None, verbose: bool) -> None:
         if incomplete:
             _print_incomplete(incomplete)
         else:
-            typer.echo("āœ“ Every 10-K/10-Q has MD&A and financial statements sections.")
+            typer.echo("āœ“ Every 10-K/10-Q has full risk factors, MD&A and financial statements.")
 
         if verbose:
             details = await query.per_filing(ticker)
@@ -266,11 +266,11 @@ def _print_issues(issues: list[FilingIssue]) -> None:
 
 
 def _print_incomplete(rows: list[IncompleteFiling]) -> None:
-    typer.echo("\n⚠ļø  Embedded but missing sections (ask_edgar section filters miss them):")
+    typer.echo("\n⚠ļø  Embedded but missing or near-empty sections (check the parse):")
     for r in rows:
         typer.echo(
             f"  - {r.ticker} {r.filing_type} {r.filed_date} "
-            f"({r.accession_number}): no {', '.join(r.missing)}"
+            f"({r.accession_number}): {', '.join(r.missing)}"
         )
 
 

@@ -8,26 +8,37 @@ from app.edgar_research.infrastructure.repositories.db import get_connection
 
 _ITEM_LABEL = re.compile(r"^Item (\d{1,2})([A-Z]?)$")
 
-# The sections a memo is built from: MD&A and the financial statements.
+# The sections a memo is built from: risk factors, MD&A and the statements.
 REQUIRED_SECTIONS = {
-    "10-K": (("Part II", "Item 7"), ("Part II", "Item 8")),
+    "10-K": (("Part I", "Item 1A"), ("Part II", "Item 7"), ("Part II", "Item 8")),
     "10-Q": (("Part I", "Item 1"), ("Part I", "Item 2")),
 }
 
+# Healthy ACN/AVGO required Items hold 23k+ characters; MCD's and IBM's
+# 2025 10-Ks parse into required Items of under 200.
+MIN_SECTION_CHARS = 5_000
 
-def missing_sections(filing_type: str, part_items: set[tuple[str, str]]) -> list[str]:
-    """Required (Part, Item) pairs a periodic filing has no section for.
+
+def missing_sections(filing_type: str, item_chars: dict[tuple[str, str], int]) -> list[str]:
+    """Required (Part, Item) pairs a periodic filing lacks or has nearly empty.
+
+    `item_chars` maps (Part, Item) to the summed length of its sections.
 
     A filing can reach EMBEDDED with its whole text in one
     ['Unknown', 'Full Document'] section — the parser's fallback when the
     Item split looks unreliable — and chunk counts look normal. ACN's
-    March and June 2026 10-Qs sat in the corpus that way unnoticed.
+    March and June 2026 10-Qs sat in the corpus that way unnoticed. An Item
+    can also exist but hold only a heading: MCD's 10-K splits on its table
+    of contents, and IBM's incorporates Items 7 and 8 by reference.
     """
-    return [
-        f"{part} {item}"
-        for part, item in REQUIRED_SECTIONS.get(filing_type, ())
-        if (part, item) not in part_items
-    ]
+    out = []
+    for part, item in REQUIRED_SECTIONS.get(filing_type, ()):
+        chars = item_chars.get((part, item))
+        if chars is None:
+            out.append(f"{part} {item}")
+        elif chars < MIN_SECTION_CHARS:
+            out.append(f"{part} {item} ({chars:,} chars)")
+    return out
 
 
 def _item_sort_key(label: str) -> tuple[int, str]:
@@ -197,32 +208,38 @@ class CorpusStatusQuery:
     async def incomplete_filings(
         self, ticker: str | None = None, filed_before: date | None = None
     ) -> list[IncompleteFiling]:
-        """Embedded 10-Ks and 10-Qs missing MD&A or the financial statements."""
+        """Embedded 10-Ks and 10-Qs whose required sections are missing or tiny."""
         where_clause, params = _scope(ticker, filed_before, trailing="AND")
 
         async with get_connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 f"""
                 SELECT s.ticker, f.accession_number, f.filing_type, f.filed_date,
-                       array_agg(sec.section_path[1] || '|' || sec.section_path[2])
-                           FILTER (WHERE sec.id IS NOT NULL) AS part_items
+                       sec.section_path[1] AS part, sec.section_path[2] AS item,
+                       sum(length(sec.content)) AS chars
                 FROM filings f
                 JOIN listed_securities s ON s.id = f.security_id
                 LEFT JOIN documents d ON d.filing_id = f.id
                 LEFT JOIN sections sec ON sec.document_id = d.id
                 {where_clause} f.status = 'embedded'
                     AND f.filing_type = ANY(%s)
-                GROUP BY s.ticker, f.accession_number, f.filing_type, f.filed_date
+                GROUP BY s.ticker, f.accession_number, f.filing_type, f.filed_date,
+                         sec.section_path[1], sec.section_path[2]
                 ORDER BY s.ticker, f.filed_date DESC
                 """,
                 params + (list(REQUIRED_SECTIONS),),
             )
             rows = await cur.fetchall()
 
-        out = []
+        filings: dict[str, tuple[dict, dict[tuple[str, str], int]]] = {}
         for r in rows:
-            part_items = {tuple(p.split("|", 1)) for p in r["part_items"] or [] if p}
-            missing = missing_sections(r["filing_type"], part_items)
+            _, item_chars = filings.setdefault(r["accession_number"], (r, {}))
+            if r["part"] and r["item"]:
+                item_chars[(r["part"], r["item"])] = r["chars"]
+
+        out = []
+        for r, item_chars in filings.values():
+            missing = missing_sections(r["filing_type"], item_chars)
             if missing:
                 out.append(IncompleteFiling(
                     ticker=r["ticker"], accession_number=r["accession_number"],
