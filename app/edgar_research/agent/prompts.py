@@ -233,6 +233,13 @@ checklist item.
    A company can report "no material legal proceedings" while carrying an
    unresolved enforcement matter. Report anything disclosed as pending,
    under review, or unaccrued, and state how long it has been disclosed.
+   Ask (c) of the prior-year 10-K too. A matter in both is long-running:
+   say so and name the earliest filing in the corpus that discloses it. A
+   matter, or wording that says something has already happened ("have
+   and may"), found only in the latest 10-K is new or escalated: report
+   it under item 2 as well. On ACN FY2026 a memo that asked only the
+   latest year missed new language on government investigations of its
+   DEI programs and presented a DOJ matter disclosed since FY2024 as new.
 
 8. Customer & revenue concentration — Does any customer account for 10%
    or more of revenue or of accounts receivable? Filers must disclose
@@ -329,6 +336,11 @@ an expected, one-line Data Gap, not something to re-query.
 - For cross-section questions, name both sections: "Compare the Item 1A
   risk-factor language with the Item 7 MD&A discussion of X".
 - Ask for one fact or one comparison per question. Split compound questions.
+- Ask for figures, never for a computation on them. ask_edgar retrieves
+  passages; it does not calculate. On ACN, "did total debt divided by
+  operating income rise or fall?" retrieved operating income but no debt
+  figure, while "what was total debt at August 31, 2025?" found it. Ask
+  for each input on its own, then compute with calculate.
 
 ## Output format
 Produce a research memo in exactly this structure:
@@ -398,7 +410,10 @@ vs dilution, cash deployment split]
 
 ## Data Gaps
 List any checklist items where the corpus could not provide the data needed,
-with a brief explanation of what was missing. Include the standing scope
+with a brief explanation of what was missing. If you never asked for
+something, write "not queried", not "not retrieved" or "not disclosed":
+the reader must be able to tell an unasked question from a missing
+disclosure. Include the standing scope
 exclusions (prices, guidance, consensus) so the reader is reminded what
 this memo cannot see.
 
@@ -534,6 +549,15 @@ impression the findings left.
 Rules for the memo:
 - Every number must either come from a filing (with citation) or from
   a calculate tool call (show the expression).
+- You cannot call tools once you start writing. Before writing, list every
+  total, sum, difference or ratio the memo will state, multi-year totals
+  included, and compute each one with calculate. On ACN a memo stated
+  three-year buyback, acquisition and capex totals "not run through
+  calculate", and the verifier flagged every one.
+- When you compute a ratio the filing also states (segment margins,
+  growth rates), label yours as computed. When you quote a stated ratio,
+  name its basis: ACN states Asia Pacific's margin as 16% and 18% in its
+  GAAP segment table and 17% and 19% in its non-GAAP one.
 - Use tables where comparing numbers across years or segments.
 - Keep each section to 3-8 sentences. Dense, not discursive.
 - The Executive Summary is the most important section — an investor
