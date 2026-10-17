@@ -165,9 +165,9 @@ class DecisionMemo(BaseModel):
     # `application/nodes.py`'s majority-of-N sampling.
     verdict_samples: list[str] = []
     evidence_quality: EvidenceQuality
-    # k/n over `verdict_samples`: the share of independent trials that
-    # reached the reported verdict. None when no sampling ran, which is a
-    # different state from 1.0 and must not be rendered as one.
+    # (k+1)/(n+2) over `verdict_samples`: how reproducible the reported
+    # verdict is, shrunk toward 0.5 (see synthesis_port.verdict_agreement).
+    # None when no sampling ran, which is a different state from any vote.
     verdict_agreement: float | None = None
     data_as_of_date: date
     data_gaps: list[str] = []

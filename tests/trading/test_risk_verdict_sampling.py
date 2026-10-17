@@ -367,7 +367,7 @@ async def test_the_chosen_samples_verification_failure_raises_even_with_a_majori
 
 
 @pytest.mark.anyio
-async def test_a_split_verdict_reports_the_share_of_trials_that_reached_it(monkeypatch):
+async def test_a_split_verdict_reports_the_shrunk_share_of_trials_that_reached_it(monkeypatch):
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
         _memo("ACN", Verdict.HOLD, tag="a", quality=0.97),
@@ -377,7 +377,8 @@ async def test_a_split_verdict_reports_the_share_of_trials_that_reached_it(monke
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
-    assert memo.verdict_agreement == 0.67
+    # (2+1)/(3+2): shrunk toward 0.5, so 3 trials cannot claim certainty.
+    assert memo.verdict_agreement == 0.6
     # Untouched: evidence quality is not bounded by verdict agreement, it is
     # a different quantity. Clamping one with the other was the workaround
     # the rename made unnecessary.
@@ -385,7 +386,7 @@ async def test_a_split_verdict_reports_the_share_of_trials_that_reached_it(monke
 
 
 @pytest.mark.anyio
-async def test_a_unanimous_verdict_reports_full_agreement(monkeypatch):
+async def test_a_unanimous_verdict_reports_shrunk_not_full_agreement(monkeypatch):
     _stub_extra_panel_samples(monkeypatch)
     _stub_synthesis_sequence(monkeypatch, [
         _memo("ACN", Verdict.SELL, tag="a", quality=0.94),
@@ -395,7 +396,8 @@ async def test_a_unanimous_verdict_reports_full_agreement(monkeypatch):
 
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
-    assert memo.verdict_agreement == 1.0
+    # (3+1)/(3+2), not 1.0: three agreeing trials are not proof of certainty.
+    assert memo.verdict_agreement == 0.8
     assert memo.evidence_quality.score == 0.94
 
 
@@ -413,7 +415,7 @@ async def test_an_unresolved_verdict_reports_its_best_agreement(monkeypatch):
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
     assert memo.verdict == Verdict.UNRESOLVED
-    assert memo.verdict_agreement == 0.33
+    assert memo.verdict_agreement == 0.4
 
 
 @pytest.mark.anyio
@@ -436,8 +438,8 @@ async def test_no_sampling_reports_none_not_full_agreement(monkeypatch):
 @pytest.mark.anyio
 async def test_agreement_is_measured_over_surviving_trials_only(monkeypatch):
     """One trial dropped by the fabrication guard leaves 2 survivors, both
-    hold — agreement is 2/2, with the weaker basis carried by the existing
-    dropped-sample caveat rather than by deflating the ratio."""
+    hold. The shrunk estimate carries the weaker basis itself: 2 of 2 is
+    (2+1)/(2+2) = 0.75, below the 0.80 of a full 3 of 3."""
     _stub_extra_panel_samples(monkeypatch)
     memos = iter([
         _memo("ACN", Verdict.HOLD, tag="a", quality=0.90),
@@ -457,5 +459,5 @@ async def test_agreement_is_measured_over_surviving_trials_only(monkeypatch):
     memo = (await nodes.synthesizer_node(_state()))["decision_memo"]
 
     assert memo.verdict_samples == ["hold", "hold"]
-    assert memo.verdict_agreement == 1.0
+    assert memo.verdict_agreement == 0.75
     assert any("dropped by the citation/fabrication guard" in g for g in memo.data_gaps)

@@ -415,7 +415,14 @@ def compute_evidence_quality(
 
 
 def verdict_agreement(verdicts: list[str]) -> float | None:
-    """k/n: the share of independent trials that reached the reported verdict.
+    """(k+1)/(n+2): how reproducible the reported verdict is, where k of n
+    independent trials reached it.
+
+    Shrunk toward 0.5 (Laplace) rather than the raw k/n, because the raw
+    share claims certainty on three samples: 3 of 3 read as 1.00, and 2 of 2
+    survivors read the same as a full 3 of 3. Shrunk, they are 0.80 and
+    0.75, and more trials move the number further from 0.5 —
+    N=3 yields only {0.80, 0.60, 0.40}, N=5 {0.857, 0.714, 0.571, 0.429}.
 
     Reported, not enforced. An earlier version of this function returned the
     same number as a CEILING on `confidence`, because a field called
@@ -433,7 +440,7 @@ def verdict_agreement(verdicts: list[str]) -> float | None:
     if not verdicts:
         return None
     top_count = Counter(verdicts).most_common(1)[0][1]
-    return round(top_count / len(verdicts), 2)
+    return round((top_count + 1) / (len(verdicts) + 2), 2)
 
 
 # ---------------------------------------------------------------------------

@@ -3003,6 +3003,8 @@ worth its ~$0.07/run, since Laplace at N=3 yields only {0.80, 0.60, 0.40}
 while N=5 yields {0.857, 0.714, 0.571, 0.429}. Deliberately not done here:
 it is a calibration decision, not a naming one.
 
+*Done 2026-10-17, see the next section.*
+
 ## The concession channel has never fired, and the summary said so wrong
 ## (2026-08-29)
 
@@ -3086,3 +3088,52 @@ every trigger named a real opposing claim. Against 0 in the 42 transcripts
 before the fix, debaters do populate `concession_trigger`. The reporting fix (3) is deliberately
 independent of that: if the model never fills the field, the artifacts now
 say "nothing was recorded" instead of "nobody moved".
+
+
+## `verdict_agreement` shrunk to (k+1)/(n+2) (2026-10-17)
+
+The open item two sections up, done. The shrunk estimate replaces raw k/n in
+`verdict_agreement`, NOT in `evidence_quality.score`: that item asked for a
+number meaning "how reproducible is this verdict", which is
+`verdict_agreement`'s job, and folding it into `evidence_quality` would undo
+the rename that separated the two. `evidence_quality` is unchanged.
+
+### What changed
+
+- `synthesis_port.verdict_agreement` returns `(k+1)/(n+2)`. 3 of 3 is 0.80,
+  not 1.00. 2 of 2 survivors after a dropped trial is 0.75, now below a full
+  3 of 3 rather than equal to it, so the weaker basis shows in the number
+  and not only in the dropped-sample caveat.
+- The renderer counted agreeing samples as `round(agreement * n)`, which
+  would have printed a unanimous 3 of 3 (0.80) as "2 of 3". It now counts
+  them from `verdict_samples`.
+- `RISK_VERDICT_SAMPLES` stays 3.
+
+### Replayed over the vault (read-only, no spend)
+
+33 decision memos carry a vote line (2 more have none: aborted or
+pre-sampling runs).
+
+| raw k/n | memos | shrunk |
+|---|---|---|
+| 1.00 (3 of 3) | 27 | 0.80 |
+| 0.67 (2 of 3) | 4 | 0.60 |
+| 0.50 (1 of 2, UNRESOLVED) | 2 | 0.50 |
+
+**At N=3 this is a relabel, not new information.** The map is monotone and
+the record still has three distinct values with 82% at the top. What it
+buys is that no memo claims 1.00 on three samples, and that a vote that lost
+a trial scores below one that did not. More resolution needs more samples.
+
+Memos written before this change carry raw k/n in their JSON. Convert with
+`(k+1)/(n+2)` from `verdict_samples` rather than comparing the stored
+numbers across the date.
+
+### The cost of N=5, re-measured
+
+The ~$0.07/run figure above is Haiku-era. On gpt-5.6-luna one extra sample
+(a fresh 9-turn risk panel, Research Manager and Risk Judge) logged
+**$0.009-0.014** across three FIG runs in `docs/cost-log-2026-09.jsonl`, so
+N=5 adds about **$0.02-0.03/run** plus wall clock for two more sequential
+panels. Not changed here: that is ongoing spend and a decision for the owner.
+
