@@ -400,7 +400,9 @@
   filing_types: ["20-F"]
   filed_after: 2026-01-01
   question: How much did ASML spend on share buybacks in 2025?
-  answers: ["€5.9bn Share buyback"]
+  # The KPI tile, the equity note ("total consideration of € 5,950.0 million")
+  # and the liquidity discussion all answer it.
+  answers: ["€5.9bn Share buyback", "5,950.0 million", "€5,450.0 million increase in share repurchases"]
 
 - id: asml-icfr-fy2024
   tag: narrative
@@ -425,4 +427,5 @@
   filing_types: ["20-F"]
   filed_after: 2026-01-01
   question: How much customer concentration does ASML have?
-  answers: ["our sales remain concentrated among a limited group", "Total net sales to our largest customer amounted to"]
+  answers: ["our sales remain concentrated among a limited group", "Total net sales to our largest customer amounted to",
+            "As a result of our limited number of customers", "Our three largest customers (based on total net sales)"]

@@ -145,6 +145,25 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
 
+### ASML added: 48 questions (2026-10-17, PR #179)
+
+ASML ingested (two 20-Fs, 1,190 chunks, each filing parsed as one whole-document section) and
+11 questions added. First run, hybrid: 9 of the 11 ASML questions in the top 8, including all
+three known wrong-column tables (FCF FY2023 rank 2, capex FY2025 rank 2, long-term debt rank 1).
+All 37 ACN/AVGO questions ranked exactly as before.
+
+| | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|
+| hybrid, 48 questions (first run) | 0.46 | 0.79 | 0.92 | 0.60 |
+
+- The two ASML misses were checked before being counted (rule from D5):
+  - `asml-buyback-2025` (missed) was a gold defect. The entry accepted only the KPI tile, but
+    the equity note ("total consideration of € 5,950.0 million") and the liquidity section also
+    answer it. Fixed; keyword alone now finds an answer at rank 3 (was 20).
+  - `asml-customer-concentration` (hybrid 16) is a real vocabulary miss. Two more answering
+    chunks were added to the entry; keyword still finds none of them.
+- The 0.92 above predates the buyback fix and needs a re-run.
+
 ### Company-name embedding trial (2026-10-17, PR #177)
 
 Every ACN and AVGO chunk re-embedded with its SEC company name ("Accenture plc", "Broadcom
