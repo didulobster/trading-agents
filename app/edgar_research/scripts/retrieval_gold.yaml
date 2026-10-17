@@ -133,3 +133,131 @@
   question: How did Accenture's net cash provided by operating activities and total revenues change between fiscal 2024 and fiscal 2025?
   answers: ["11,474", "69,673"]
   require: all
+
+# --- grown 2026-10-17: prose figures, more numeric tables, 10-Qs, vocabulary ---
+
+- id: acn-rpo-fy25
+  tag: numeric_prose
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What was Accenture's remaining performance obligations amount as of August 31, 2025 compared with August 31, 2024?
+  answers: ["remaining performance obligations of approximately $ 34 billion"]
+
+- id: acn-genai-investment
+  tag: numeric_prose
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: How much did Accenture commit to invest in generative AI?
+  answers: ["$3 billion multi-year investment"]
+
+- id: avgo-vmware-cash
+  tag: numeric_prose
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: How much cash did Broadcom pay for the VMware acquisition?
+  answers: ["$25,416 million cash paid in connection with the acquisition of VMware"]
+
+- id: avgo-china-revenue
+  tag: numeric_prose
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What share of Broadcom's net revenue came from shipments to China including Hong Kong?
+  answers: ["shipments or deliveries to China (including Hong Kong)"]
+
+- id: acn-cash-fy25
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What was cash and cash equivalents as of August 31, 2025 and August 31, 2024 in the Accenture consolidated balance sheets?
+  answers: ["11,478,729", "5,004,469"]
+  require: all
+
+- id: avgo-segment-revenue-fy24
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2024-06-01
+  filed_before: 2025-06-01
+  question: What was net revenue for the Semiconductor Solutions and Infrastructure Software segments in fiscal 2024 compared with fiscal 2023?
+  answers: ["30,096", "21,478"]
+  require: all
+
+- id: avgo-9mo-revenue
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-Q"]
+  filed_after: 2026-08-01
+  question: What was Broadcom's total net revenue for the three fiscal quarters ended August 2, 2026 compared with the same period a year earlier?
+  answers: ["71,089", "45,872"]
+  require: all
+
+- id: acn-9mo-opcash
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-Q"]
+  filed_after: 2026-06-01
+  question: What was net cash provided by operating activities for the nine months ended May 31, 2026 compared with May 31, 2025 for Accenture?
+  answers: ["9,268", "7,560"]
+  require: all
+
+- id: avgo-repurchases-fy24
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2024-06-01
+  filed_before: 2025-06-01
+  question: How much cash did Broadcom use for repurchases of common stock under its repurchase program in fiscal 2024 compared with fiscal 2023?
+  answers: ["7,176", "5,824"]
+  require: all
+
+- id: avgo-buybacks
+  tag: vocab_mismatch
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2024-06-01
+  filed_before: 2025-06-01
+  question: How large were Broadcom's buybacks in fiscal 2024?
+  answers: ["Repurchases of common stock - repurchase program"]
+
+- id: acn-buybacks
+  tag: vocab_mismatch
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: How large were Accenture's buybacks in fiscal 2025?
+  answers: ["Purchases of Class A shares"]
+
+- id: acn-notes-2031-principal
+  tag: 8k_by_date
+  ticker: ACN
+  question: What principal amount of senior notes due 2031 did Accenture sell in its July 2026 offering?
+  answers: ["5.000% senior notes due 2031"]
+
+- id: acn-new-debt-vague
+  tag: 8k_by_date
+  ticker: ACN
+  question: Did Accenture raise new debt recently, and on what terms?
+  answers: ["5.000% senior notes due 2031"]
+
+- id: acn-rpo-and-cash
+  tag: multi_part
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What were Accenture's remaining performance obligations and its cash and cash equivalents at August 31, 2025?
+  answers: ["remaining performance obligations of approximately $ 34 billion", "11,478,729"]
+  require: all
+
+- id: avgo-auditor-and-icfr
+  tag: multi_part
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: Who audits Broadcom and for how long, and is its internal control over financial reporting effective?
+  answers: ["We have served as the Company's auditor since 2006", "our internal control over financial reporting is effective based on those criteria"]
+  require: all
