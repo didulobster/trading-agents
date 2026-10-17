@@ -3,6 +3,7 @@ import logging
 
 from app.edgar_research.application.date_hints import narrow_by_date_hints
 from app.edgar_research.application.query_decomposer import DecompositionResult, QueryDecomposer
+from app.edgar_research.application.synonyms import with_filer_terms
 from app.edgar_research.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
     ChunkSearchFilters,
@@ -179,7 +180,7 @@ class RetrievalService:
             query_embedding=query_vector, k=candidate_k, filters=filters,
         )
         bm25_results = await self.chunk_repo.search_by_text(
-            query=question, k=candidate_k, filters=filters,
+            query=with_filer_terms(question), k=candidate_k, filters=filters,
         )
         return vector_results, bm25_results
 
