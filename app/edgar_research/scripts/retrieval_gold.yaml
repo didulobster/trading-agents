@@ -168,6 +168,8 @@
   question: What share of Broadcom's net revenue came from shipments to China including Hong Kong?
   answers: ["shipments or deliveries to China (including Hong Kong)"]
 
+# Strict: needs the statement table itself (balance sheet or cash-flow end of
+# period). The sibling below accepts the MD&A sentence, which rounds to $11.5B.
 - id: acn-cash-fy25
   tag: numeric_table
   ticker: ACN
@@ -176,6 +178,14 @@
   question: What was cash and cash equivalents as of August 31, 2025 and August 31, 2024 in the Accenture consolidated balance sheets?
   answers: ["11,478,729", "5,004,469"]
   require: all
+
+- id: acn-cash-fy25-prose
+  tag: numeric_prose
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What was Accenture's cash and cash equivalents at August 31, 2025 compared with August 31, 2024?
+  answers: ["Cash and cash equivalents were $11.5 billion, compared with $5.0 billion"]
 
 - id: avgo-segment-revenue-fy24
   tag: numeric_table
@@ -230,7 +240,10 @@
   filing_types: ["10-K"]
   filed_before: 2026-01-01
   question: How large were Accenture's buybacks in fiscal 2025?
-  answers: ["Purchases of Class A shares"]
+  # The cash-flow line ("Purchases of shares") and the Item 5 / equity-statement
+  # tables carry the fiscal 2025 total; the first version of this entry accepted
+  # only the equity-statement label and scored three answering chunks as misses.
+  answers: ["(4,619,497)", "4,614,969"]
 
 - id: acn-notes-2031-principal
   tag: 8k_by_date

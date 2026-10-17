@@ -117,6 +117,13 @@ What the larger set changed:
 - Multi-part is the other gap: `acn-rpo-and-cash` is missed everywhere (the two answers sit in different chunks). Re-measure with the decomposer on before acting.
 - `acn-cash-fy25` is a numeric_table miss at hybrid (vector absent, keyword 16): the balance-sheet chunk is not found by its own question. Worth a direct look at that chunk's text.
 
+### The two misses, examined (2026-10-17)
+
+- `acn-buybacks` was mostly a gold defect. The answer string matched only the equity-statement label, but the fiscal 2025 total also sits in the cash-flow line ("Purchases of shares | (4,619,497)") and the Item 5 table (4,614,969). Keyword search already ranked an Item 5 chunk 9th. The entry now accepts both figures.
+- `acn-cash-fy25` was half gold, half retrieval. The MD&A sentence "Cash and cash equivalents were $11.5 billion, compared with $5.0 billion" answers it in rounded prose and keyword ranks it 7th, but the gold only accepted the statement table. Split in two: the strict entry stays (balance-sheet chunk: keyword rank 16, vector and hybrid beyond 20), and `acn-cash-fy25-prose` accepts the MD&A sentence (keyword rank 1).
+- The real finding: a dense statement table chunk is hard to retrieve with a plain-language question. Keyword ranks boilerplate (financial-statement index, exhibit lists) above it because the query is all common words. Candidate fix: contextual chunk prefix (P1).
+- Lesson for the gold set: before calling a question a retrieval failure, list every chunk that answers it and accept all of them. Gold counts changed to 31 questions; the 30-question numbers above predate these fixes and need a re-run.
+
 ### Earlier 15-question baseline (2026-10-17)
 
 Hybrid, by tag (n is tiny: read direction, not decimals):
