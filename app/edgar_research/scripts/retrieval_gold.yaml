@@ -330,3 +330,102 @@
   question: What was Broadcom's long-term debt on the consolidated balance sheet at November 2, 2025 and November 3, 2024?
   answers: ["61,984", "66,295"]
   require: all
+
+# --- grown 2026-10-17: ASML (20-F). Its tables run oldest year first
+# ("2024 | 2025"), the layout behind the known wrong-column misreads. These
+# entries check retrieval only; a wrong-column reading needs an answer check.
+
+- id: asml-fcf-fy2023
+  tag: numeric_table
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_before: 2025-06-01
+  question: What was ASML's free cash flow in 2023?
+  answers: ["Free cash flow 1 | 3,247.2"]
+
+- id: asml-capex-fy2025
+  tag: numeric_table
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What were ASML's purchases of property, plant and equipment and intangible assets in 2025?
+  answers: ["(2,083.1) | (1,631.2)"]
+
+- id: asml-long-term-debt
+  tag: numeric_table
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What was ASML's non-current long-term debt at December 31, 2025 compared with December 31, 2024?
+  answers: ["3,677.3", "2,709.0"]
+  require: all
+
+- id: asml-cash-fy2025
+  tag: numeric_table
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What were ASML's cash and cash equivalents at December 31, 2025 and December 31, 2024?
+  answers: ["12,735.9", "12,916.0"]
+  require: all
+
+- id: asml-net-income-fy2025
+  tag: numeric_table
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What was ASML's net income in 2025 compared with 2024?
+  answers: ["7,571.6", "9,609.4"]
+  require: all
+
+- id: asml-largest-customer
+  tag: numeric_prose
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What share of ASML's total net sales came from its largest customer in 2025?
+  answers: ["23.9% of total net sales in 2025"]
+
+- id: asml-dividend-2025
+  tag: numeric_prose
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What total dividend per share did ASML propose for 2025?
+  answers: ["total dividend for the year of 2025 of € 7.50 per ordinary share"]
+
+- id: asml-buyback-2025
+  tag: numeric_prose
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: How much did ASML spend on share buybacks in 2025?
+  # The KPI tile, the equity note ("total consideration of € 5,950.0 million")
+  # and the liquidity discussion all answer it.
+  answers: ["€5.9bn Share buyback", "5,950.0 million", "€5,450.0 million increase in share repurchases"]
+
+- id: asml-icfr-fy2024
+  tag: narrative
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_before: 2025-06-01
+  question: Did ASML management conclude that internal control over financial reporting was effective as of December 31, 2024?
+  answers: ["ASML's internal control over financial reporting was effective, as of December 31, 2024"]
+
+- id: asml-auditor-change
+  tag: multi_part
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: Did ASML change its independent auditor, and which firm audited the 2025 financial statements?
+  answers: ["We have served as the Company's auditor since 2024", "We served as the Company's auditor from 2015 to 2025"]
+  require: all
+
+- id: asml-customer-concentration
+  tag: vocab_mismatch
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: How much customer concentration does ASML have?
+  answers: ["our sales remain concentrated among a limited group", "Total net sales to our largest customer amounted to",
+            "As a result of our limited number of customers", "Our three largest customers (based on total net sales)"]

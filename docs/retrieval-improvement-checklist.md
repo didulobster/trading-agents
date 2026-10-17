@@ -100,6 +100,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | P1 contextual chunk prefix (PR #176) | 0.87 hybrid | 0.87 hybrid | Target `acn-cash-fy25` still missed. hit@5 0.74 -> 0.77, hit@1 0.45 -> 0.39, MRR 0.57 -> 0.54. 6 questions up, 5 down. No clear gain; reverted, vectors restored to plain content |
 | 2026-10-17 | Baseline refreshed: 37 questions (6 balance-sheet line items added) | 0.87 hybrid (31 q) | 0.86 hybrid (37 q) | hit@1 0.49, hit@5 0.76, MRR 0.60. The original 31 questions rank exactly as before, confirming the vector revert. New misses: acn-total-assets-fy25 (17), acn-cash-fy25 still missed. Reference for later changes |
 | 2026-10-17 | Company-name embedding (PR #177) | 0.86 hybrid (37 q) | 0.95 hybrid (37 q) | 3 misses enter the top 8 (ranks 7-8); 10 up, 5 down by 1-2 ranks; hit@1 0.49 -> 0.46, MRR 0.60 flat |
+| 2026-10-17 | ASML added, gold set at 48 questions (PR #179) | 0.95 hybrid (37 q) | 0.94 hybrid (48 q) | 10 of 11 ASML questions in the top 8; all three wrong-column tables found (ranks 1-2). hit@1 0.48, MRR 0.62. Reference for later changes |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -144,6 +145,37 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - 15 of 31 questions trip the regex, mostly on "compared with"; plain numeric-table questions get an LLM rewrite they did not need. The rewrite helped some of them and hurt others, with no clear pattern at n=31.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
+
+### ASML added: 48 questions (2026-10-17, PR #179)
+
+ASML ingested (two 20-Fs, 1,190 chunks, each filing parsed as one whole-document section) and
+11 questions added. First run, hybrid: 9 of the 11 ASML questions in the top 8, including all
+three known wrong-column tables (FCF FY2023 rank 2, capex FY2025 rank 2, long-term debt rank 1).
+All 37 ACN/AVGO questions ranked exactly as before.
+
+| | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|
+| hybrid, 48 questions (first run) | 0.46 | 0.79 | 0.92 | 0.60 |
+
+- The two ASML misses were checked before being counted (rule from D5):
+  - `asml-buyback-2025` (missed) was a gold defect. The entry accepted only the KPI tile, but
+    the equity note ("total consideration of € 5,950.0 million") and the liquidity section also
+    answer it. Fixed; keyword alone now finds an answer at rank 3 (was 20).
+  - `asml-customer-concentration` (hybrid 16) is a real vocabulary miss. Two more answering
+    chunks were added to the entry; keyword still finds none of them.
+- Re-run after the fix (current reference):
+
+  | 48 questions | hit@1 | hit@5 | hit@8 | MRR |
+  |---|---|---|---|---|
+  | vector | 0.38 | 0.83 | 0.92 | 0.55 |
+  | keyword | 0.40 | 0.67 | 0.71 | 0.51 |
+  | hybrid | 0.48 | 0.81 | 0.94 | 0.62 |
+
+  Only the two corrected entries moved: `asml-buyback-2025` missed -> 1, and
+  `asml-customer-concentration` stays at 16 hybrid (vector 6, keyword none: fusion with an
+  empty keyword list pushes the vector hit down, as with `avgo-contingent-liabilities`).
+  Misses left: `asml-customer-concentration` (16), `avgo-contingent-liabilities` (13),
+  `acn-new-debt-vague` (14). All three are vocabulary or no-date questions.
 
 ### Company-name embedding trial (2026-10-17, PR #177)
 
