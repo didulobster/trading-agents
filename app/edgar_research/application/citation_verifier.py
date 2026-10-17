@@ -381,9 +381,9 @@ def verify_answer(
                       passing tool call; recorded in `report.flagged`
                       rather than `report.unverified`.
     instructions    : the prompt the model was given. A quote of it (the
-                      red-flag rubric, say) is skipped: no filing will ever
-                      contain it, so it was 17% of all unverified items in
-                      the vault on 2026-10-17.
+                      red-flag rubric, say), or a number from it that matches
+                      nothing retrieved (its 200 bp threshold), is skipped:
+                      no filing will ever contain it.
 
     Returns a VerificationReport. `unverified` is what needs a human look.
     """
@@ -398,6 +398,7 @@ def verify_answer(
     normalized_chunks = {cid: _normalize_text(t) for cid, t in chunk_texts.items()}
     chunk_tokens = {cid: _corpus_number_tokens(t) for cid, t in chunk_texts.items()}
     _corpus_nums = _corpus_values("\n".join(chunk_texts.values()))
+    instruction_numbers = {t.replace(",", "") for t in _corpus_number_tokens(instructions)}
 
     # --- numbers -----------------------------------------------------------
     # Provisionally-unverified numbers, held back from report.unverified with
@@ -466,6 +467,11 @@ def verify_answer(
         f = Finding("number", raw, context, hit)
         if hit is not None:
             report.verified.append(f)
+        elif bare in instruction_numbers:
+            # A threshold quoted from the prompt ("the 200 bp flag"): 10% of
+            # the figures still flagged in the vault on 2026-10-17, and a
+            # perturbed fake matched the prompt once in 239 tries.
+            report.skipped.append(f)
         else:
             provisional_unverified.append((f, m.start()))
 

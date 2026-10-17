@@ -349,3 +349,25 @@ def test_verify_memo_passes_instructions_through():
     rubric = "a driver discussed in the prior period disappears with no explanation"
     assert verify_memo(memo, _DEI_SOURCE, computed_values=[], instructions=rubric) == memo
     assert "Unverified" in verify_memo(memo, _DEI_SOURCE, computed_values=[])
+
+
+_RUBRIC = "5. A reported segment's operating margin fell more than 200 basis points while revenue grew."
+
+
+def test_a_threshold_from_the_instructions_is_skipped_not_unverified():
+    answer = "EMEA margin fell 150 bp, below the 200 bp flag threshold."
+    report = verify_answer(answer, {0: "EMEA margin fell 150 basis points."}, instructions=_RUBRIC)
+    assert not report.unverified
+    assert "200" in [f.value for f in report.skipped]
+
+
+def test_without_instructions_the_threshold_is_still_flagged():
+    answer = "EMEA margin fell 150 bp, below the 200 bp flag threshold."
+    report = verify_answer(answer, {0: "EMEA margin fell 150 basis points."})
+    assert [f.value for f in report.unverified] == ["200"]
+
+
+def test_a_figure_not_in_the_instructions_is_still_flagged():
+    answer = "EMEA margin fell 150 bp, and revenue was $4,317 million."
+    report = verify_answer(answer, {0: "EMEA margin fell 150 basis points."}, instructions=_RUBRIC)
+    assert [f.value for f in report.unverified] == ["4,317"]
