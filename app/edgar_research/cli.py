@@ -201,13 +201,13 @@ async def _corpus_status(ticker: str | None, verbose: bool) -> None:
         if issues:
             _print_issues(issues)
         else:
-            typer.echo("\nāœ“ No stuck or failed filings.")
+            typer.echo("\n✓ No stuck or failed filings.")
 
         incomplete = await query.incomplete_filings(ticker)
         if incomplete:
             _print_incomplete(incomplete)
         else:
-            typer.echo("āœ“ Every 10-K/10-Q has full risk factors, MD&A and financial statements.")
+            typer.echo("✓ Every 10-K/10-Q has full risk factors, MD&A and financial statements.")
 
         if verbose:
             details = await query.per_filing(ticker)
@@ -248,7 +248,7 @@ def _print_summary_table(rows: list[dict]) -> None:
 
 
 def _print_issues(issues: list[FilingIssue]) -> None:
-    typer.echo("\n⚠ļø  Issues:")
+    typer.echo("\n⚠️  Issues:")
     for i in issues:
         age = ""
         if i.updated_at:
@@ -266,7 +266,7 @@ def _print_issues(issues: list[FilingIssue]) -> None:
 
 
 def _print_incomplete(rows: list[IncompleteFiling]) -> None:
-    typer.echo("\n⚠ļø  Embedded but missing or near-empty sections (check the parse):")
+    typer.echo("\n⚠️  Embedded but missing or near-empty sections (check the parse):")
     for r in rows:
         typer.echo(
             f"  - {r.ticker} {r.filing_type} {r.filed_date} "
