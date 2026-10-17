@@ -159,8 +159,25 @@ Question: `acn-cash-fy25`, plain-content vectors, filters ACN / 10-K / filed bef
   "consolidated", "cash"): the FX note, the equity statement, MD&A.
 - Why the prefix failed fits this: a header line adds a few tokens to a vector dominated by
   hundreds of numeric ones.
-- Not yet tested: whether stripping the numbers or isolating the row raises the similarity.
-  That needs a handful of embeddings and is the next step before any fix.
+- Tested (4 embeddings): each altered text scored against the question. The pool's rank-1
+  similarity is 0.714 and rank 8 is 0.673.
+
+  | Embedded text | Similarity | Would rank |
+  |---|---|---|
+  | original chunk (about 30 line items) | 0.574 | 111 |
+  | same chunk, numbers stripped | 0.584 | 97 |
+  | current-assets block (5 line items) | 0.626 | 55 |
+  | title, column headers and the cash row alone | 0.748 | 1 |
+
+- So it is not the numbers: removing them barely moves the score. It is the number of line
+  items. Even five rows dilute the vector far below the top 8; one row with its title and
+  column headers ranks first.
+- Caveat: one question and one table, and the isolated row shares the question's wording
+  ("Consolidated Balance Sheets", both dates), which flatters it. Real agent questions are
+  phrased this way, but the result needs more table questions before it justifies a build.
+- Direction this points to: index statement-table rows individually (title + column headers
+  + one row) as extra retrieval entries that return the full table chunk. Carrying the column
+  headers on every row would also address the wrong-fiscal-year column problem.
 
 ### Contextual chunk prefix measured (2026-10-17, PR #176)
 
