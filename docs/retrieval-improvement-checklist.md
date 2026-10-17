@@ -175,6 +175,27 @@ Question: `acn-cash-fy25`, plain-content vectors, filters ACN / 10-K / filed bef
 - Caveat: one question and one table, and the isolated row shares the question's wording
   ("Consolidated Balance Sheets", both dates), which flatters it. Real agent questions are
   phrased this way, but the result needs more table questions before it justifies a build.
+- Repeated on seven balance-sheet questions (6 new gold entries, 14 embeddings). Vector ranks:
+
+  | Question | Table chunk | Answer anywhere | Row alone |
+  |---|---|---|---|
+  | acn-cash-fy25 | 111 / 359 | 59 | 1 |
+  | acn-total-assets-fy25 | 152 / 359 | 28 | 16 |
+  | acn-goodwill-fy25 | 119 / 359 | 1 | 1 |
+  | acn-long-term-debt-fy25 | 77 / 359 | 1 | 4 |
+  | avgo-cash-fy25 | 2 / 168 | 1 | 1 |
+  | avgo-total-assets-fy25 | 1 / 168 | 1 | 1 |
+  | avgo-long-term-debt-fy25 | 1 / 168 | 1 | 1 |
+
+- The dilution is specific to ACN's balance-sheet chunk (about 45 rows, assets and liabilities
+  together). AVGO's balance sheet (about 18 rows, plus audit-report text) already ranks 1-2.
+- For ACN goodwill and long-term debt, notes carry the same figures and rank 1, so the table
+  miss costs nothing there. Only cash (59) and total assets (28) are real misses, and an
+  isolated row fixes cash (1) but leaves total assets at 16.
+- Unresolved confound: the AVGO chunk contains the company name ("BROADCOM INC."); the ACN chunk
+  never says "Accenture". The failed prefix used the ticker "ACN", not the name.
+- Decision: a row index is not justified yet. It would fix one of two real misses on this
+  set. Test the company-name confound first (two embeddings).
 - Direction this points to: index statement-table rows individually (title + column headers
   + one row) as extra retrieval entries that return the full table chunk. Carrying the column
   headers on every row would also address the wrong-fiscal-year column problem.
