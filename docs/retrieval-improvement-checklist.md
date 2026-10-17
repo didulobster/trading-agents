@@ -89,3 +89,25 @@ Record each shipped item here with the before/after gold-set numbers.
 
 | Date | Item | hit@8 before | hit@8 after | Notes |
 |---|---|---|---|---|
+| 2026-10-17 | P0 baseline (15 questions, ACN + AVGO) | - | 0.87 hybrid | vector 0.73, keyword 0.73, hybrid 0.87. Hybrid hit@1 0.47, MRR 0.58 |
+
+### Baseline detail (2026-10-17, `eval_retrieval --depth 20`)
+
+Hybrid, by tag (n is tiny: read direction, not decimals):
+
+| Tag | n | hit@1 | hit@5 | hit@8 | MRR |
+|---|---|---|---|---|---|
+| numeric_table | 4 | 0.75 | 1.00 | 1.00 | 0.83 |
+| narrative | 5 | 0.40 | 0.80 | 1.00 | 0.58 |
+| multi_part | 2 | 0.00 | 0.50 | 1.00 | 0.16 |
+| vocab_mismatch | 2 | 0.50 | 0.50 | 0.50 | 0.53 |
+| 8k_by_date | 2 | 0.50 | 0.50 | 0.50 | 0.56 |
+
+What it shows:
+
+- Hybrid beats either path alone on hit@8 (0.87 vs 0.73 / 0.73), so fusion earns its keep overall.
+- Fusion hurt one case: `avgo-contingent-liabilities` ranks 13 by vector, absent by keyword, 19 fused. The vocabulary-mismatch fix (P1) targets this.
+- `acn-notes-offering-after-period-end` ranks 9 hybrid, just outside k=8, reproducing the known 8-K date failure. The "in July 2026" wording ranks 1. Supports the filing-date-hint item (P2).
+- Auditor questions rank 4 and 6 hybrid; the answer is one short sentence inside a long audit-report chunk. Worth watching.
+- Both multi-part questions only reach the answer by rank 5-8 without decomposition. This run does not use the decomposer, so it is a floor.
+- Numeric tables are already strong (hit@5 = 1.00), so the table-header item (P1) is about the wrong-fiscal-year column, which this answer-text metric cannot see. It needs a column-aware gold entry before that item can be measured.
