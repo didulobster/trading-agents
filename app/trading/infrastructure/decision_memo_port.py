@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from app.shared.vault import save_output
@@ -46,7 +47,8 @@ def _render_quality_line(memo: DecisionMemo) -> str:
     )
     if memo.verdict_agreement is None:
         return quality
-    agreed = round(memo.verdict_agreement * len(memo.verdict_samples))
+    # Counted from the samples: the shrunk estimate does not invert to k.
+    agreed = Counter(memo.verdict_samples).most_common(1)[0][1]
     return (
         f"**Verdict agreement:** {agreed} of {len(memo.verdict_samples)} "
         f"({memo.verdict_agreement:.2f})  ·  {quality}"

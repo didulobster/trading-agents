@@ -218,13 +218,19 @@ def test_verdict_agreement_is_rendered_beside_evidence_quality_when_a_vote_happe
                 score=0.97, analyst_coverage=1.0, panel_dispersion=0.05, guard_flags=1
             ),
             verdict_samples=["sell", "hold", "sell"],
-            verdict_agreement=0.67,
+            verdict_agreement=0.6,
         )
     )
-    assert "**Verdict agreement:** 2 of 3 (0.67)" in voted
+    # The count comes from the samples, not from the shrunk estimate.
+    assert "**Verdict agreement:** 2 of 3 (0.60)" in voted
     # Shown side by side and NOT reconciled: 0.97 evidence quality on a 2-1
     # split is exactly the pair that used to be one self-contradictory number.
     assert "**Evidence quality:** 0.97" in voted
+
+    unanimous = _format_memo_markdown(
+        _memo(verdict_samples=["hold", "hold", "hold"], verdict_agreement=0.8)
+    )
+    assert "**Verdict agreement:** 3 of 3 (0.80)" in unanimous
 
     # None is not 1.0: a memo whose verdict was never put to a vote has not
     # achieved unanimity, and the line is omitted rather than faked.
