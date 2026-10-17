@@ -93,6 +93,7 @@ def _filters(gold: GoldQuestion):
 
 async def _rank_all(golds: list[GoldQuestion], depth: int) -> dict[str, dict[str, int | None]]:
     """mode -> question id -> first-hit rank."""
+    from app.edgar_research.application.date_hints import narrow_by_date_hints
     from app.edgar_research.application.embedding_service import EmbeddingService
     from app.edgar_research.application.retrieval_service import RetrievalService
     from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
@@ -101,7 +102,7 @@ async def _rank_all(golds: list[GoldQuestion], depth: int) -> dict[str, dict[str
     vectors = await EmbeddingService().embed_many([g.question for g in golds])
     ranks: dict[str, dict[str, int | None]] = {m: {} for m in MODES}
     for gold, vector in zip(golds, vectors):
-        flt = _filters(gold)
+        flt = narrow_by_date_hints(gold.question, _filters(gold))
         by_vector = await repo.search_by_embedding(query_embedding=vector, k=depth, filters=flt)
         by_keyword = await repo.search_by_text(query=gold.question, k=depth, filters=flt)
         pool = 3 * depth

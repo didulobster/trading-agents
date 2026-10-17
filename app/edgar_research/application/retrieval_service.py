@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from app.edgar_research.application.date_hints import narrow_by_date_hints
 from app.edgar_research.application.query_decomposer import DecompositionResult, QueryDecomposer
 from app.edgar_research.infrastructure.repositories.chunk_repo import (
     ChunkRepository,
@@ -139,17 +140,19 @@ class RetrievalService:
         # Retrieve more candidates from each path than we need,
         # so fusion has enough to work with
         candidate_k = k * 3
+        filters = filters or ChunkSearchFilters()
 
-        # Vector path
         vectors = await self.embedder.embed_many([question])
-        vector_results = await self.chunk_repo.search_by_embedding(
-            query_embedding=vectors[0], k=candidate_k, filters=filters,
+        narrowed = narrow_by_date_hints(question, filters)
+        vector_results, bm25_results = await self._search_both(
+            question, vectors[0], candidate_k, narrowed,
         )
-
-        # BM25 path
-        bm25_results = await self.chunk_repo.search_by_text(
-            query=question, k=candidate_k, filters=filters,
-        )
+        if narrowed != filters and not vector_results and not bm25_results:
+            # A date read out of the question matched no filing at all; a
+            # wrong guess about what the date meant must not empty the answer.
+            vector_results, bm25_results = await self._search_both(
+                question, vectors[0], candidate_k, filters,
+            )
 
         # Reciprocal rank fusion
         merged = self._reciprocal_rank_fusion(
@@ -162,6 +165,22 @@ class RetrievalService:
         )
 
         return merged
+
+    async def _search_both(
+        self,
+        question: str,
+        query_vector: list[float],
+        candidate_k: int,
+        filters: ChunkSearchFilters,
+    ) -> tuple[list[RetrievedChunk], list[RetrievedChunk]]:
+        """The vector and keyword candidates for one question."""
+        vector_results = await self.chunk_repo.search_by_embedding(
+            query_embedding=query_vector, k=candidate_k, filters=filters,
+        )
+        bm25_results = await self.chunk_repo.search_by_text(
+            query=question, k=candidate_k, filters=filters,
+        )
+        return vector_results, bm25_results
 
     @staticmethod
     def _reciprocal_rank_fusion(
