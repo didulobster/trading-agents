@@ -127,7 +127,22 @@ the answer model sees).
 - **Chose 0.55:** the D15 rule, the highest threshold that ranks the target first. Against 0.6: `acn-debt-use-of-proceeds` 5 to 1, `acn-notes-offering-after-period-end` 4 to 3, `acn-new-debt-vague` 9 to 7, `acn-rpo-and-cash` 9 to 8.
 - **Caution:** the target pair clears 0.55 by 0.008, so another boundary change could undo it. 0.45 has more margin and better hit@5 but ranks the target 3rd.
 
+### D19. Compound questions measured on real agent calls, no splitter built
+- **Still happens:** the `ask_edgar` description says ONE QUESTION PER CALL (PR #97), yet 442 of 2,694 agent calls in 42 vault provenance files since 2026-09-12 join two or more asks.
+- **Proxy said yes (20 hand-split ACN/AVGO questions):** 11 of 46 parts had none of their own top-3 chunks in the compound question's top 8. But a part's best chunk is not the only chunk that answers it.
+- **Answer text said mostly no.** Four of those questions added verbatim to the gold set (one statement figure per part, `require: all`). Hybrid rank of the full answer, whole question vs parts retrieved separately and interleaved:
+
+  | Question | whole | split |
+  |---|---|---|
+  | `acn-sbc-and-revenue-agent` | 8 | 11 |
+  | `acn-opinc-and-debt-agent` | missed | 7 |
+  | `acn-netinc-and-opcash-agent` | 1 | 8 |
+  | `avgo-fy23-revenue-and-net-income-agent` | 2 | 2 |
+
+- **Decision:** no splitter. Splitting fixed one and hurt two, the same pattern as PR #175. The one miss is the most instruction-laden question ("Retrieve the exact operating income figures and debt figures needed, without summing segment results"), which fits the earlier finding that boilerplate in a question dilutes its embedding.
+- **Gold set:** 53 questions. Hybrid hit@1 0.47, hit@5 0.89, hit@8 0.98, MRR 0.63; multi_part (9) hit@8 0.89, MRR 0.32. Cost under $0.001.
+
 ## Still open
 
-- No misses at k=8 after D18. Weakest: `acn-rpo-and-cash` (8) and `acn-new-debt-vague` (7).
+- One miss at k=8: `acn-opinc-and-debt-agent`, an instruction-laden compound question (D19). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
 - Wrong-fiscal-year columns are not measured: the answer-text check can't see them. D17 removed the headerless fragments that cause them, but no gold entry tests the column.

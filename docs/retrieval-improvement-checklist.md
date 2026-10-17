@@ -5,8 +5,8 @@ measurement first because nothing below can be judged without it.
 
 Why each change was made, kept or dropped: `retrieval-decision-log.md`.
 
-Status as of 2026-10-17: 49-question gold set, hybrid hit@8 1.00, hit@5 0.92,
-MRR 0.64 (latest row of the done log).
+Status as of 2026-10-17: 53-question gold set, hybrid hit@8 0.98, hit@5 0.89,
+MRR 0.63 (latest row of the done log).
 
 Rule for every item: measure by answer content (does a top-k chunk contain the
 answer string), never by chunk id, and rank the right chunk before changing
@@ -51,7 +51,7 @@ retrieval.
 - [ ] **Rerank.** Fetch ~30 candidates, rerank with a cross-encoder, keep 8.
   Only worth building if the gold set shows the right chunk at rank 9-30.
   Check that first; do not build on a guess.
-- [ ] **Split compound questions before retrieval, not only on regex signals.** (Measured 2026-10-17: 3 of the 4 multi-part gold questions never trip the regex, so the decomposer never sees them.)
+- [x] **Split compound questions before retrieval, not only on regex signals.** Measured on real agent questions 2026-10-17 (D19): splitting fixed 1 of 4 and hurt 2; not built. (Measured 2026-10-17: 3 of the 4 multi-part gold questions never trip the regex, so the decomposer never sees them.)
   A 3-part question ranked the ICFR chunk nowhere; asked alone it ranked 1.
   The regex gate in `query_decomposer` misses compound questions with no
   trigger word.
@@ -109,7 +109,8 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | Collapse repeated footnotes to the newest copy (D15) | 0.92 hybrid (49 q) | 0.94 hybrid (49 q) | hit@5 0.80 to 0.86, MRR 0.61 to 0.63; `acn-debt-use-of-proceeds` 9 to 1; six questions up, none down. Reference for later changes |
 | 2026-10-17 | Synonym map for the keyword query (D16) | 0.94 hybrid (49 q) | 0.98 hybrid (49 q) | hit@5 0.86 to 0.92, MRR 0.63 to 0.64, hit@1 flat. contingent liabilities 13 to 3, ASML customer concentration 16 to 5; acn-buybacks 2 to 3. Reference for later changes |
 | 2026-10-17 | Overlap never carries table rows (D17) | 0.98 hybrid (49 q) | 0.96 hybrid (49 q) | Headerless table openings 263 to 0. hit@1 0.49 to 0.47, MRR 0.64 to 0.62; 8 up, 8 down. acn-debt-use-of-proceeds 1 to 5 (D15 threshold no longer collapses its footnote pair). |
-| 2026-10-17 | Repeat threshold 0.6 to 0.55 (D18) | 0.96 hybrid (49 q) | 1.00 hybrid (49 q) | hit@1 0.47 to 0.49, MRR 0.62 to 0.64; acn-debt-use-of-proceeds 5 to 1; none worse. Target clears the threshold by 0.008. Reference for later changes |
+| 2026-10-17 | Repeat threshold 0.6 to 0.55 (D18) | 0.96 hybrid (49 q) | 1.00 hybrid (49 q) | hit@1 0.47 to 0.49, MRR 0.62 to 0.64; acn-debt-use-of-proceeds 5 to 1; none worse. Target clears the threshold by 0.008. |
+| 2026-10-17 | Four real agent compound questions added (D19), no retrieval change | 1.00 hybrid (49 q) | 0.98 hybrid (53 q) | hit@1 0.47, hit@5 0.89, MRR 0.63. `acn-opinc-and-debt-agent` missed; splitting would fix it but hurts two others. Reference for later changes |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
