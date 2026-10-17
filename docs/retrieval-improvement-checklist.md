@@ -94,6 +94,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | P0 baseline, 31 questions after gold fixes | - | 0.84 hybrid | vector 0.77, keyword 0.61, hybrid 0.84. Hybrid hit@1 0.45, MRR 0.57. Reference for later changes |
 | 2026-10-17 | P2 filing-date hints (`date_hints.py`) | 0.84 hybrid | 0.87 hybrid | 8k_by_date hit@8 0.50 -> 0.75; `acn-notes-offering-after-period-end` hybrid rank 9 -> 5. No other question's rank changed. The vague 'raise new debt recently' question has no date and still ranks 15. hit@1 0.45, MRR 0.57 unchanged |
 | 2026-10-17 | Measured the decomposer (`--decompose`), no retrieval change | 0.87 hybrid | 0.84 decomposed | Production path is a wash vs plain hybrid: 4 better, 3 worse, 1 lost from top 8. Multi-part still unfixed because 3 of 4 never trip the regex. Cost $0.0016 |
+| 2026-10-17 | Compound-question trigger (`is_compound`, PR #175), rejected | multi_part 0.75 decomposed | multi_part 0.50 decomposed | All 3 targets worse or still missed; `acn-rpo-and-cash` is blocked by the balance-sheet table chunk, not by decomposition. Decomposer output varies run to run |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
@@ -138,6 +139,31 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - 15 of 31 questions trip the regex, mostly on "compared with"; plain numeric-table questions get an LLM rewrite they did not need. The rewrite helped some of them and hurt others, with no clear pattern at n=31.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
+
+### Compound-question trigger tried and rejected (2026-10-17, PR #175)
+
+`is_compound()` sent questions joining two different concepts with "and" to the decomposer.
+On the gold set it fired on exactly the three multi-part questions the regex missed. Result
+of one `--decompose` run (18 rewrites, $0.0019):
+
+| Question | decomposed rank before | after |
+|---|---|---|
+| `acn-opcash-and-revenue` | 8 | 13 |
+| `avgo-auditor-and-icfr` | 5 | 8 |
+| `acn-rpo-and-cash` | missed | missed |
+
+Multi-part hybrid-decomposed hit@8 went 0.75 -> 0.50. All three targets got worse or stayed missed.
+
+- Decomposition is not what multi-part lacks. `acn-rpo-and-cash` needs the balance-sheet chunk,
+  which no mode finds even for its own single question (`acn-cash-fy25`). That is the
+  dense-table problem (P1 contextual prefix), not a missing rewrite.
+- Splitting the other two made them worse: summed RRF over 2-4 sub-queries spread the top
+  ranks across more chunks. Sub-queries were not logged, so the exact cause is unconfirmed.
+- The decomposer's output varies between identical runs. Questions whose rewrite path did
+  not change moved anyway: `avgo-contingent-liabilities` 17 -> 6, `avgo-supplier-dependence`
+  10 -> 12. So the decomposed column's ALL row (0.84 both times) is noise-dominated; only
+  the targeted questions can be compared across one run pair, and a real claim needs repeats.
+- Decision: do not merge #175. Next for multi-part is the dense-table fix, then re-measure.
 
 ### The two misses, examined (2026-10-17)
 
