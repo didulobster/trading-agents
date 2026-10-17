@@ -141,3 +141,11 @@ def test_why_questions_have_reserved_calls():
     last two on coverage, as the budget checkpoint told it to."""
     setup = re.sub(r"\s+", " ", PROMPT.split("Budget checkpoint")[1][:900])
     assert 'Reserve your last 3 ask_edgar calls for "why" questions' in setup
+
+
+def test_operating_income_is_asked_for_every_covered_year():
+    """Threshold 6(a) trips when leverage rose in every covered year, which
+    needs three years of operating income. An ACN run asked for FY2026 vs
+    FY2025 only, and the FY2024 column in the same chunk never reached it."""
+    item_6 = re.sub(r"\s+", " ", PROMPT.split("6. Debt trajectory")[1].split("(b) Maturity wall")[0])
+    assert "operating income for every covered year in one question that names each year" in item_6
