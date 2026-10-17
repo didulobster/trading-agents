@@ -3,6 +3,8 @@
 Ranked by priority: expected accuracy gain, divided by cost and risk, with
 measurement first because nothing below can be judged without it.
 
+Why each change was made, kept or dropped: `retrieval-decision-log.md`.
+
 Status as of 2026-10-17. No standing accuracy number exists: the eval harness
 was removed on 2026-10-11 and its 8-question set was never committed. The last
 recorded figure is vector-only S@5 = 0.625, which predates hybrid search and
