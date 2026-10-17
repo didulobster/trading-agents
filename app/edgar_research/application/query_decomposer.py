@@ -42,6 +42,43 @@ _VOCABULARY_MISMATCH_TERMS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Stage 1c: a question asking for two different things at once. The signals
+# above need a trigger word ("compared with", "vs"), so "What were X and its Y?"
+# reached retrieval as one query, and one embedding cannot sit near two
+# chunks that are far apart (the filing's note on X and its balance sheet).
+# Concepts are deliberately coarse: a question is compound when "and" joins
+# mentions of two DIFFERENT ones, not when it repeats the same one
+# ("fiscal 2025 and fiscal 2024", "cash and cash equivalents").
+_CONCEPTS = {
+    "revenue": r"revenues?|net sales",
+    "operating_income": r"operating (?:income|profit|margin)",
+    "net_income": r"net (?:income|loss)|earnings per share|diluted (?:shares|eps)",
+    "operating_cash": r"net cash (?:provided|used)|operating cash flow|operating activities",
+    "capex": r"capital expenditures|purchases of property|free cash flow",
+    "cash_balance": r"cash and cash equivalents",
+    "debt": r"debt|senior notes|borrowings|principal maturit",
+    "obligations": r"performance obligations|backlog|bookings",
+    "buybacks": r"repurchases?|buybacks?|share purchases?",
+    "dividends": r"dividends?",
+    "sbc": r"(?:stock|share)-based compensation",
+    "auditor": r"audit(?:s|ed|ors?)\b|accounting firm",
+    "internal_control": r"internal control|material weakness",
+    "related_party": r"related[- ]part(?:y|ies)",
+    "legal": r"legal proceedings|litigation|contingenc",
+    "goodwill": r"goodwill|impairment",
+    "balance_sheet_totals": r"total assets|total liabilities",
+}
+_CONCEPT_PATTERNS = {name: re.compile(rf"\b(?:{pat})", re.IGNORECASE) for name, pat in _CONCEPTS.items()}
+_AND = re.compile(r"\band\b", re.IGNORECASE)
+
+
+def is_compound(query: str) -> bool:
+    """True when `query` joins two different financial concepts with "and"."""
+    if not _AND.search(query):
+        return False
+    return sum(bool(p.search(query)) for p in _CONCEPT_PATTERNS.values()) >= 2
+
+
 DECOMPOSITION_PROMPT = """You are a financial research query decomposer. Given a complex investment research question that requires multiple distinct facts to answer, break it into independent sub-queries that can each be answered by searching a corpus of SEC 10-K filings.
 
 Rules:
@@ -118,7 +155,7 @@ class QueryDecomposer:
         """Stage 1: cheap detection.
             Returns 'decompose', 'expand', or None.
         """
-        if _NEEDS_REWRITE_SIGNALS.search(query):
+        if _NEEDS_REWRITE_SIGNALS.search(query) or is_compound(query):
             return "decompose"
         if _VOCABULARY_MISMATCH_TERMS.search(query):
             return "expand"
