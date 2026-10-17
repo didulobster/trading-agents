@@ -99,9 +99,6 @@ DISCOVERED -> DOWNLOADED -> PARSED -> CHUNKED -> EMBEDDED
                    \----------------------> FAILED (resettable to DISCOVERED)
 ```
 
-`METRICS_EXTRACTED` is still in the enum for filings that reached it before the
-`extract-metrics` command was removed; nothing sets it now.
-
 This makes ingestion resumable — each phase only processes filings sitting at the prerequisite status.
 
 **Core entities:**

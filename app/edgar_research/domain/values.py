@@ -16,7 +16,6 @@ class FilingStatus(str, Enum):
     CHUNKED = "chunked"
     EMBEDDED = "embedded"
     FAILED = "failed"
-    METRICS_EXTRACTED = "metrics_extracted"
 
 
 # -------------------- Value objects --------------------
