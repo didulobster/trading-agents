@@ -9,6 +9,7 @@ from app.edgar_research.infrastructure.repositories.chunk_repo import (
     RetrievedChunk,
 )
 from .embedding_service import EmbeddingService
+from .repeats import collapse_repeats
 
 logger = logging.getLogger(__name__)
 
@@ -154,10 +155,10 @@ class RetrievalService:
                 question, vectors[0], candidate_k, filters,
             )
 
-        # Reciprocal rank fusion
-        merged = self._reciprocal_rank_fusion(
-            vector_results, bm25_results, rrf_k=rrf_k, k=k,
-        )
+        # Fuse the whole pool, so the slots freed by collapsing repeats refill.
+        merged = collapse_repeats(self._reciprocal_rank_fusion(
+            vector_results, bm25_results, rrf_k=rrf_k, k=candidate_k,
+        ))[:k]
 
         logger.info(
             "Hybrid retrieval: %d vector + %d bm25 -> %d merged (top %d)",

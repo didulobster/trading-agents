@@ -251,6 +251,15 @@
   question: What principal amount of senior notes due 2031 did Accenture sell in its July 2026 offering?
   answers: ["5.000% senior notes due 2031"]
 
+# The agent's own question from a 2026-10-17 run. The FY2024-notes wording of
+# the same footnote, repeated in the FY2025 10-K and three 10-Qs, took the top
+# slots; only the FY2026 10-K names acquisitions as a use of the July notes.
+- id: acn-debt-use-of-proceeds
+  tag: narrative
+  ticker: ACN
+  question: Why did Accenture's long-term debt increase from about $5.0 billion at August 31, 2025 to about $10.0 billion at August 31, 2026, and how were the proceeds used?
+  answers: ["funding acquisitions"]
+
 - id: acn-new-debt-vague
   tag: 8k_by_date
   ticker: ACN
