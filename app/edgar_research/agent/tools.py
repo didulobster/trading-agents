@@ -349,6 +349,21 @@ def safe_calculate(expression: str, inputs: list[dict] | None = None) -> str:
         return f"Error evaluating '{expression}': {e}"
 
 
+def calc_steps(expression: str, inputs: list[dict] | None = None) -> list[float]:
+    """The value of every operation inside `expression`, below the final one.
+
+    "(A+B+C)/(D+E+F)" yields A+B, A+B+C, D+E and D+E+F. A memo that states
+    those totals beside the ratio is quoting calculate's own working.
+    """
+    node = ast.parse(expression, mode="eval").body
+    scale_by_value = _scale_by_value(inputs or [])
+    return [
+        float(_eval_node(n, scale_by_value))
+        for n in ast.walk(node)
+        if isinstance(n, ast.BinOp) and n is not node
+    ]
+
+
 def _scale_by_value(inputs: list[dict]) -> dict[float, float]:
     out: dict[float, float] = {}
     for i in inputs:
@@ -659,6 +674,8 @@ async def _dispatch(name: str, inputs: dict) -> str:
 
         result = safe_calculate(expression, inputs.get("inputs", []))
         record_calc_result(result)
+        if _is_number(result):
+            _state().calc_steps.extend(calc_steps(expression, inputs.get("inputs", [])))
         # Said, because a bare 10874360000.0 from thousands-scale inputs read
         # to the agent as an error. Only on a number — an error is not one —
         # and worded for ratios too, where the scale cancels. No digits: the
@@ -1010,6 +1027,9 @@ class _RunState:
     as_of: date | None = None
     retrieved_text: list[str] = field(default_factory=list)
     calc_results: list[float] = field(default_factory=list)
+    # Inner values of passing calculate calls. For the memo verifier only;
+    # never accepted as calculate inputs.
+    calc_steps: list[float] = field(default_factory=list)
     rejected_calc_attempts: list[dict] = field(default_factory=list)
     session_log: list[str] = field(default_factory=list)
     # Keyed by the model that spent it; None for a server too old to say.
@@ -1125,6 +1145,9 @@ def record_calc_result(value: str | float) -> None:
 
 def get_calc_results() -> list[float]:
     return list(_state().calc_results)
+
+def get_calc_steps() -> list[float]:
+    return list(_state().calc_steps)
 
 def record_rejected_calc(expression: str, inputs: list[dict], reason: str) -> None:
     """Record a calculate() call the guard rejected. Also evaluates the raw

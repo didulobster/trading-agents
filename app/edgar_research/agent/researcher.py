@@ -34,7 +34,7 @@ import yaml
 
 from datetime import date, datetime
 from app.edgar_research.agent.prompts import ANALYST_SYSTEM_PROMPT, NEWS_ASSESSMENT_PROMPT
-from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_delegated_usage, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance, tool_usage_by_model
+from app.edgar_research.agent.tools import TOOLS, execute_tool, get_calc_results, get_calc_steps, get_delegated_usage, get_provenance_corpus, get_session_log, get_unretried_rejected_calcs, record_log_line, reset_run_provenance, tool_usage_by_model
 from app.edgar_research.application.memo_verifier import verify_memo
 from app.shared.llm import MODEL_PRICING, get_client
 from app.shared.llm.models import model_for
@@ -416,7 +416,7 @@ async def run_agent(
             else:
                 final = _strip_preamble(final)
 
-            final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+            final = verify_memo(final, get_provenance_corpus(), get_calc_results() + get_calc_steps(),
                                get_unretried_rejected_calcs(),
                                instructions=system_prompt + "\n" + user_task)
             _trace(f"\n[agent finished after {turn + 1} turns]")
@@ -486,7 +486,7 @@ async def run_agent(
             "**INCOMPLETE — this memo was cut off before all sections were "
             "completed.**\n\n"
         ) + final
-    final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
+    final = verify_memo(final, get_provenance_corpus(), get_calc_results() + get_calc_steps(),
                         get_unretried_rejected_calcs(),
                         instructions=system_prompt + "\n" + user_task)
     return final, usage
