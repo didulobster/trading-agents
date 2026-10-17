@@ -6,7 +6,8 @@ from app.edgar_research.application.verdict_consistency import verdict_warning
 
 def verify_memo(memo: str, provenance_corpus: str,
                 computed_values: list[float],
-                rejected_calcs: list[dict] | None = None) -> str:
+                rejected_calcs: list[dict] | None = None,
+                instructions: str = "") -> str:
     # Read from the memo alone, before the provenance checks and outside
     # their early returns: a memo can be perfectly sourced, or have no
     # provenance at all, and still contradict itself about what it concludes.
@@ -21,7 +22,8 @@ def verify_memo(memo: str, provenance_corpus: str,
 
     report = verify_answer(memo, {0: provenance_corpus},
                            computed_values=computed_values,
-                           rejected_calcs=rejected_calcs)
+                           rejected_calcs=rejected_calcs,
+                           instructions=instructions)
     if report.ok and not report.flagged and not report.underived:
         return _appended(verdict_lines)
 

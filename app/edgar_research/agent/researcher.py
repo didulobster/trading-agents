@@ -417,7 +417,8 @@ async def run_agent(
                 final = _strip_preamble(final)
 
             final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
-                               get_unretried_rejected_calcs())
+                               get_unretried_rejected_calcs(),
+                               instructions=system_prompt + "\n" + user_task)
             _trace(f"\n[agent finished after {turn + 1} turns]")
             return final, usage
 
@@ -486,7 +487,8 @@ async def run_agent(
             "completed.**\n\n"
         ) + final
     final = verify_memo(final, get_provenance_corpus(), get_calc_results(),
-                        get_unretried_rejected_calcs())
+                        get_unretried_rejected_calcs(),
+                        instructions=system_prompt + "\n" + user_task)
     return final, usage
 
 
