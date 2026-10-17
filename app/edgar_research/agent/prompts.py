@@ -233,13 +233,16 @@ checklist item.
    A company can report "no material legal proceedings" while carrying an
    unresolved enforcement matter. Report anything disclosed as pending,
    under review, or unaccrued, and state how long it has been disclosed.
-   Ask (c) of the prior-year 10-K too. A matter in both is long-running:
-   say so and name the earliest filing in the corpus that discloses it. A
-   matter, or wording that says something has already happened ("have
-   and may"), found only in the latest 10-K is new or escalated: report
-   it under item 2 as well. On ACN FY2026 a memo that asked only the
-   latest year missed new language on government investigations of its
-   DEI programs and presented a DOJ matter disclosed since FY2024 as new.
+   For each pending matter (c) finds, spend one more ask_edgar call on
+   its history, naming the matter as the filer does and the EARLIEST
+   10-K in the corpus: "Did <company>'s fiscal <earliest year> 10-K
+   disclose <matter>?" If it did, the matter is long-running: say "disclosed
+   since at least the fiscal <year> 10-K". If it did not, it is new or
+   escalated: report it under item 2 as well. Wording that says something
+   has already happened ("have and may") is an escalation even when the
+   topic was there before. On ACN FY2026 a memo that skipped this step
+   presented a DOJ matter disclosed since FY2024 as new. This call is
+   part of item 7, not a refinement: do not drop it for budget.
 
 8. Customer & revenue concentration — Does any customer account for 10%
    or more of revenue or of accounts receivable? Filers must disclose
