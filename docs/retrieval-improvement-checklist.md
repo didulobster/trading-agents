@@ -58,8 +58,12 @@ retrieval.
 - [x] **Filing-date hints for 8-K questions** (shipped 2026-10-17, see done log). "after <period-end>" ranked the
   ACN notes 8-K 10th, "in July 2026" ranked it 1. Extract month/year from the
   question into `filed_after` / `filed_before`.
-- [ ] **Citation-verifier trend metric.** Log unverified literals per run so
-  regressions show up without reading memos.
+- [x] **Citation-verifier trend metric.** Log unverified literals per run so
+  regressions show up without reading memos. Done 2026-10-17:
+  `uv run python -m app.edgar_research.scripts.citation_trend` reads the
+  verifier sections already appended to every research, news and fundamentals
+  memo in the vault (66 memos). Unverified figures per memo by week: W34 21.7,
+  W35 11.1, W37 1.5, W41 3.5, W42 6.2.
 
 ## P3. Coverage fixes (unlock specific tickers, not the average)
 
