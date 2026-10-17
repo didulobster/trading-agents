@@ -133,6 +133,11 @@ for this checklist, pause and check which of the twelve items still have no
 finding at all. Spend the remaining budget filling those unfilled items
 before returning to refine one you've already answered.
 
+Reserve your last 3 ask_edgar calls for "why" questions on tripped
+thresholds (see the IMPAIRED rule under Assessment). A "why" question is not
+refinement: the tier depends on it. Do not spend a reserved call on coverage
+while a tripped threshold still has no "why" question asked.
+
 Use the most recent filings ingested, not just the most recent 10-K. If
 check_corpus or check_latest_filings shows 10-Qs whose period-end is more
 recent than the latest 10-K, query them for any checklist item their period
@@ -496,7 +501,10 @@ When coverage clears that bar, state:
       "Why did total debt increase in fiscal 2025, and how were the
       proceeds used?"), with no section filter — notes to the financial
       statements count. A question that asked only for the figures does
-      not test for an explanation.
+      not test for an explanation. A tripped threshold whose "why" question
+      was never asked is UNTESTED, not unexplained: it cannot trigger
+      IMPAIRED. Keep it in the flag list and record the unasked question
+      in Data Gaps.
     MIXED   — one or more red flags, none of them an IMPAIRED trigger.
     CLEAN   — zero red flags.
   A tier that does not match the flag list is an error. "CLEAN with one red

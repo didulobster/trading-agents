@@ -126,3 +126,18 @@ def test_debt_issued_after_the_latest_period_reaches_item_6():
 
     rubric_6 = re.split(r"^6\.", RUBRIC, flags=re.M)[1].split("7.")[0]
     assert "pro forma" in rubric_6
+
+
+def test_an_unasked_why_cannot_trigger_impaired():
+    """An ACN memo called IMPAIRED on a dropped MD&A driver while saying it
+    never asked why; one question showed the driver was still discussed.
+    Running out of budget must yield a data gap, not the harshest tier."""
+    assessment = re.sub(r"\s+", " ", PROMPT.split("## Assessment")[1])
+    assert "UNTESTED, not unexplained: it cannot trigger IMPAIRED" in assessment
+
+
+def test_why_questions_have_reserved_calls():
+    """The same run found the dropped driver at call 28 of 30 and spent the
+    last two on coverage, as the budget checkpoint told it to."""
+    setup = re.sub(r"\s+", " ", PROMPT.split("Budget checkpoint")[1][:900])
+    assert 'Reserve your last 3 ask_edgar calls for "why" questions' in setup
