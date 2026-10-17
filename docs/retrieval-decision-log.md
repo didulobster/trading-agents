@@ -97,9 +97,15 @@ the answer model sees).
 - **Decision (user):** keep. The live database already holds these vectors.
 - **Open items:** the gains sit at the edge of k=8; six of the 37 questions were added for this problem; the ingestion path is not yet exercised live.
 
+### D15. Collapse repeated footnotes to their newest copy, kept
+- **Found by:** an ACN research run (2026-10-17) said the July 2026 notes had no disclosed use of proceeds. The FY2026 10-K states it ("...commercial paper borrowing and funding acquisitions"). Re-asking through `/ask` reproduced the miss. The chunk ranked 9th in hybrid, and five of the top 8 slots held the October 2024 wording of the same footnote, restated in the FY2025 10-K and three 10-Qs.
+- **Gold first:** added `acn-debt-use-of-proceeds` (the agent's own question). The 49-question baseline is hybrid hit@1 0.47, hit@5 0.80, hit@8 0.92, MRR 0.61.
+- **Change:** after fusing the full candidate pool, a chunk whose word set has Jaccard >= 0.6 with a higher-ranked chunk from another filing counts as a repeat. A newer copy takes the older copy's slot; an older copy is dropped. Chunks from the same filing are never collapsed, because overlapping neighbours share text.
+- **Threshold sweep (scratch):** 0.5 and 0.6 tied on hit@8 0.94 and MRR 0.63; 0.7 and 0.8 left the target at 7-8; 0.9 did not reach it. No question got worse at any threshold. Chose 0.6, the highest threshold that ranks the target first.
+- **Result:** hit@1 0.47 to 0.49, hit@5 0.80 to 0.86, hit@8 0.92 to 0.94, MRR 0.61 to 0.63. Six questions moved up, all ACN; none moved down. The target went from 9 to 1. Live `/ask` now returns the correct use of proceeds.
+- **Open items:** only ACN moved. AVGO and ASML have fewer repeated quarterlies in the corpus, so the rule is untested on them. Year-comparison tables did not collapse at 0.6, but the gold set covers few of them.
+
 ## Still open
 
-- Merge order: #172, #173, #174, #177. Until #177 merges, ingesting from `main` would mix plain and named vectors.
-- After merging, ingest one ticker to exercise `_embed` with the stored name.
 - Remaining misses: `avgo-contingent-liabilities` (vocabulary) and `acn-new-debt-vague` (an 8-K question with no date).
 - Wrong-fiscal-year columns are not measured: the answer-text check can't see them, and ASML is not in the local corpus.

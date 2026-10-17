@@ -101,6 +101,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | Baseline refreshed: 37 questions (6 balance-sheet line items added) | 0.87 hybrid (31 q) | 0.86 hybrid (37 q) | hit@1 0.49, hit@5 0.76, MRR 0.60. The original 31 questions rank exactly as before, confirming the vector revert. New misses: acn-total-assets-fy25 (17), acn-cash-fy25 still missed. Reference for later changes |
 | 2026-10-17 | Company-name embedding (PR #177) | 0.86 hybrid (37 q) | 0.95 hybrid (37 q) | 3 misses enter the top 8 (ranks 7-8); 10 up, 5 down by 1-2 ranks; hit@1 0.49 -> 0.46, MRR 0.60 flat |
 | 2026-10-17 | ASML added, gold set at 48 questions (PR #179) | 0.95 hybrid (37 q) | 0.94 hybrid (48 q) | 10 of 11 ASML questions in the top 8; all three wrong-column tables found (ranks 1-2). hit@1 0.48, MRR 0.62. Reference for later changes |
+| 2026-10-17 | Collapse repeated footnotes to the newest copy (D15) | 0.92 hybrid (49 q) | 0.94 hybrid (49 q) | hit@5 0.80 to 0.86, MRR 0.61 to 0.63; `acn-debt-use-of-proceeds` 9 to 1; six questions up, none down. Reference for later changes |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
