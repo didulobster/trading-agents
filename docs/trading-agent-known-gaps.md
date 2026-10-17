@@ -3146,3 +3146,12 @@ pin `RISK_VERDICT_SAMPLES = 3` because their scenarios are written as
 3-sample votes; without the pin, samples 4 and 5 ran out of stubbed memos
 and were silently dropped as errored, and most of those tests still passed.
 
+**Verified live, 2026-10-17** (one ACN run, thread `trading-ACN-n5-20261017`,
+as-of 2026-10-16, server and pipeline both on `e30666e`). `completed`,
+66 events, `cost_ledger_gap_usd` 0. The memo reads `HOLD (majority of 5
+samples: hold, hold, hold, hold, hold)` and `Verdict agreement: 5 of 5
+(0.86)`: five panels of 9 turns, five Research Manager and five Risk Judge
+calls, none dropped. **$0.2093 and 745 s.** The five samples together cost
+$0.0777, $0.0155 each, a little above the FIG range (ACN's evidence pack is
+bigger); the pre-run estimate of ~$0.18 was 16% low. Cache-read ratio 0.82.
+
