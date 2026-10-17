@@ -363,6 +363,7 @@ def verify_answer(
     chunk_texts: dict[int, str],
     computed_values: list[float] | None = None,
     rejected_calcs: list[dict] | None = None,
+    instructions: str = "",
 ) -> VerificationReport:
     """
     answer          : the generated answer text
@@ -379,6 +380,10 @@ def verify_answer(
                       corpus) but its derivation was never validated by a
                       passing tool call; recorded in `report.flagged`
                       rather than `report.unverified`.
+    instructions    : the prompt the model was given. A quote of it (the
+                      red-flag rubric, say) is skipped: no filing will ever
+                      contain it, so it was 17% of all unverified items in
+                      the vault on 2026-10-17.
 
     Returns a VerificationReport. `unverified` is what needs a human look.
     """
@@ -499,10 +504,17 @@ def verify_answer(
             report.unverified.append(f)
 
     # --- quotes ------------------------------------------------------------
+    own_words = _normalize_text(instructions)
     for quoted, qstart in _extract_quotes(answer):
-        needle = _normalize_text(quoted)
+        # A sentence's closing period often lands inside the quote marks
+        # ("...contracting.") where the source has none.
+        needle = _normalize_text(quoted).rstrip(".,;:")
         start = max(0, qstart - 30)
         context = answer[start : qstart + len(quoted) + 32].replace("\n", " ")
+
+        if own_words and needle in own_words:
+            report.skipped.append(Finding("quote", quoted[:70], context))
+            continue
 
         hit = None
         for cid, text in normalized_chunks.items():

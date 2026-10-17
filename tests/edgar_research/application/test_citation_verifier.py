@@ -308,3 +308,44 @@ def test_a_figure_after_an_item_reference_is_still_checked():
     report = verify_answer(answer, {0: "unrelated"}, computed_values=[], rejected_calcs=[])
 
     assert "4.75" in {f.value for f in report.unverified}
+
+
+# ---- quote false alarms (ACN fundamentals memo, 2026-10-17) ----
+
+_DEI_SOURCE = (
+    'The risk factor states that "Government investigations related to our '
+    "diversity, equity and inclusion programs have and may in the future result "
+    "in financial penalties, sanctions, or restrictions on government contracting\" "
+    "[ACN 10-K 2026 §Item 1A]."
+)
+
+
+def test_period_inside_the_closing_quote_still_verifies():
+    """The memo ended the sentence inside the quote; the source has no period."""
+    answer = ('Item 1A says DEI programs "have and may in the future result in financial '
+              'penalties, sanctions, or restrictions on government contracting." Next point.')
+    report = verify_answer(answer, {0: _DEI_SOURCE})
+    assert [f.kind for f in report.verified] == ["quote"]
+    assert not report.unverified
+
+
+def test_a_changed_word_is_still_unverified():
+    answer = ('Item 1A says DEI programs "have and may in the future result in large '
+              'penalties, sanctions, or restrictions on government contracting." Next.')
+    assert len(verify_answer(answer, {0: _DEI_SOURCE}).unverified) == 1
+
+
+def test_quoting_the_instructions_is_skipped_not_unverified():
+    """The agent quotes its own red-flag rubric; no filing will ever contain it."""
+    rubric = "Flag total debt that rose in every covered year, or a driver discussed in the prior period disappears with no explanation."
+    answer = 'FY2024 debt was not retrieved, so the "rose in every covered year" clause cannot be confirmed.'
+    report = verify_answer(answer, {0: _DEI_SOURCE}, instructions=rubric)
+    assert not report.unverified
+    assert [f.kind for f in report.skipped if f.kind == "quote"] == ["quote"]
+
+
+def test_verify_memo_passes_instructions_through():
+    memo = 'The "driver discussed in the prior period disappears with no explanation" test is met.'
+    rubric = "a driver discussed in the prior period disappears with no explanation"
+    assert verify_memo(memo, _DEI_SOURCE, computed_values=[], instructions=rubric) == memo
+    assert "Unverified" in verify_memo(memo, _DEI_SOURCE, computed_values=[])
