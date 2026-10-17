@@ -2,7 +2,7 @@ import logging
 import re
 from pathlib import Path
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 from .models import ParsedSection
 
@@ -260,8 +260,13 @@ def _flatten_to_text_blocks(soup: BeautifulSoup) -> tuple[list[str], list[tuple[
     rendered: dict[int, str | None] = {}   # table id -> rendering, None if not a data table
 
     for tag in soup.find_all(BLOCK_TAGS):
-        # Avoid double-counting nested blocks; only emit at the leaf level
+        # Avoid double-counting nested blocks; only emit at the leaf level,
+        # plus any text a non-leaf block holds before its first nested block.
         if any(child.name in BLOCK_TAGS for child in tag.find_all()):
+            lead = _leading_text(tag, BLOCK_TAGS)
+            if lead:
+                blocks.append(lead)
+                tables.append(None)
             continue
         text = tag.get_text(" ", strip=True)
         text = re.sub(r"\s+", " ", text).strip()
@@ -275,6 +280,26 @@ def _flatten_to_text_blocks(soup: BeautifulSoup) -> tuple[list[str], list[tuple[
         tables.append(_data_table_of(tag, rendered))
 
     return blocks, tables
+
+
+def _leading_text(tag, block_tags: set[str]) -> str:
+    """Text inside `tag` that comes before its first nested block.
+
+    AVGO's 10-K writes <div><span>CONSOLIDATED STATEMENTS OF CASH FLOWS</span>
+    <table>...</table></div>. The div is not a leaf and the span is not a
+    block, so emitting leaves only dropped every statement title, and ACN's
+    balance-sheet date line with them. Text after the nested block is left
+    out: emitted here it would land ahead of the block, and on the corpus it
+    was 13 of 183 such strings, all boilerplate ("Amounts in table may not
+    total due to rounding.").
+    """
+    parts: list[str] = []
+    for node in tag.descendants:
+        if getattr(node, "name", None) in block_tags:
+            break
+        if type(node) is NavigableString:   # not comments or CDATA
+            parts.append(str(node))
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()
 
 
 def _data_table_of(tag, rendered: dict[int, str | None]) -> tuple[int, str] | None:

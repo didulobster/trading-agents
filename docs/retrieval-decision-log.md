@@ -150,7 +150,14 @@ the answer model sees).
 - **Found instead:** two new plain-hybrid misses, `avgo-capex-3yr-instructed` and `avgo-opinc-3yr-instructed` (three-year AVGO statement lines).
 - **Gold set:** 61 questions. Hybrid hit@1 0.44, hit@5 0.85, hit@8 0.95, MRR 0.60; instructed (8) hit@8 0.75. Cost under $0.0002.
 
+### D21. Parser keeps text that shares a block with a table, kept
+- **Found:** `avgo-capex-3yr-instructed` and `avgo-opinc-3yr-instructed` (D20) missed because AVGO's statement chunks carried no title. The 10-K writes `<div><span>CONSOLIDATED STATEMENTS OF CASH FLOWS</span><table>...</table></div>`; the flattener emitted only leaf blocks, so a div holding a table was skipped and its span never emitted.
+- **Measured (free, all 19 corpus filings):** 183 such strings, 170 before the nested block (statement and note titles, table captions, ACN's balance-sheet date line "August 31, 2025 and 2024") and 13 after it (all boilerplate such as "Amounts in table may not total due to rounding.").
+- **Change:** a non-leaf block emits the text it holds before its first nested block. Text after it is still dropped, since emitting it there would put it ahead of the table. Old vs new parse: section structure identical in all 19 filings; AVGO gains 770-1,400 characters per filing, ACN 26, ASML 306.
+- **Corpus:** the 9 filings with added text reparsed and re-embedded (about $0.02).
+- **Result (61 questions, same question vectors):** hit@1 0.44 to 0.46, hit@5 0.85 to 0.84, hit@8 0.95 to 0.98, MRR 0.60 to 0.61. `avgo-opinc-3yr-instructed` missed to 4, `avgo-capex-3yr-instructed` missed to 8, `avgo-capex-fy25-instructed` 5 to 1, `acn-cash-fy25` and `acn-total-assets-fy25` 4 to 3. Down, all still in the top 8: `avgo-auditor` 5 to 6, `avgo-auditor-and-icfr` 5 to 6, `avgo-buybacks` 3 to 5, `avgo-fy23-revenue-and-net-income-agent` 2 to 3.
+
 ## Still open
 
-- Misses at k=8: `acn-opinc-and-debt-agent` (debt asked as a ratio, D19/D20), `avgo-capex-3yr-instructed` and `avgo-opinc-3yr-instructed` (three-year AVGO statement lines, D20). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
+- One miss at k=8: `acn-opinc-and-debt-agent` (debt asked as a ratio, D19/D20). `avgo-capex-3yr-instructed` sits at the edge (8). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
 - Wrong-fiscal-year columns are not measured: the answer-text check can't see them. D17 removed the headerless fragments that cause them, but no gold entry tests the column.
