@@ -59,5 +59,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # The service database starts empty. Without the schema,
+      # test_filing_status_enum queried a `filing_status` type that did not
+      # exist and failed on every run.
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
       - name: Run tests
         run: uv run pytest -q -rs
