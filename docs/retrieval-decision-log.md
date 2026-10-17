@@ -121,7 +121,13 @@ the answer model sees).
 - **Biggest drop explained:** `acn-debt-use-of-proceeds` 1 to 5. The FY2025 and FY2026 copies of the debt footnote now overlap at Jaccard 0.558, under D15's 0.6, so the older copy is no longer collapsed and takes rank 1.
 - **Decision (user):** keep, then retune the repeat threshold on the new chunks as its own change.
 
+### D18. Repeat threshold 0.6 to 0.55, kept
+- **Why:** after D17 the FY2025 and FY2026 copies of the ACN debt footnote overlap at Jaccard 0.558, so 0.6 no longer collapses them.
+- **Sweep (free, same question vectors, D17 chunks):** 0.4 and 0.45 gave hit@5 0.94, hit@8 1.00, MRR 0.63, target at 3. 0.5 gave hit@8 1.00, target at 3. 0.55 gave hit@1 0.49, hit@5 0.92, hit@8 1.00, MRR 0.64, target at 1. No question got worse than at 0.6 at any of these.
+- **Chose 0.55:** the D15 rule, the highest threshold that ranks the target first. Against 0.6: `acn-debt-use-of-proceeds` 5 to 1, `acn-notes-offering-after-period-end` 4 to 3, `acn-new-debt-vague` 9 to 7, `acn-rpo-and-cash` 9 to 8.
+- **Caution:** the target pair clears 0.55 by 0.008, so another boundary change could undo it. 0.45 has more margin and better hit@5 but ranks the target 3rd.
+
 ## Still open
 
-- Remaining miss: `acn-new-debt-vague` (an 8-K question with no date).
-- Wrong-fiscal-year columns are not measured: the answer-text check can't see them, and ASML is not in the local corpus.
+- No misses at k=8 after D18. Weakest: `acn-rpo-and-cash` (8) and `acn-new-debt-vague` (7).
+- Wrong-fiscal-year columns are not measured: the answer-text check can't see them. D17 removed the headerless fragments that cause them, but no gold entry tests the column.

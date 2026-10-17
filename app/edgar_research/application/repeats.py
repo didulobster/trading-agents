@@ -4,10 +4,11 @@ import re
 
 from app.edgar_research.infrastructure.repositories.chunk_repo import RetrievedChunk
 
-# Chosen on the 49-question gold set: 0.6 moved acn-debt-use-of-proceeds from
-# rank 9 to 1 and changed no other question for the worse; 0.8 collapsed too
-# little to reach it. See docs/retrieval-decision-log.md (D15).
-REPEAT_THRESHOLD = 0.6
+# The highest value that ranks acn-debt-use-of-proceeds first on the
+# 49-question gold set, with no question worse. 0.6 did until the overlap
+# change (D17) moved its footnote pair to 0.558. See
+# docs/retrieval-decision-log.md (D15, D18).
+REPEAT_THRESHOLD = 0.55
 
 
 def _words(text: str) -> set[str]:
