@@ -1,0 +1,135 @@
+# Retrieval gold set: a question is answered when the retrieved chunks contain
+# the answer text. Chunk ids are never used (they change on every re-ingest).
+#
+#   id        unique, stable
+#   tag       numeric_table | numeric_prose | narrative | vocab_mismatch
+#             | multi_part | 8k_by_date
+#   ticker    required; filing_types / filed_after / filed_before optional
+#   question  plain language, as the agent would ask it
+#   answers   strings that must appear verbatim in the chunks (whitespace and
+#             curly quotes are normalised)
+#   require   any (default): one answer string suffices
+#             all: every answer string must appear somewhere in the top-k
+#
+# Verify the strings still exist in the corpus: eval_retrieval --check-gold
+# Seeded 2026-10-17 from real agent questions on ACN and AVGO.
+
+- id: avgo-opcash-fy25
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  question: What were net cash provided by operating activities in fiscal year 2025 compared with fiscal year 2024 for Broadcom, per the consolidated statements of cash flows?
+  answers: ["27,537", "19,962"]
+  require: all
+
+- id: avgo-revenue-fy25
+  tag: numeric_table
+  ticker: AVGO
+  filing_types: ["10-K"]
+  question: What was Broadcom's total net revenue in fiscal year 2025 compared with fiscal year 2024 as reported in the consolidated statements of operations?
+  answers: ["63,887", "51,574"]
+  require: all
+
+- id: acn-opcash-fy25
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: What were net cash provided by operating activities in fiscal 2025 and fiscal 2024 in the Accenture consolidated cash flows statements?
+  answers: ["11,474", "9,131"]
+  require: all
+
+- id: acn-revenue-fy26
+  tag: numeric_table
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_after: 2026-01-01
+  question: What were total revenues in fiscal 2026 compared with fiscal 2025 for Accenture?
+  answers: ["74,183", "69,673"]
+  require: all
+
+- id: avgo-icfr
+  tag: narrative
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: Does management conclude that Broadcom's internal control over financial reporting was effective as of November 2, 2025, or does it disclose a material weakness?
+  answers: ["our internal control over financial reporting is effective based on those criteria"]
+
+- id: acn-icfr
+  tag: narrative
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: Does management conclude that Accenture's internal control over financial reporting was effective as of August 31, 2025, or does it disclose any material weakness?
+  answers: ["our internal control over financial reporting was effective as of the end of the fiscal year"]
+
+- id: avgo-auditor
+  tag: narrative
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: Which independent registered public accounting firm audited Broadcom's FY2025 consolidated financial statements, and has the auditor changed?
+  answers: ["We have served as the Company's auditor since 2006"]
+
+- id: acn-auditor
+  tag: narrative
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: Which independent registered public accounting firm audited Accenture's consolidated financial statements for fiscal 2025, and did the auditor change?
+  answers: ["We have served as the Company's auditor since 2002"]
+
+- id: avgo-rpo
+  tag: narrative
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What were Broadcom's remaining performance obligations as of November 2, 2025 compared with November 3, 2024?
+  answers: ["Revenue allocated to remaining performance obligations represents the transaction price allocated to unsatisfied"]
+
+- id: avgo-contingent-liabilities
+  tag: vocab_mismatch
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What contingent liabilities does Broadcom disclose?
+  answers: ["14. Commitments and Contingencies"]
+
+- id: avgo-supplier-dependence
+  tag: vocab_mismatch
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: What supply chain risks does Broadcom have from outsourcing manufacturing?
+  answers: ["outsource a majority of our manufacturing operations, utilizing third-party foundry"]
+
+- id: acn-notes-offering-july
+  tag: 8k_by_date
+  ticker: ACN
+  question: Did Accenture Capital issue notes in July 2026, and what were the principal amounts and interest rates of the 2026 senior notes offering?
+  answers: ["4.750% senior notes due 2029"]
+
+- id: acn-notes-offering-after-period-end
+  tag: 8k_by_date
+  ticker: ACN
+  question: Did Accenture issue senior notes after May 31, 2026, and what were the principal amounts and interest rates?
+  answers: ["4.750% senior notes due 2029"]
+
+- id: avgo-revenue-and-opcash
+  tag: multi_part
+  ticker: AVGO
+  filing_types: ["10-K"]
+  filed_after: 2025-06-01
+  question: How did Broadcom's fiscal 2025 total net revenue and net cash provided by operating activities compare with fiscal 2024?
+  answers: ["63,887", "27,537"]
+  require: all
+
+- id: acn-opcash-and-revenue
+  tag: multi_part
+  ticker: ACN
+  filing_types: ["10-K"]
+  filed_before: 2026-01-01
+  question: How did Accenture's net cash provided by operating activities and total revenues change between fiscal 2024 and fiscal 2025?
+  answers: ["11,474", "69,673"]
+  require: all
