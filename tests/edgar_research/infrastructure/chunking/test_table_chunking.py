@@ -138,3 +138,40 @@ def test_preamble_is_capped_so_it_cannot_crowd_out_the_rows():
     # Trimmed rather than repeated in full on every piece.
     assert all(c.content.count("heading cell 11") <= 1 for c in chunks)
     assert sum(c.content.count("Line item") for c in chunks) == 120
+
+
+# ---- overlap between chunks ----
+
+def _lines(n: int, word: str = "Revenue") -> list[str]:
+    """Short prose paragraphs, as annual-report text arrives."""
+    return [f"{word} grew in sentence {i} of the discussion." for i in range(n)]
+
+
+_TABLE = "\n".join(["Year ended December 31 | 2024 | 2025"] + _rows(8))
+
+
+def _openings(chunks) -> list[str]:
+    return [c.content.split("\n\n")[0] for c in chunks[1:]]
+
+
+def test_overlap_never_carries_table_rows():
+    """ASML's 2025 20-F: the 80-token overlap began the next chunk with
+    "(2,083.1) | (1,631.2)" and the free cash flow row, without the year
+    heading that says which column is 2025."""
+    chunks = _chunks(_lines(10) + [_TABLE] + _lines(40, "Margin"), target_tokens=300)
+    assert len(chunks) > 1
+    assert all(" | " not in o for o in _openings(chunks))
+
+
+def test_prose_overlap_is_still_carried():
+    chunks = _chunks(_lines(80), target_tokens=300)
+    assert len(chunks) > 1
+    assert chunks[0].content[-30:] in chunks[1].content
+
+
+def test_overlap_keeps_the_prose_after_a_table():
+    """A footnote after a table may be carried; the rows above it may not."""
+    footnote = "1. Free cash flow is a non-GAAP measure."
+    chunks = _chunks(_lines(10) + [_TABLE, footnote] + _lines(40, "Margin"), target_tokens=300)
+    assert any(o.endswith(footnote) for o in _openings(chunks))
+    assert all(" | " not in o for o in _openings(chunks))

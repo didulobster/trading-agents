@@ -93,7 +93,7 @@ def _chunk_one_section(
             joined = "\n\n".join(buffer)
             chunks.append((joined, buffer_tokens))
             # Start new buffer with overlap from the tail of the previous chunk
-            buffer, buffer_tokens = _carry_overlap(joined, overlap_tokens)
+            buffer, buffer_tokens = _carry_overlap(buffer, overlap_tokens)
             buffer.append(para)
             buffer_tokens += para_tokens
         else:
@@ -225,10 +225,21 @@ def _token_window_split(
     return chunks
 
 
-def _carry_overlap(prev_chunk_text: str, overlap_tokens: int) -> tuple[list[str], int]:
-    """Take the tail of the previous chunk as overlap into the next buffer."""
-    tokens = _ENCODER.encode(prev_chunk_text)
+def _carry_overlap(paragraphs: list[str], overlap_tokens: int) -> tuple[list[str], int]:
+    """The previous chunk's trailing prose, as overlap into the next buffer.
+
+    Stops at the last table: a token tail cut through one opened the next
+    chunk with rows and no year heading. In 2,402 follow-on chunks, 263
+    began that way, ASML's 2025 capex row among them.
+    """
+    prose: list[str] = []
+    for para in reversed(paragraphs):
+        if "\n" in para:
+            break
+        prose.insert(0, para)
+    if not prose:
+        return [], 0
+    tokens = _ENCODER.encode("\n\n".join(prose))
     if len(tokens) <= overlap_tokens:
-        return [prev_chunk_text], len(tokens)
-    tail = _ENCODER.decode(tokens[-overlap_tokens:])
-    return [tail], overlap_tokens
+        return ["\n\n".join(prose)], len(tokens)
+    return [_ENCODER.decode(tokens[-overlap_tokens:])], overlap_tokens

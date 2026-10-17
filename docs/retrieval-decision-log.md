@@ -112,6 +112,15 @@ the answer model sees).
 - **Hybrid (one embedding call, same vectors before and after):** before matched the D15 baseline exactly. hit@1 0.49 flat, hit@5 0.86 to 0.92, hit@8 0.94 to 0.98, MRR 0.63 to 0.64. `avgo-contingent-liabilities` 13 to 3, `asml-customer-concentration` 16 to 5, `avgo-buybacks` 6 to 3; `acn-buybacks` 2 to 3.
 - **Open items:** the decomposer still sends these terms to an LLM "expand" rewrite (`_VOCABULARY_MISMATCH_TERMS`), which once moved `avgo-supplier-dependence` from 1 to 10; not changed here. Four vocab questions is a small sample.
 
+### D17. Overlap never carries table rows, kept
+- **Found:** the chunker already repeats a split table's caption and year headings on every piece. The headerless rows came from the 80-token overlap: when a chunk ended inside or just after a table, its token tail opened the next chunk with rows and no headings. ASML's 2025 20-F chunk 3435 opened with "(2,083.1) | (1,631.2)" and the free cash flow row; the known capex failure read EUR 2.1B, which is 2,083.1.
+- **Measured (free, re-chunking stored sections):** 263 of 2,402 follow-on chunks opened with carried table rows (ACN 119, AVGO 67, ASML 77). The replay of the old chunker matched the stored chunks exactly.
+- **Change:** `_carry_overlap` carries the previous chunk's trailing prose paragraphs only, stopping at the last table. Re-chunked: 0 headerless openings (23 detector hits remain, all split-table pieces or new tables with their own headings).
+- **Corpus:** all 19 filings reparsed and re-embedded (about $0.03); 2,553 to 2,525 chunks. Chunks whose text did not change kept their vectors (cosine 0.996 or more).
+- **Retrieval (same question vectors before and after):** hit@1 0.49 to 0.47, hit@5 0.92 flat, hit@8 0.98 to 0.96, MRR 0.64 to 0.62. Eight questions up, eight down; `acn-rpo-and-cash` 6 to 9 leaves the top 8. The answer-text metric cannot see the wrong-column failure this fixes.
+- **Biggest drop explained:** `acn-debt-use-of-proceeds` 1 to 5. The FY2025 and FY2026 copies of the debt footnote now overlap at Jaccard 0.558, under D15's 0.6, so the older copy is no longer collapsed and takes rank 1.
+- **Decision (user):** keep, then retune the repeat threshold on the new chunks as its own change.
+
 ## Still open
 
 - Remaining miss: `acn-new-debt-vague` (an 8-K question with no date).
