@@ -142,7 +142,15 @@ the answer model sees).
 - **Decision:** no splitter. Splitting fixed one and hurt two, the same pattern as PR #175. The one miss is the most instruction-laden question ("Retrieve the exact operating income figures and debt figures needed, without summing segment results"), which fits the earlier finding that boilerplate in a question dilutes its embedding.
 - **Gold set:** 53 questions. Hybrid hit@1 0.47, hit@5 0.89, hit@8 0.98, MRR 0.63; multi_part (9) hit@8 0.89, MRR 0.32. Cost under $0.001.
 
+### D20. Instruction text in agent questions measured, no stripping built
+- **Seen:** 1,033 of 2,694 agent `ask_edgar` questions carry an imperative sentence after the opening clause; 90 ACN/AVGO questions end in an answer-format instruction ("Quote the exact figures.").
+- **One-question probe (`acn-opinc-and-debt-agent`):** dropping its last sentence moved operating income 8 to 1 but debt stayed missed. Debt ranked 3 only when asked directly ("what was total debt?") instead of as "did total debt divided by operating income rise or fall". The miss is the ratio phrasing, not the instruction.
+- **Gold first:** eight of those questions added verbatim, tag `instructed`. Prototype rule: drop trailing format sentences whose words add nothing beyond the rest of the question, plus "without ..." clauses. Hybrid ranks, original vs stripped: `acn-revenues-3yr-instructed` 3 to 1, `avgo-capex-3yr-instructed` missed to 10, `acn-sbc-revenue-instructed` 6 to 8; three unchanged, three had nothing to strip; the known miss stayed missed. hit@8 6 of 9 either way.
+- **Decision:** no stripping. One better, one worse, no change at k=8.
+- **Found instead:** two new plain-hybrid misses, `avgo-capex-3yr-instructed` and `avgo-opinc-3yr-instructed` (three-year AVGO statement lines).
+- **Gold set:** 61 questions. Hybrid hit@1 0.44, hit@5 0.85, hit@8 0.95, MRR 0.60; instructed (8) hit@8 0.75. Cost under $0.0002.
+
 ## Still open
 
-- One miss at k=8: `acn-opinc-and-debt-agent`, an instruction-laden compound question (D19). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
+- Misses at k=8: `acn-opinc-and-debt-agent` (debt asked as a ratio, D19/D20), `avgo-capex-3yr-instructed` and `avgo-opinc-3yr-instructed` (three-year AVGO statement lines, D20). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
 - Wrong-fiscal-year columns are not measured: the answer-text check can't see them. D17 removed the headerless fragments that cause them, but no gold entry tests the column.

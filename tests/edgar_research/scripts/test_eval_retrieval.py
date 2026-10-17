@@ -47,5 +47,6 @@ def test_the_committed_gold_set_loads_with_unique_ids_and_known_tags():
     assert len({g.id for g in golds}) == len(golds)
     assert {g.tag for g in golds} <= {
         "numeric_table", "numeric_prose", "narrative", "vocab_mismatch", "multi_part", "8k_by_date",
+        "instructed",
     }
     assert all(g.answers and g.require in ("any", "all") for g in golds)

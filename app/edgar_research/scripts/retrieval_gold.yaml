@@ -3,7 +3,7 @@
 #
 #   id        unique, stable
 #   tag       numeric_table | numeric_prose | narrative | vocab_mismatch
-#             | multi_part | 8k_by_date
+#             | multi_part | 8k_by_date | instructed
 #   ticker    required; filing_types / filed_after / filed_before optional
 #   question  plain language, as the agent would ask it
 #   answers   strings that must appear verbatim in the chunks (whitespace and
@@ -468,3 +468,56 @@
   question: "For Broadcom (AVGO) FY2023 (period ended October 29, 2023), what was total net revenue, and what was net income? Also for FY2025 (period ended November 2, 2025) and FY2024 (ended November 3, 2024), what was net income for each year?"
   answers: ["35,819", "14,082", "23,126"]
   require: all
+
+# Agent questions ending in answer-format instructions ("Quote the exact
+# figures."), verbatim from vault provenance 2026-09/10. Tag: instructed.
+- id: avgo-capex-fy25-instructed
+  tag: instructed
+  ticker: AVGO
+  question: 'In the Broadcom (AVGO) FY2025 10-K (period ended November 2, 2025), what is the exact dollar amount of "purchases of property, plant and equipment" or "capital expenditures" or "purchases of property and equipment" on the consolidated statements of cash flows? Please state the exact figure from the cash flow statement.'
+  answers: ["Purchases of property, plant and equipment | (623)"]
+
+- id: acn-sbc-revenue-instructed
+  tag: instructed
+  ticker: ACN
+  question: "For Accenture (ACN), from the FY2025 10-K (ended 8/31/2025) and FY2024 10-K (ended 8/31/2024): what was share-based compensation expense for each of FY2025, FY2024, and FY2023, and what was total revenue for each? Quote the exact figures."
+  answers: ["2,093,878", "69,672,977"]
+  require: all
+
+- id: acn-diluted-shares-instructed
+  tag: instructed
+  ticker: ACN
+  question: "For Accenture, what was Diluted earnings per share and the related denominator (diluted weighted-average ordinary shares outstanding) as stated in the consolidated income statements for fiscal years 2023, 2024, and 2025? Cite the exact shares outstanding figures."
+  answers: ["632,435,108"]
+
+- id: acn-revenues-3yr-instructed
+  tag: instructed
+  ticker: ACN
+  question: "What were Accenture's total revenues for fiscal years 2025 (ended August 31, 2025), 2024 (ended August 31, 2024), and 2023 (ended August 31, 2023), as stated exactly in the consolidated statements of income in the 10-K filings (filed 2025-10-10, 2024-10-10, 2023-10-12)? Give each figure in the units stated."
+  answers: ["69,672,977", "64,896,464"]
+  require: all
+
+- id: avgo-capex-3yr-instructed
+  tag: instructed
+  ticker: AVGO
+  question: 'What is AVGO''s capital expenditure amount in each of FY2025, FY2024, and FY2023? Search the cash flow statements in the 10-K filings for the line item that represents capital expenditures (which may be labeled "purchases of property, plant and equipment" or "capital expenditures"). Report the exact amounts and which filing each came from.'
+  answers: ["Purchases of property, plant and equipment | (623) | (548) | (452)"]
+
+- id: avgo-10q-capex-instructed
+  tag: instructed
+  ticker: AVGO
+  question: 'In AVGO''s 10-Q for the quarter ended May 3, 2026 (filed June 9, 2026), the consolidated statement of cash flows for the six months ended: what were "Purchases of property, plant and equipment" (capital expenditures) for the first six months of fiscal 2026 and the comparable period of fiscal 2025? Report exact dollar amounts.'
+  answers: ["Purchases of property, plant and equipment | (481) | (244)"]
+
+- id: avgo-capex-acq-instructed
+  tag: instructed
+  ticker: AVGO
+  question: 'Broadcom Inc (AVGO): In the FY2025 10-K cash flow statement, what cash was used for "Purchases of property, plant and equipment" and what cash was used for "Acquisitions" in FY2025 (ended November 2 2025)? Quote the exact investing cash flow line items and amounts for fiscal 2025.'
+  answers: ["Purchases of property, plant and equipment | (623) | (548)", "Acquisitions of businesses, net of cash acquired | — | (25,978)"]
+  require: all
+
+- id: avgo-opinc-3yr-instructed
+  tag: instructed
+  ticker: AVGO
+  question: "In AVGO's fiscal 2025 10-K (filed Dec 2025), the consolidated statements of operations - what is the operating income (total operating expenses and operating income) for fiscal 2025, 2024, and 2023? Report the operating income line amount for each of the three fiscal years."
+  answers: ["Operating income | 25,484 | 13,463 | 16,207"]
