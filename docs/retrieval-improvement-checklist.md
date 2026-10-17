@@ -48,7 +48,7 @@ retrieval.
   A 3-part question ranked the ICFR chunk nowhere; asked alone it ranked 1.
   The regex gate in `query_decomposer` misses compound questions with no
   trigger word.
-- [ ] **Filing-date hints for 8-K questions.** "after <period-end>" ranked the
+- [x] **Filing-date hints for 8-K questions** (shipped 2026-10-17, see done log). "after <period-end>" ranked the
   ACN notes 8-K 10th, "in July 2026" ranked it 1. Extract month/year from the
   question into `filed_after` / `filed_before`.
 - [ ] **Citation-verifier trend metric.** Log unverified literals per run so
@@ -92,6 +92,7 @@ Record each shipped item here with the before/after gold-set numbers.
 | 2026-10-17 | P0 baseline (15 questions, ACN + AVGO) | - | 0.87 hybrid | vector 0.73, keyword 0.73, hybrid 0.87. Hybrid hit@1 0.47, MRR 0.58 |
 | 2026-10-17 | P0 baseline, gold set grown to 30 questions | - | 0.80 hybrid | vector 0.73, keyword 0.60, hybrid 0.80. Hybrid hit@1 0.43, MRR 0.54. Superseded by the next row: two gold entries undercounted answering chunks |
 | 2026-10-17 | P0 baseline, 31 questions after gold fixes | - | 0.84 hybrid | vector 0.77, keyword 0.61, hybrid 0.84. Hybrid hit@1 0.45, MRR 0.57. Reference for later changes |
+| 2026-10-17 | P2 filing-date hints (`date_hints.py`) | 0.84 hybrid | 0.87 hybrid | 8k_by_date hit@8 0.50 -> 0.75; `acn-notes-offering-after-period-end` hybrid rank 9 -> 5. No other question's rank changed. The vague 'raise new debt recently' question has no date and still ranks 15. hit@1 0.45, MRR 0.57 unchanged |
 
 ### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
