@@ -90,39 +90,42 @@ Record each shipped item here with the before/after gold-set numbers.
 | Date | Item | hit@8 before | hit@8 after | Notes |
 |---|---|---|---|---|
 | 2026-10-17 | P0 baseline (15 questions, ACN + AVGO) | - | 0.87 hybrid | vector 0.73, keyword 0.73, hybrid 0.87. Hybrid hit@1 0.47, MRR 0.58 |
-| 2026-10-17 | P0 baseline, gold set grown to 30 questions | - | 0.80 hybrid | vector 0.73, keyword 0.60, hybrid 0.80. Hybrid hit@1 0.43, MRR 0.54. Use this row as the reference for later changes |
+| 2026-10-17 | P0 baseline, gold set grown to 30 questions | - | 0.80 hybrid | vector 0.73, keyword 0.60, hybrid 0.80. Hybrid hit@1 0.43, MRR 0.54. Superseded by the next row: two gold entries undercounted answering chunks |
+| 2026-10-17 | P0 baseline, 31 questions after gold fixes | - | 0.84 hybrid | vector 0.77, keyword 0.61, hybrid 0.84. Hybrid hit@1 0.45, MRR 0.57. Reference for later changes |
 
-### Current baseline: 30 questions (2026-10-17, `eval_retrieval --depth 20`)
+### Current baseline: 31 questions (2026-10-17, `eval_retrieval --depth 20`)
 
-All modes, ALL tags: vector 0.37 / 0.67 / 0.73 (hit@1/5/8), keyword 0.37 / 0.60 / 0.60,
-hybrid 0.43 / 0.67 / 0.80, hybrid MRR 0.54.
+This is the reference for later changes. It follows two gold fixes (see "The two
+misses, examined" below); the 30-question run before them scored hybrid hit@8 0.80.
+
+All modes, ALL tags (hit@1 / hit@5 / hit@8, MRR): vector 0.35 / 0.68 / 0.77, 0.50;
+keyword 0.39 / 0.61 / 0.61, 0.49; hybrid 0.45 / 0.71 / 0.84, 0.57.
 
 Hybrid, by tag:
 
 | Tag | n | hit@1 | hit@5 | hit@8 | MRR |
 |---|---|---|---|---|---|
-| numeric_prose | 4 | 0.50 | 0.75 | 1.00 | 0.61 |
+| numeric_prose | 5 | 0.60 | 0.80 | 1.00 | 0.69 |
 | narrative | 5 | 0.40 | 0.80 | 1.00 | 0.58 |
 | numeric_table | 9 | 0.67 | 0.89 | 0.89 | 0.76 |
+| vocab_mismatch | 4 | 0.25 | 0.50 | 0.75 | 0.42 |
 | multi_part | 4 | 0.00 | 0.50 | 0.75 | 0.13 |
-| vocab_mismatch | 4 | 0.25 | 0.25 | 0.50 | 0.29 |
 | 8k_by_date | 4 | 0.50 | 0.50 | 0.50 | 0.54 |
 
-What the larger set changed:
+What it shows:
 
-- The 15-question hybrid hit@8 of 0.87 fell to 0.80: the extra questions are harder, so the earlier figure was optimistic.
-- Hybrid still beats both paths at hit@8 (0.80 vs 0.73 vector, 0.60 keyword), but keyword alone is weak on prose and vocabulary (0.50 and 0.25).
-- Vocabulary mismatch is the weakest tag: hit@5 is 0.25. `acn-buybacks` is found by no mode within the top 20; `avgo-buybacks` reaches rank 8 hybrid. Check `acn-buybacks` before blaming retrieval: its answer string sits in the equity statement, and the cash-flow line may be the better gold target.
-- 8-K questions: the vague wording ("raise new debt recently") ranks 15 hybrid; only the wording that names the notes or the month ranks 1. Supports the filing-date item (P2).
-- Multi-part is the other gap: `acn-rpo-and-cash` is missed everywhere (the two answers sit in different chunks). Re-measure with the decomposer on before acting.
-- `acn-cash-fy25` is a numeric_table miss at hybrid (vector absent, keyword 16): the balance-sheet chunk is not found by its own question. Worth a direct look at that chunk's text.
+- Hybrid beats both paths at hit@8 (0.84 vs 0.77 vector, 0.61 keyword). Keyword alone is weak on prose (0.60), vocabulary (0.25) and multi-part (0.25).
+- Fusion can bury a vector hit: `avgo-contingent-liabilities` ranks 13 by vector, is absent from keyword, and ranks 19 fused.
+- 8-K questions are the weakest tag: the vague wording ("raise new debt recently") ranks 15 hybrid, and "after May 31, 2026" ranks 9. Only wording that names the notes or the month ranks 1. Supports the filing-date item (P2).
+- Multi-part: `acn-rpo-and-cash` is missed by every mode (its two answers sit in different chunks). This run does not use the decomposer, so it is a floor.
+- `acn-cash-fy25` (strict statement table) is still missed by vector and hybrid, keyword rank 16. See below.
 
 ### The two misses, examined (2026-10-17)
 
 - `acn-buybacks` was mostly a gold defect. The answer string matched only the equity-statement label, but the fiscal 2025 total also sits in the cash-flow line ("Purchases of shares | (4,619,497)") and the Item 5 table (4,614,969). Keyword search already ranked an Item 5 chunk 9th. The entry now accepts both figures.
 - `acn-cash-fy25` was half gold, half retrieval. The MD&A sentence "Cash and cash equivalents were $11.5 billion, compared with $5.0 billion" answers it in rounded prose and keyword ranks it 7th, but the gold only accepted the statement table. Split in two: the strict entry stays (balance-sheet chunk: keyword rank 16, vector and hybrid beyond 20), and `acn-cash-fy25-prose` accepts the MD&A sentence (keyword rank 1).
 - The real finding: a dense statement table chunk is hard to retrieve with a plain-language question. Keyword ranks boilerplate (financial-statement index, exhibit lists) above it because the query is all common words. Candidate fix: contextual chunk prefix (P1).
-- Lesson for the gold set: before calling a question a retrieval failure, list every chunk that answers it and accept all of them. Gold counts changed to 31 questions; the 30-question numbers above predate these fixes and need a re-run.
+- Lesson for the gold set: before calling a question a retrieval failure, list every chunk that answers it and accept all of them. The re-run after these fixes is the baseline above: `acn-buybacks` now ranks 2 hybrid and `acn-cash-fy25-prose` ranks 1.
 
 ### Earlier 15-question baseline (2026-10-17)
 
