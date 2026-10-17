@@ -195,7 +195,10 @@ checklist item.
        total debt / consolidated operating income (never a sum of segment
        results). Retrieve cash and equivalents for the same period-end so
        both gross and net leverage are visible. State whether leverage is
-       rising or falling across the covered years.
+       rising or falling across the covered years. Retrieve consolidated
+       operating income for every covered year in one question that names
+       each year: the latest 10-K income statement carries three years, so
+       one question covers them, and a question naming two years gets two.
    (b) Maturity wall: from the debt footnote's maturity schedule, retrieve
        principal due by year for the next five years and the stated or
        weighted-average interest rates. Flag any single maturity within
