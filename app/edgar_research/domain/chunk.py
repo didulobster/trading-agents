@@ -22,6 +22,18 @@ class Chunk(BaseModel):
 
     created_at: datetime | None = None
 
+    def embedding_text(self) -> str:
+        """What gets embedded: the content under a line naming its filing and section.
+
+        A chunk cut from the middle of a statement table ("Cash and cash
+        equivalents | 11,478,729 | ...") carries no company, form, date or
+        section of its own, so its vector sat far from a question that names
+        them. Only the vector sees this line; `content` (what is cited,
+        verified and keyword-searched) is unchanged.
+        """
+        section = " > ".join(self.section_path)
+        return f"{self.ticker} {self.filing_type} filed {self.filed_date.isoformat()} | {section}\n\n{self.content}"
+
 def chunk_from_draft(
     draft: ChunkDraft,
     section_id: int,

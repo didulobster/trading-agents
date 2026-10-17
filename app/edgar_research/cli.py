@@ -15,6 +15,7 @@ import typer
 
 from app.edgar_research.application.embedding_service import EmbeddingService
 from app.edgar_research.application.ingestion_service import IngestionService
+from app.edgar_research.application.reembed import reembed_ticker
 from app.edgar_research.infrastructure.edgar.client import EdgarClient
 from app.edgar_research.infrastructure.edgar.ticker_resolver import TickerResolver
 from app.edgar_research.infrastructure.chunking.section_chunker import chunk_filing
@@ -121,6 +122,24 @@ def reparse_cmd(accessions: list[str]):
     documents — after a parser fix, or to resume a filing reset by hand.
     Filings not in the corpus are skipped and listed at the end."""
     asyncio.run(_reparse(accessions))
+
+@app.command(name="reembed")
+def reembed_cmd(tickers: list[str]):
+    """Re-embed every chunk of these tickers in place. Needed after the
+    embedding text changes: vectors from two versions are not comparable."""
+    asyncio.run(_reembed(tickers))
+
+
+async def _reembed(tickers: list[str]) -> None:
+    await init_pool()
+    try:
+        embedder, repo = EmbeddingService(), ChunkRepository()
+        for ticker in tickers:
+            count = await reembed_ticker(ticker, embedder, repo)
+            typer.echo(f"Re-embedded {count} chunks for {ticker.upper()}")
+    finally:
+        await close_pool()
+
 
 @app.command(name="corpus-status")
 def corpus_status_cmd(

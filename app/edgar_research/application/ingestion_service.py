@@ -359,7 +359,7 @@ class IngestionService:
 
         logger.info("Embedding %d chunks for filing %s",
                     len(chunks), filing.accession_number)
-        vectors = await self.embedder.embed_many([c.content for c in chunks])
+        vectors = await self.embedder.embed_many([c.embedding_text() for c in chunks])
         updates = [(c.id, v) for c, v in zip(chunks, vectors)]
         await self.chunk_repo.update_embeddings(updates)
         await self.filing_repo.mark_status(filing.id, FilingStatus.EMBEDDED)
