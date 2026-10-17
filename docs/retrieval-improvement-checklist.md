@@ -211,6 +211,10 @@ Question: `acn-cash-fy25`, plain-content vectors, filters ACN / 10-K / filed bef
   separated; and only one chunk changed, so this is an upper bound. Naming the company on
   every chunk also lifts every competitor, which is how the corpus-wide ticker prefix lost
   its gain.
+- Name-only test (3 embeddings): "Accenture plc" alone above the chunk ranks it 8 for cash
+  (sim 0.679) and 1 for total assets (0.745), against 5 and 1 with the title added. The
+  company name carries almost all of the lift; the repeated title adds a little for cash.
+  Still one chunk re-embedded against an unchanged pool, so still an upper bound.
 - Direction this points to: index statement-table rows individually (title + column headers
   + one row) as extra retrieval entries that return the full table chunk. Carrying the column
   headers on every row would also address the wrong-fiscal-year column problem.
