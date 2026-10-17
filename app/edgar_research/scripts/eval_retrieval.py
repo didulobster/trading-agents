@@ -107,6 +107,7 @@ async def _rank_all(
     from app.edgar_research.application.query_decomposer import QueryDecomposer
     from app.edgar_research.application.repeats import collapse_repeats
     from app.edgar_research.application.retrieval_service import RetrievalService
+    from app.edgar_research.application.synonyms import with_filer_terms
     from app.edgar_research.infrastructure.repositories.chunk_repo import ChunkRepository
 
     repo = ChunkRepository()
@@ -118,11 +119,11 @@ async def _rank_all(
     for gold, vector in zip(golds, vectors):
         flt = narrow_by_date_hints(gold.question, _filters(gold))
         by_vector = await repo.search_by_embedding(query_embedding=vector, k=depth, filters=flt)
-        by_keyword = await repo.search_by_text(query=gold.question, k=depth, filters=flt)
+        by_keyword = await repo.search_by_text(query=with_filer_terms(gold.question), k=depth, filters=flt)
         pool = 3 * depth
         fused = collapse_repeats(RetrievalService._reciprocal_rank_fusion(
             await repo.search_by_embedding(query_embedding=vector, k=pool, filters=flt),
-            await repo.search_by_text(query=gold.question, k=pool, filters=flt),
+            await repo.search_by_text(query=with_filer_terms(gold.question), k=pool, filters=flt),
             k=pool,
         ))[:depth]
         for mode, results in (("vector", by_vector), ("keyword", by_keyword), ("hybrid", fused)):

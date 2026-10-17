@@ -105,7 +105,14 @@ the answer model sees).
 - **Result:** hit@1 0.47 to 0.49, hit@5 0.80 to 0.86, hit@8 0.92 to 0.94, MRR 0.61 to 0.63. Six questions moved up, all ACN; none moved down. The target went from 9 to 1. Live `/ask` now returns the correct use of proceeds.
 - **Open items:** only ACN moved. AVGO and ASML have fewer repeated quarterlies in the corpus, so the rule is untested on them. Year-comparison tables did not collapse at 0.6, but the gold set covers few of them.
 
+### D16. Synonym map for the keyword query, kept
+- **Chose:** append general SEC vocabulary to the keyword query when a question uses an analyst term (`synonyms.py`: supply chain, contingent liabilities, buybacks, customer concentration, capital intensity, EBITDA, pricing power, moat). The keyword query ORs its terms, so additions only widen the match. The vector query is unchanged, so no extra embedding cost.
+- **Guard against fitting the gold set:** first trial phrases were copied from the answers (ASML 38 to 1); the shipped map uses general filing wording instead and was measured as written.
+- **Keyword only (free):** 6 of 49 questions are expanded. contingent liabilities 50 to 7, AVGO buybacks 19 to 5, ACN buybacks 9 to 4, ASML buyback 3 to 1, ASML customer concentration 38 to 1, supplier dependence stays 1.
+- **Hybrid (one embedding call, same vectors before and after):** before matched the D15 baseline exactly. hit@1 0.49 flat, hit@5 0.86 to 0.92, hit@8 0.94 to 0.98, MRR 0.63 to 0.64. `avgo-contingent-liabilities` 13 to 3, `asml-customer-concentration` 16 to 5, `avgo-buybacks` 6 to 3; `acn-buybacks` 2 to 3.
+- **Open items:** the decomposer still sends these terms to an LLM "expand" rewrite (`_VOCABULARY_MISMATCH_TERMS`), which once moved `avgo-supplier-dependence` from 1 to 10; not changed here. Four vocab questions is a small sample.
+
 ## Still open
 
-- Remaining misses: `avgo-contingent-liabilities` (vocabulary) and `acn-new-debt-vague` (an 8-K question with no date).
+- Remaining miss: `acn-new-debt-vague` (an 8-K question with no date).
 - Wrong-fiscal-year columns are not measured: the answer-text check can't see them, and ASML is not in the local corpus.
