@@ -141,6 +141,27 @@ calls on gpt-5.6-luna: 4,310 in / 644 out tokens, $0.0016.
 - Multi-part is not fixed: 3 of the 4 multi-part questions never trip the regex (`acn-rpo-and-cash`, `acn-opcash-and-revenue`, `avgo-auditor-and-icfr`), so the decomposer never sees them. `acn-rpo-and-cash` stays missed.
 - Open questions this raises, none acted on yet: tighten the regex so "compared with" alone does not trigger a rewrite; stop expand rewrites from displacing a first-rank original; trigger on "X and Y" compound questions. Each should be measured with `--decompose` against this table.
 
+### Balance-sheet chunk diagnosed (2026-10-17, one query embedding)
+
+Question: `acn-cash-fy25`, plain-content vectors, filters ACN / 10-K / filed before 2026.
+
+- The balance-sheet chunk (id 2585) ranks **111 of 359** by vector (cosine 0.574). The top hit
+  scores 0.714. The cash-flow statement chunk that also holds the figure ranks 59; the MD&A
+  sentence with the rounded figure ranks 7.
+- The chunk's own vector is coherent: its nearest neighbours are the other ACN balance sheets
+  (0.995 to the FY2024 one, 0.93 to the 10-Q ones). It embeds as "a balance sheet"; the
+  question just does not land near that cluster.
+- The likely reason is dilution. The chunk is 635 tokens in 1,698 characters (about 2.7
+  characters per token against roughly 4 for prose), so most of its tokens are numbers.
+  "Cash" appears twice, as one line item among about thirty. A question about one line item
+  is far from a vector that averages thirty items and their figures.
+- The top-ranked chunks are prose that repeats the question's words ("August 31, 2025",
+  "consolidated", "cash"): the FX note, the equity statement, MD&A.
+- Why the prefix failed fits this: a header line adds a few tokens to a vector dominated by
+  hundreds of numeric ones.
+- Not yet tested: whether stripping the numbers or isolating the row raises the similarity.
+  That needs a handful of embeddings and is the next step before any fix.
+
 ### Contextual chunk prefix measured (2026-10-17, PR #176)
 
 ACN and AVGO re-embedded with `"{ticker} {form} filed {date} | {section}"` above each chunk
