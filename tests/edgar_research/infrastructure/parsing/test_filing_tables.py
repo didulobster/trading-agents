@@ -111,3 +111,30 @@ def test_item_headings_inside_tables_are_still_found(tmp_path):
     assert "Part I > Item 2 > Properties" in paths
     risks = next(s for s in sections if s.section_path[1] == "Item 1A")
     assert "Our business faces risks." in risks.content
+
+
+# ---- text beside a nested block ----
+# AVGO's 10-K puts each statement title in the same <div> as the statement:
+# <div><span>CONSOLIDATED STATEMENTS OF CASH FLOWS</span><table>...</table></div>.
+# Only leaf blocks were emitted, so the title never reached the corpus.
+
+
+def test_a_title_sharing_a_div_with_its_table_is_kept_before_the_table(tmp_path):
+    html = ("<p>Item 8. Financial Statements</p>"
+            f"<div><span>CONSOLIDATED STATEMENTS OF CASH FLOWS</span>{_CASH_FLOWS}</div>")
+    content = _parse(tmp_path, html)[0].content
+    assert "CONSOLIDATED STATEMENTS OF CASH FLOWS" in content
+    assert content.index("CONSOLIDATED STATEMENTS OF CASH FLOWS") < content.index("Net income | 7,832,400")
+
+
+def test_text_after_the_nested_block_is_not_moved_ahead_of_it(tmp_path):
+    html = ("<p>Item 8. Financial Statements</p>"
+            f"<div>{_CASH_FLOWS}<span>Amounts in table may not total due to rounding.</span></div>")
+    content = _parse(tmp_path, html)[0].content
+    assert "Amounts in table may not total" not in content.split("Net income")[0]
+
+
+def test_leaf_blocks_are_not_emitted_twice(tmp_path):
+    html = "<p>Item 8. Financial Statements</p><div><p>Revenue grew in fiscal 2025.</p><p>Margins held.</p></div>"
+    content = _parse(tmp_path, html)[0].content
+    assert content.count("Revenue grew in fiscal 2025.") == 1
