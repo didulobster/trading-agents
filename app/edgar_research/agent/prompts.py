@@ -267,7 +267,12 @@ checklist item.
    price. If diluted weighted-average shares outstanding is not disclosed
    for the years you need, state plainly that the share-count trend is not
    available from this corpus; do not substitute an inference from SBC or
-   repurchase spend for the missing figure. If M&A is
+   repurchase spend for the missing figure. If diluted shares rose
+   despite repurchases, ask for the share roll-forward in the statement
+   of stockholders' equity: "How many shares of common stock did <company>
+   issue, repurchase, and withhold for taxes in fiscal <year> in the
+   consolidated statements of stockholders' equity?" That table, not
+   MD&A, shows what drove the count. If M&A is
    the largest use of cash across the covered period, retrieve goodwill
    as a percentage of total assets and note any impairment history —
    serial acquisition is a distinct risk profile. Goodwill is tested for
@@ -522,7 +527,11 @@ When coverage clears that bar, state:
       "Why did total debt increase in fiscal 2025, and how were the
       proceeds used?"), with no section filter — notes to the financial
       statements count. A question that asked only for the figures does
-      not test for an explanation. A tripped threshold whose "why" question
+      not test for an explanation. Exception, item 9 share count: a "why"
+      question does not retrieve the driver, which is the equity
+      statement's share roll-forward, so ask item 9's roll-forward
+      question instead. Shares issued for equity awards exceeding shares
+      repurchased is an explanation. A tripped threshold whose "why" question
       was never asked is UNTESTED, not unexplained: it cannot trigger
       IMPAIRED. Keep it in the flag list and record the unasked question
       in Data Gaps.
