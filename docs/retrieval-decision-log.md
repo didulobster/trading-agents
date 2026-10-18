@@ -157,7 +157,13 @@ the answer model sees).
 - **Corpus:** the 9 filings with added text reparsed and re-embedded (about $0.02).
 - **Result (61 questions, same question vectors):** hit@1 0.44 to 0.46, hit@5 0.85 to 0.84, hit@8 0.95 to 0.98, MRR 0.60 to 0.61. `avgo-opinc-3yr-instructed` missed to 4, `avgo-capex-3yr-instructed` missed to 8, `avgo-capex-fy25-instructed` 5 to 1, `acn-cash-fy25` and `acn-total-assets-fy25` 4 to 3. Down, all still in the top 8: `avgo-auditor` 5 to 6, `avgo-auditor-and-icfr` 5 to 6, `avgo-buybacks` 3 to 5, `avgo-fy23-revenue-and-net-income-agent` 2 to 3.
 
+### D22. Column check: a row must sit in one chunk with its year headings
+- **Gap:** the answer-text check passes on a table row with no headings, which is the wrong-column failure D17 removed (ASML capex read as 2,083.1, the 2024 figure). Nothing would catch it coming back.
+- **Change:** `require: chunk` in the gold set: every answer string in ONE chunk. New tag `column`, four ASML 20-F entries pairing a statement row with its year-heading line (FCF 2023, capex 2025, balance-sheet long-term debt, three-year net income). `--check-gold` also checks a single chunk holds them. Existing entries unchanged.
+- **Result (65 questions, ~$0.0002):** hybrid `column` hit@1 0.25, hit@5 1.00, hit@8 1.00, MRR 0.58; ranks 2, 3, 2, 1. All four match their text-only twins except long-term debt (1 to 2): rank 1 is the debt note, which carries its own `| 2024 | 2025` headings, not the balance-sheet heading the entry names. So that one is not a misread.
+- **Limit:** this checks that the headings are in front of the model, not that the model reads the right column. That still needs an answer check.
+
 ## Still open
 
 - One miss at k=8: `acn-opinc-and-debt-agent` (debt asked as a ratio, D19/D20). `avgo-capex-3yr-instructed` sits at the edge (8). Weakest hits: `acn-rpo-and-cash` and `acn-sbc-and-revenue-agent` (8).
-- Wrong-fiscal-year columns are not measured: the answer-text check can't see them. D17 removed the headerless fragments that cause them, but no gold entry tests the column.
+- Column reading by the model is unmeasured: D22 checks the year headings reach it, not that it picks the right column.
