@@ -29,6 +29,15 @@ def test_all_needs_every_answer_across_the_prefix():
     assert first_hit_rank(chunks, _gold(["74,183", "69,673"], require="all")) == 3
 
 
+def test_chunk_needs_every_answer_inside_one_chunk():
+    """A row without its year headings is the wrong-column failure: not a hit."""
+    headings = "Year ended December 31 | 2023 | 2024"
+    row = "Free cash flow | 3,247.2 | 9,083.1"
+    gold = _gold([headings, row], require="chunk")
+    assert first_hit_rank([headings, row], gold) is None
+    assert first_hit_rank([row, f"{headings}\n{row}"], gold) == 2
+
+
 def test_a_missing_answer_is_not_a_hit():
     assert first_hit_rank(["74,183 only"], _gold(["74,183", "69,673"], require="all")) is None
     assert first_hit_rank([], _gold(["74,183"])) is None
@@ -47,6 +56,6 @@ def test_the_committed_gold_set_loads_with_unique_ids_and_known_tags():
     assert len({g.id for g in golds}) == len(golds)
     assert {g.tag for g in golds} <= {
         "numeric_table", "numeric_prose", "narrative", "vocab_mismatch", "multi_part", "8k_by_date",
-        "instructed",
+        "instructed", "column",
     }
-    assert all(g.answers and g.require in ("any", "all") for g in golds)
+    assert all(g.answers and g.require in ("any", "all", "chunk") for g in golds)

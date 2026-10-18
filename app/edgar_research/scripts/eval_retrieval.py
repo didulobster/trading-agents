@@ -67,14 +67,18 @@ def first_hit_rank(contents: list[str], gold: GoldQuestion) -> int | None:
     """1-based rank at which the answer is first fully in front of the model.
 
     `any`: the first chunk containing any answer string. `all`: the smallest
-    prefix whose chunks together contain every answer string.
+    prefix whose chunks together contain every answer string. `chunk`: the
+    first single chunk containing every answer string, e.g. a table row and
+    the year headings that say which column is which.
     """
     wanted = [normalize(a) for a in gold.answers]
     seen = ""
     for rank, content in enumerate(contents, start=1):
+        if gold.require == "chunk":
+            seen = ""
         seen += " " + normalize(content)
         found = [a in seen for a in wanted]
-        if all(found) if gold.require == "all" else any(found):
+        if all(found) if gold.require in ("all", "chunk") else any(found):
             return rank
     return None
 
@@ -189,7 +193,11 @@ async def _check_gold(golds: list[GoldQuestion]) -> int:
                     (gold.ticker, flt.filing_types, flt.filing_types,
                      flt.filed_after, flt.filed_after, flt.filed_before, flt.filed_before),
                 )
-                corpus = normalize(" ".join(r["content"] for r in await cur.fetchall()))
+                chunks = [r["content"] for r in await cur.fetchall()]
+            if gold.require == "chunk" and first_hit_rank(chunks, gold) is None:
+                missing += 1
+                print(f"MISSING  {gold.id}: no single chunk holds every answer")
+            corpus = normalize(" ".join(chunks))
             for answer in gold.answers:
                 if normalize(answer) not in corpus:
                     missing += 1

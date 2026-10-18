@@ -3,13 +3,14 @@
 #
 #   id        unique, stable
 #   tag       numeric_table | numeric_prose | narrative | vocab_mismatch
-#             | multi_part | 8k_by_date | instructed
+#             | multi_part | 8k_by_date | instructed | column
 #   ticker    required; filing_types / filed_after / filed_before optional
 #   question  plain language, as the agent would ask it
 #   answers   strings that must appear verbatim in the chunks (whitespace and
 #             curly quotes are normalised)
 #   require   any (default): one answer string suffices
 #             all: every answer string must appear somewhere in the top-k
+#             chunk: every answer string must appear in ONE chunk (column)
 #
 # Verify the strings still exist in the corpus: eval_retrieval --check-gold
 # Seeded 2026-10-17 from real agent questions on ACN and AVGO.
@@ -521,3 +522,44 @@
   ticker: AVGO
   question: "In AVGO's fiscal 2025 10-K (filed Dec 2025), the consolidated statements of operations - what is the operating income (total operating expenses and operating income) for fiscal 2025, 2024, and 2023? Report the operating income line amount for each of the three fiscal years."
   answers: ["Operating income | 25,484 | 13,463 | 16,207"]
+
+# --- grown 2026-10-18: column. A table row is only safe to read with its
+# year headings beside it; a headerless row is how ASML FCF and capex were
+# read from the wrong year (D17). Each entry needs the row AND its headings
+# in the same chunk.
+
+- id: asml-fcf-fy2023-column
+  tag: column
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_before: 2025-06-01
+  question: What was ASML's free cash flow in 2023?
+  answers: ["(€, in millions) | 2023 | 2024", "Free cash flow 1 | 3,247.2 | 9,083.1"]
+  require: chunk
+
+- id: asml-capex-fy2025-column
+  tag: column
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What were ASML's purchases of property, plant and equipment and intangible assets in 2025?
+  answers: ["(€, in millions) | 2024 | 2025", "intangible assets | (2,083.1) | (1,631.2)"]
+  require: chunk
+
+- id: asml-long-term-debt-column
+  tag: column
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What was ASML's non-current long-term debt at December 31, 2025 compared with December 31, 2024?
+  answers: ["| Notes | 2024 | 2025", "Long-term debt | 16 | 3,677.3 | 2,709.0"]
+  require: chunk
+
+- id: asml-net-income-3yr-column
+  tag: column
+  ticker: ASML
+  filing_types: ["20-F"]
+  filed_after: 2026-01-01
+  question: What was ASML's net income in 2023, 2024 and 2025?
+  answers: ["| 2023 | 2024 | 2025", "Net income | 7,839.0 | 7,571.6 | 9,609.4"]
+  require: chunk
